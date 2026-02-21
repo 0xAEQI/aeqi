@@ -1,0 +1,24 @@
+[molecule]
+name = "feature-dev"
+description = "Feature development: {{subject}}"
+
+[vars]
+subject = { type = "string", required = true }
+
+[[steps]]
+id = "research"
+title = "Research the codebase"
+instructions = "Spawn a researcher sub-agent (Task tool, Explore type). Map relevant code, data flow, and constraints. Return structured findings."
+needs = []
+
+[[steps]]
+id = "implement"
+title = "Implement the solution"
+instructions = "Spawn a developer sub-agent with the researcher's findings. Work in a worktree. Build must pass. Commit with descriptive message."
+needs = ["research"]
+
+[[steps]]
+id = "review"
+title = "Review the implementation"
+instructions = "Spawn a reviewer sub-agent to check for anti-patterns, security issues, and correctness. Return PASS/FAIL verdict."
+needs = ["implement"]

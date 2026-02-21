@@ -1,0 +1,30 @@
+[molecule]
+name = "incident"
+description = "Incident response: {{description}}"
+
+[vars]
+description = { type = "string", required = true }
+
+[[steps]]
+id = "detect"
+title = "Detect and characterize the issue"
+instructions = "Check service status, logs, metrics. Determine scope and severity. Report findings."
+needs = []
+
+[[steps]]
+id = "diagnose"
+title = "Find root cause"
+instructions = "Trace the issue through logs, code, and configuration. Identify the root cause, not just symptoms."
+needs = ["detect"]
+
+[[steps]]
+id = "fix"
+title = "Implement the fix"
+instructions = "Fix the root cause. Work in a worktree. Build must pass. Deploy to dev first."
+needs = ["diagnose"]
+
+[[steps]]
+id = "verify"
+title = "Verify the fix"
+instructions = "Confirm the issue is resolved. Check metrics, logs, and related functionality for regressions."
+needs = ["fix"]
