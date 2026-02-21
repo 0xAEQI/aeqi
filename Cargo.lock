@@ -1599,6 +1599,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "reqwest",
  "serde",
  "serde_json",
  "sigil-core",
@@ -1691,6 +1692,7 @@ dependencies = [
  "async-trait",
  "serde",
  "serde_json",
+ "sigil-beads",
  "sigil-core",
  "thiserror",
  "tokio",

@@ -5,7 +5,7 @@ use sigil_beads::BeadStore;
 use sigil_core::traits::{LogObserver, Memory, Observer, Provider, Tool};
 use sigil_core::{Agent, AgentConfig, Identity, SecretStore, SigilConfig};
 use sigil_memory::SqliteMemory;
-use sigil_orchestrator::{CronJob, CronSchedule, CronStore, Daemon, Familiar, MailBus, Molecule, Rig, Witness};
+use sigil_orchestrator::{ConvoyStore, CronJob, CronSchedule, CronStore, Daemon, Familiar, MailBus, Molecule, Rig, Witness};
 use sigil_providers::OpenRouterProvider;
 use sigil_tools::{FileReadTool, FileWriteTool, ListDirTool, ShellTool, Skill};
 use std::collections::HashMap;
@@ -128,6 +128,13 @@ enum Commands {
         #[command(subcommand)]
         action: SkillAction,
     },
+
+    // --- Cross-rig ---
+    /// Track work across rigs.
+    Convoy {
+        #[command(subcommand)]
+        action: ConvoyAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -183,6 +190,20 @@ enum SkillAction {
         /// Additional user prompt appended after the skill's user_prefix.
         prompt: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum ConvoyAction {
+    /// Create a convoy tracking beads across rigs.
+    Create {
+        name: String,
+        /// Bead IDs to track (e.g. as-001 rd-002).
+        bead_ids: Vec<String>,
+    },
+    /// List active convoys.
+    List,
+    /// Show convoy status.
+    Status { id: String },
 }
 
 #[derive(Subcommand)]
@@ -243,6 +264,7 @@ async fn main() -> Result<()> {
         Commands::Mol { action } => cmd_mol(&cli.config, action).await,
         Commands::Cron { action } => cmd_cron(&cli.config, action).await,
         Commands::Skill { action } => cmd_skill(&cli.config, action).await,
+        Commands::Convoy { action } => cmd_convoy(&cli.config, action).await,
     }
 }
 
@@ -1047,6 +1069,60 @@ async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction) -> Result
             let agent = Agent::new(agent_config, provider, filtered_tools, observer, skill_identity);
             let result = agent.run(&user_prompt).await?;
             println!("{result}");
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_convoy(config_path: &Option<PathBuf>, action: ConvoyAction) -> Result<()> {
+    let (config, _) = load_config(config_path)?;
+    let convoy_path = config.data_dir().join("convoys.json");
+
+    match action {
+        ConvoyAction::Create { name, bead_ids } => {
+            let beads: Vec<(sigil_beads::BeadId, String)> = bead_ids.iter()
+                .map(|id| {
+                    let prefix = id.split('-').next().unwrap_or("");
+                    let rig_name = config.rigs.iter()
+                        .find(|r| r.prefix == prefix)
+                        .map(|r| r.name.clone())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    (sigil_beads::BeadId::from(id.as_str()), rig_name)
+                })
+                .collect();
+
+            let mut store = ConvoyStore::open(&convoy_path)?;
+            let convoy = store.create(&name, beads)?;
+            let (done, total) = convoy.progress();
+            println!("Created convoy {} — {} ({}/{})", convoy.id, convoy.name, done, total);
+        }
+
+        ConvoyAction::List => {
+            let store = ConvoyStore::open(&convoy_path)?;
+            let active = store.active();
+            if active.is_empty() {
+                println!("No active convoys.");
+            } else {
+                for convoy in active {
+                    let (done, total) = convoy.progress();
+                    println!("  {} — {} ({}/{})", convoy.id, convoy.name, done, total);
+                }
+            }
+        }
+
+        ConvoyAction::Status { id } => {
+            let store = ConvoyStore::open(&convoy_path)?;
+            if let Some(convoy) = store.get(&id) {
+                let (done, total) = convoy.progress();
+                let status = if convoy.closed_at.is_some() { "COMPLETE" } else { "ACTIVE" };
+                println!("{} [{}] {} ({}/{})", convoy.id, status, convoy.name, done, total);
+                for bead in &convoy.beads {
+                    let icon = if bead.closed { "[x]" } else { "[ ]" };
+                    println!("  {} {} (rig: {})", icon, bead.bead_id, bead.rig);
+                }
+            } else {
+                println!("Convoy not found: {id}");
+            }
         }
     }
     Ok(())
