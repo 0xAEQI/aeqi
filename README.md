@@ -56,7 +56,7 @@ sg run "what work is ready?" --rig algostaking
 ```
 sg init                           Initialize Sigil in current directory
 sg run "prompt" [--rig NAME]      One-shot agent execution
-sg daemon start|stop|status       Manage the background daemon
+sg daemon start|stop|status|query  Manage the background daemon
 sg assign "task" --rig NAME       Route work to a rig
 sg ready [--rig NAME]             Show unblocked work
 sg beads [--rig NAME] [--all]     Show open beads
