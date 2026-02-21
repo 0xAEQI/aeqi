@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
-use crate::executor::ClaudeCodeExecutor;
+use crate::executor::{ClaudeCodeExecutor, WorkerOutcome};
 use crate::hook::Hook;
 use crate::mail::{Mail, MailBus};
 
@@ -98,12 +98,13 @@ impl Worker {
     }
 
     /// Execute the hooked work. Dispatches to Agent or Claude Code based on execution mode.
-    pub async fn execute(&mut self) -> Result<()> {
+    /// Returns the structured outcome for the Witness to process.
+    pub async fn execute(&mut self) -> Result<WorkerOutcome> {
         let hook = match &self.hook {
             Some(h) => h.clone(),
             None => {
                 warn!(worker = %self.name, "no hook assigned, nothing to do");
-                return Ok(());
+                return Ok(WorkerOutcome::Done("no work assigned".to_string()));
             }
         };
 
@@ -146,7 +147,7 @@ impl Worker {
         };
 
         // Dispatch based on execution mode.
-        let result = match &self.execution {
+        let raw_result = match &self.execution {
             WorkerExecution::Agent { provider, tools, model } => {
                 self.execute_agent(provider.clone(), tools.clone(), model, &bead_context).await
             }
@@ -155,17 +156,20 @@ impl Worker {
             }
         };
 
-        match result {
-            Ok(result_text) => {
-                info!(worker = %self.name, bead = %hook.bead_id, "work completed");
+        // Parse into structured outcome.
+        let outcome = match raw_result {
+            Ok(result_text) => WorkerOutcome::parse(&result_text),
+            Err(e) => WorkerOutcome::Failed(e.to_string()),
+        };
 
-                // Close the bead.
+        // Process outcome: update bead status + notify witness.
+        match &outcome {
+            WorkerOutcome::Done(result_text) => {
+                info!(worker = %self.name, bead = %hook.bead_id, "work completed");
                 {
                     let mut store = self.beads.lock().await;
-                    let _ = store.close(&hook.bead_id.0, &result_text);
+                    let _ = store.close(&hook.bead_id.0, result_text);
                 }
-
-                // Notify witness.
                 self.mail_bus
                     .send(Mail::new(
                         &self.name,
@@ -174,13 +178,40 @@ impl Worker {
                         &format!("Completed bead {}: {}", hook.bead_id, hook.subject),
                     ))
                     .await;
-
                 self.state = WorkerState::Done;
             }
-            Err(e) => {
-                warn!(worker = %self.name, bead = %hook.bead_id, error = %e, "work failed");
 
-                // Mark bead back to pending.
+            WorkerOutcome::Blocked { question, full_text } => {
+                info!(
+                    worker = %self.name,
+                    bead = %hook.bead_id,
+                    question = %question,
+                    "worker blocked — needs input"
+                );
+                // Mark bead as Blocked (not Pending — Witness handles escalation).
+                {
+                    let mut store = self.beads.lock().await;
+                    let _ = store.update(&hook.bead_id.0, |b| {
+                        b.status = BeadStatus::Blocked;
+                        b.assignee = None;
+                    });
+                }
+                self.mail_bus
+                    .send(Mail::new(
+                        &self.name,
+                        &format!("witness-{}", self.rig_name),
+                        "BLOCKED",
+                        &format!(
+                            "Bead {} blocked: {}\n\nQuestion: {}\n\nFull context:\n{}",
+                            hook.bead_id, hook.subject, question, full_text
+                        ),
+                    ))
+                    .await;
+                self.state = WorkerState::Done; // Worker is done; bead is blocked.
+            }
+
+            WorkerOutcome::Failed(error_text) => {
+                warn!(worker = %self.name, bead = %hook.bead_id, "work failed");
                 {
                     let mut store = self.beads.lock().await;
                     let _ = store.update(&hook.bead_id.0, |b| {
@@ -188,23 +219,20 @@ impl Worker {
                         b.assignee = None;
                     });
                 }
-
-                // Notify witness of failure.
                 self.mail_bus
                     .send(Mail::new(
                         &self.name,
                         &format!("witness-{}", self.rig_name),
                         "FAILED",
-                        &format!("Failed bead {}: {}", hook.bead_id, e),
+                        &format!("Failed bead {}: {}", hook.bead_id, error_text),
                     ))
                     .await;
-
-                self.state = WorkerState::Failed(e.to_string());
+                self.state = WorkerState::Failed(error_text.to_string());
             }
         }
 
         self.hook = None;
-        Ok(())
+        Ok(outcome)
     }
 
     /// Execute via internal Agent loop (lightweight LLM API calls).

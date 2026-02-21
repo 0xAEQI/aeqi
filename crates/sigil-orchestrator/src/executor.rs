@@ -19,11 +19,57 @@ pub struct ExecutionResult {
     pub duration_ms: u64,
 }
 
+/// Worker protocol injected into every Claude Code worker's system prompt.
+/// Teaches workers how to report completion, signal blockers, and use sub-agents.
+pub const WORKER_PROTOCOL: &str = r#"
+## Worker Protocol
+
+You are a Sigil worker executing a task (bead). Follow these rules strictly.
+
+### Completion
+When you successfully complete the task, provide a clear summary of what you changed.
+Include file paths, commit hashes, and any deployment notes.
+
+### Blocked — Need Input
+If you cannot complete the task because you need a decision, clarification, or information
+that isn't available in the codebase:
+- Start your response with exactly: BLOCKED:
+- On the next line, state the specific question you need answered
+- Then describe what you've done so far and why you're stuck
+- Be precise — your question will be passed to another agent or human for resolution
+
+Example:
+```
+BLOCKED:
+Should the new WebSocket endpoint require authentication, or should it be public?
+I've implemented the handler and message types in src/ws.rs but need to know
+whether to wire it through the auth middleware before proceeding.
+```
+
+### Failed — Technical Error
+If the task fails due to a build error, test failure, or infrastructure issue you cannot fix:
+- Start your response with exactly: FAILED:
+- Include the error output and what you tried
+
+### Sub-Agents
+You have full access to Claude Code's Task tool for spawning sub-agents. Use them freely:
+- Explore agents for parallel codebase research
+- Bash agents for running tests and builds
+- general-purpose agents for complex multi-step investigations
+Each worker IS an orchestrator — swarm when the task is complex.
+
+### Git Workflow
+Follow the project's CLAUDE.md for git workflow (worktrees, branches, commits).
+"#;
+
 /// Spawns Claude Code CLI instances for bead execution.
 ///
 /// Each execution is ephemeral: no session persistence, no interactive mode.
 /// The worker's identity is injected via `--append-system-prompt` and the
 /// repo's CLAUDE.md is auto-discovered from the working directory.
+///
+/// NO tool restrictions — workers get full Claude Code access including
+/// Edit, Grep, Glob, Task (sub-agents), Bash, Read, Write, and everything else.
 pub struct ClaudeCodeExecutor {
     /// Working directory (rig's repo path).
     workdir: PathBuf,
@@ -33,14 +79,7 @@ pub struct ClaudeCodeExecutor {
     max_turns: u32,
     /// Max budget in USD per execution (None = unlimited).
     max_budget_usd: Option<f64>,
-    /// Tool allowlist (Claude Code tool names).
-    allowed_tools: Vec<String>,
 }
-
-/// Default tool allowlist for code-working rigs.
-const DEFAULT_CODE_TOOLS: &[&str] = &[
-    "Bash", "Read", "Write", "Edit", "Grep", "Glob", "Task",
-];
 
 impl ClaudeCodeExecutor {
     pub fn new(
@@ -54,14 +93,13 @@ impl ClaudeCodeExecutor {
             model,
             max_turns,
             max_budget_usd,
-            allowed_tools: DEFAULT_CODE_TOOLS.iter().map(|s| s.to_string()).collect(),
         }
     }
 
     /// Execute a bead via Claude Code CLI.
     ///
-    /// Spawns `claude -p "<bead_context>"` with the rig's identity as
-    /// `--append-system-prompt`. Returns the parsed result from JSON output.
+    /// Spawns `claude -p "<bead_context>"` with the rig's identity + worker protocol
+    /// as `--append-system-prompt`. Returns the parsed result from JSON output.
     pub async fn execute(
         &self,
         identity: &sigil_core::Identity,
@@ -84,30 +122,28 @@ impl ClaudeCodeExecutor {
             cmd.arg("--max-budget-usd").arg(budget.to_string());
         }
 
-        // Tool allowlist.
-        if !self.allowed_tools.is_empty() {
-            cmd.arg("--allowedTools").arg(self.allowed_tools.join(","));
-        }
+        // NO --allowedTools — workers get full unrestricted Claude Code access.
+        // This means Edit, Grep, Glob, Task (sub-agents), Bash, Read, Write,
+        // WebSearch, WebFetch, NotebookEdit — everything.
 
-        // Identity as system prompt appendage.
-        let system_prompt = identity.system_prompt();
-        if !system_prompt.is_empty() {
-            cmd.arg("--append-system-prompt").arg(&system_prompt);
-        }
+        // Identity + worker protocol as system prompt appendage.
+        let mut system_prompt = identity.system_prompt();
+        system_prompt.push_str("\n\n---\n\n");
+        system_prompt.push_str(WORKER_PROTOCOL);
+        cmd.arg("--append-system-prompt").arg(&system_prompt);
 
         // Working directory.
         cmd.current_dir(&self.workdir);
 
         // CRITICAL: Unset CLAUDECODE env var to avoid nested-session block.
         cmd.env_remove("CLAUDECODE");
-        // Also unset CLAUDE_CODE to be safe.
         cmd.env_remove("CLAUDE_CODE");
 
         debug!(
             workdir = %self.workdir.display(),
             model = %self.model,
             max_turns = self.max_turns,
-            "spawning claude code"
+            "spawning claude code (unrestricted)"
         );
 
         let output = cmd
@@ -137,18 +173,6 @@ impl ClaudeCodeExecutor {
     }
 
     /// Parse the `--output-format json` response from Claude Code.
-    ///
-    /// The JSON output has this shape:
-    /// ```json
-    /// {
-    ///   "type": "result",
-    ///   "result": "the assistant's response text",
-    ///   "session_id": "...",
-    ///   "num_turns": 5,
-    ///   "total_cost_usd": 0.12,
-    ///   ...
-    /// }
-    /// ```
     fn parse_json_output(stdout: &str, duration_ms: u64) -> Result<ExecutionResult> {
         let v: serde_json::Value = serde_json::from_str(stdout)
             .context("failed to parse claude code JSON output")?;
@@ -188,6 +212,48 @@ impl ClaudeCodeExecutor {
     }
 }
 
+/// Parsed outcome from a worker's result text.
+#[derive(Debug, Clone)]
+pub enum WorkerOutcome {
+    /// Task completed successfully.
+    Done(String),
+    /// Worker is blocked and needs input to continue.
+    Blocked {
+        /// The specific question or information needed.
+        question: String,
+        /// Full result text including work done so far.
+        full_text: String,
+    },
+    /// Task failed due to a technical error.
+    Failed(String),
+}
+
+impl WorkerOutcome {
+    /// Parse a worker's result text into a structured outcome.
+    pub fn parse(result_text: &str) -> Self {
+        let trimmed = result_text.trim();
+
+        if trimmed.starts_with("BLOCKED:") {
+            let after_prefix = trimmed.strip_prefix("BLOCKED:").unwrap_or("").trim();
+            // The question is everything up to the first blank line (or all of it).
+            let question = after_prefix
+                .split("\n\n")
+                .next()
+                .unwrap_or(after_prefix)
+                .trim()
+                .to_string();
+            Self::Blocked {
+                question,
+                full_text: result_text.to_string(),
+            }
+        } else if trimmed.starts_with("FAILED:") {
+            Self::Failed(result_text.to_string())
+        } else {
+            Self::Done(result_text.to_string())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,5 +283,29 @@ mod tests {
         assert_eq!(result.result_text, "done");
         assert_eq!(result.num_turns, 0);
         assert_eq!(result.total_cost_usd, 0.0);
+    }
+
+    #[test]
+    fn test_worker_outcome_done() {
+        let outcome = WorkerOutcome::parse("I fixed the bug and committed to feat/fix-pms.");
+        assert!(matches!(outcome, WorkerOutcome::Done(_)));
+    }
+
+    #[test]
+    fn test_worker_outcome_blocked() {
+        let text = "BLOCKED:\nShould auth be JWT or session-based?\n\nI've set up the middleware but need to know the auth strategy.";
+        let outcome = WorkerOutcome::parse(text);
+        match outcome {
+            WorkerOutcome::Blocked { question, .. } => {
+                assert_eq!(question, "Should auth be JWT or session-based?");
+            }
+            _ => panic!("expected Blocked"),
+        }
+    }
+
+    #[test]
+    fn test_worker_outcome_failed() {
+        let outcome = WorkerOutcome::parse("FAILED:\ncargo build returned 3 errors in pms/src/main.rs");
+        assert!(matches!(outcome, WorkerOutcome::Failed(_)));
     }
 }

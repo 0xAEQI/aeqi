@@ -15,7 +15,7 @@ pub mod worker;
 pub use convoy::{Convoy, ConvoyStore};
 pub use cron::{CronJob, CronSchedule, CronStore};
 pub use daemon::Daemon;
-pub use executor::ClaudeCodeExecutor;
+pub use executor::{ClaudeCodeExecutor, WorkerOutcome};
 pub use heartbeat::Heartbeat;
 pub use hook::Hook;
 pub use mail::{Mail, MailBus};

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sigil_beads::BeadStore;
+use sigil_beads::{BeadStatus, BeadStore};
 use sigil_core::config::ExecutionMode;
 use sigil_core::traits::{Provider, Tool};
 use std::sync::Arc;
@@ -11,8 +11,15 @@ use crate::mail::{Mail, MailBus};
 use crate::rig::Rig;
 use crate::worker::{Worker, WorkerState};
 
+/// Max resolution attempts at the rig level before escalating to Familiar.
+/// Each attempt spawns a new worker to try to answer the blocker question.
+const MAX_RIG_RESOLUTION_ATTEMPTS: u32 = 1;
+
+/// Label prefix for tracking escalation depth on beads.
+const ESCALATION_LABEL_PREFIX: &str = "escalation:";
+
 /// Witness: per-rig supervisor. Runs patrol cycles, manages workers,
-/// detects stuck/orphaned beads, reports to Familiar.
+/// detects stuck/orphaned beads, handles escalation, reports to Familiar.
 pub struct Witness {
     pub rig_name: String,
     pub workers: Vec<Worker>,
@@ -104,7 +111,8 @@ impl Witness {
         }
     }
 
-    /// Run one patrol cycle: check workers, assign ready work, report status.
+    /// Run one patrol cycle: check workers, assign ready work, handle blocked
+    /// beads, report status.
     pub async fn patrol(&mut self) -> Result<()> {
         debug!(rig = %self.rig_name, "patrol cycle");
 
@@ -113,7 +121,10 @@ impl Witness {
             !matches!(w.state, WorkerState::Done | WorkerState::Failed(_))
         });
 
-        // 2. Check for ready beads and assign to idle workers.
+        // 2. Handle blocked beads — attempt resolution or escalate.
+        self.handle_blocked_beads().await;
+
+        // 3. Check for ready beads and assign to idle workers.
         let ready_beads = {
             let store = self.beads.lock().await;
             store.ready().into_iter().cloned().collect::<Vec<_>>()
@@ -124,7 +135,6 @@ impl Witness {
                 break;
             }
 
-            // Check if already assigned.
             if bead.assignee.is_some() {
                 continue;
             }
@@ -144,8 +154,7 @@ impl Witness {
             self.workers.push(worker);
         }
 
-        // 3. Detect stuck workers (no state change for too long).
-        // For now, just log worker states.
+        // 4. Log worker states.
         for worker in &self.workers {
             debug!(
                 rig = %self.rig_name,
@@ -155,7 +164,7 @@ impl Witness {
             );
         }
 
-        // 4. Report to Familiar.
+        // 5. Report to Familiar.
         let active = self.workers.iter().filter(|w| w.state == WorkerState::Working).count();
         let pending = {
             let store = self.beads.lock().await;
@@ -179,18 +188,192 @@ impl Witness {
         Ok(())
     }
 
+    /// Handle blocked beads: attempt rig-level resolution or escalate to Familiar.
+    ///
+    /// Escalation chain:
+    ///   1. Worker BLOCKED → Witness spawns resolver worker (same rig, has full codebase access)
+    ///   2. Resolver answers → Witness appends answer to bead, resets to Pending for re-attempt
+    ///   3. Resolver also blocked → Witness escalates to Familiar via mail
+    ///   4. Familiar tries (has KNOWLEDGE.md + cross-rig context)
+    ///   5. Familiar resolves → sends RESOLVED mail back → Witness re-opens bead
+    ///   6. Familiar stuck → routes to human via Telegram
+    async fn handle_blocked_beads(&mut self) {
+        let blocked_beads = {
+            let store = self.beads.lock().await;
+            store.all().into_iter()
+                .filter(|b| b.status == BeadStatus::Blocked)
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+
+        for bead in blocked_beads {
+            let escalation_depth = Self::get_escalation_depth(&bead.labels);
+
+            if escalation_depth >= MAX_RIG_RESOLUTION_ATTEMPTS {
+                // Already tried rig-level resolution. Escalate to Familiar.
+                self.escalate_to_familiar(&bead).await;
+            } else {
+                // Attempt rig-level resolution: re-open as Pending with resolution context.
+                self.attempt_rig_resolution(&bead, escalation_depth).await;
+            }
+        }
+    }
+
+    /// Attempt to resolve a blocker at the rig level.
+    ///
+    /// Increments escalation depth, appends the blocker question to the bead
+    /// description as resolution context, and resets to Pending so a new worker
+    /// picks it up with the full context.
+    async fn attempt_rig_resolution(
+        &self,
+        bead: &sigil_beads::Bead,
+        current_depth: u32,
+    ) {
+        let new_depth = current_depth + 1;
+        let new_label = format!("{ESCALATION_LABEL_PREFIX}{new_depth}");
+
+        // Extract the blocker question from closed_reason or description.
+        let blocker_context = bead.closed_reason.as_deref()
+            .unwrap_or("(no blocker details captured)");
+
+        info!(
+            rig = %self.rig_name,
+            bead = %bead.id,
+            depth = new_depth,
+            "attempting rig-level resolution"
+        );
+
+        // Update bead: append resolution context, increment depth, reset to Pending.
+        let mut store = self.beads.lock().await;
+        let _ = store.update(&bead.id.0, |b| {
+            // Append blocker context to description so the next worker sees it.
+            b.description.push_str(&format!(
+                "\n\n---\n## Resolution Attempt {new_depth}\n\n\
+                 A previous worker was blocked on this task. \
+                 Before continuing the original task, first try to answer this question \
+                 using the codebase, documentation, and your knowledge. \
+                 If you can answer it, proceed with the original task using that answer. \
+                 If you genuinely cannot determine the answer, respond with BLOCKED: again.\n\n\
+                 **Blocker question:**\n{blocker_context}\n"
+            ));
+
+            // Track escalation depth.
+            b.labels.retain(|l| !l.starts_with(ESCALATION_LABEL_PREFIX));
+            b.labels.push(new_label);
+
+            // Reset to Pending so patrol picks it up for a new worker.
+            b.status = BeadStatus::Pending;
+            b.assignee = None;
+        });
+    }
+
+    /// Escalate a blocked bead to the Familiar for cross-rig resolution.
+    ///
+    /// The Familiar has KNOWLEDGE.md with operational learnings and cross-rig
+    /// awareness. If it can't resolve either, it routes to human via Telegram.
+    async fn escalate_to_familiar(&self, bead: &sigil_beads::Bead) {
+        // Only escalate once — check if we already sent an ESCALATE mail for this bead.
+        if bead.labels.iter().any(|l| l == "escalated_to_familiar") {
+            return;
+        }
+
+        info!(
+            rig = %self.rig_name,
+            bead = %bead.id,
+            "escalating to familiar — rig-level resolution exhausted"
+        );
+
+        // Mark bead as escalated.
+        {
+            let mut store = self.beads.lock().await;
+            let _ = store.update(&bead.id.0, |b| {
+                b.labels.push("escalated_to_familiar".to_string());
+            });
+        }
+
+        // Send escalation mail to Familiar with full context.
+        self.mail_bus
+            .send(Mail::new(
+                &format!("witness-{}", self.rig_name),
+                "familiar",
+                "ESCALATE",
+                &format!(
+                    "Rig {} needs help resolving a blocker.\n\n\
+                     Bead: {} — {}\n\
+                     Priority: {}\n\n\
+                     Full description:\n{}\n\n\
+                     This bead has been blocked after {} resolution attempt(s) at the rig level. \
+                     Please try to resolve using your cross-rig knowledge (KNOWLEDGE.md). \
+                     If you can answer the blocker question, send a RESOLVED mail back to \
+                     witness-{} with the answer. If you cannot resolve it, escalate to the \
+                     human operator via Telegram.",
+                    self.rig_name,
+                    bead.id,
+                    bead.subject,
+                    bead.priority,
+                    bead.description,
+                    Self::get_escalation_depth(&bead.labels),
+                    self.rig_name,
+                ),
+            ))
+            .await;
+    }
+
+    /// Process a RESOLVED mail from the Familiar: re-open the blocked bead
+    /// with the answer appended to the description.
+    pub async fn handle_resolution(&self, bead_id: &str, answer: &str) {
+        info!(
+            rig = %self.rig_name,
+            bead = %bead_id,
+            "received resolution from familiar"
+        );
+
+        let mut store = self.beads.lock().await;
+        let _ = store.update(bead_id, |b| {
+            b.description.push_str(&format!(
+                "\n\n---\n## Resolution (from Familiar)\n\n{answer}\n\n\
+                 **Now proceed with the original task using this answer.**\n"
+            ));
+            b.status = BeadStatus::Pending;
+            b.assignee = None;
+            // Remove escalation labels — fresh start with the answer.
+            b.labels.retain(|l| {
+                !l.starts_with(ESCALATION_LABEL_PREFIX) && l != "escalated_to_familiar"
+            });
+        });
+    }
+
+    /// Get escalation depth from bead labels.
+    fn get_escalation_depth(labels: &[String]) -> u32 {
+        labels.iter()
+            .filter_map(|l| l.strip_prefix(ESCALATION_LABEL_PREFIX))
+            .filter_map(|n| n.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0)
+    }
+
     /// Execute all hooked workers. Returns the number of workers that ran.
     pub async fn execute_workers(&mut self) -> usize {
         let mut executed = 0;
         for worker in &mut self.workers {
             if worker.state == WorkerState::Hooked {
-                if let Err(e) = worker.execute().await {
-                    warn!(
-                        rig = %self.rig_name,
-                        worker = %worker.name,
-                        error = %e,
-                        "worker execution failed"
-                    );
+                match worker.execute().await {
+                    Ok(outcome) => {
+                        debug!(
+                            rig = %self.rig_name,
+                            worker = %worker.name,
+                            outcome = ?std::mem::discriminant(&outcome),
+                            "worker finished"
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            rig = %self.rig_name,
+                            worker = %worker.name,
+                            error = %e,
+                            "worker execution error"
+                        );
+                    }
                 }
                 executed += 1;
             }
