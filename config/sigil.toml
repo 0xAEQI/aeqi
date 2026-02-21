@@ -1,0 +1,50 @@
+[sigil]
+name = "emperor-sigil"
+data_dir = "~/.sigil"
+
+[providers.openrouter]
+api_key = "${OPENROUTER_API_KEY}"
+default_model = "anthropic/claude-sonnet-4-20250514"
+fallback_model = "anthropic/claude-haiku-4-5-20251001"
+embedding_model = "openai/text-embedding-3-small"
+
+[security]
+autonomy = "supervised"
+workspace_only = true
+max_cost_per_day_usd = 10.0
+
+[memory]
+backend = "sqlite"
+embedding_dimensions = 1536
+vector_weight = 0.6
+keyword_weight = 0.4
+temporal_decay_halflife_days = 30
+mmr_lambda = 0.7
+chunk_size_tokens = 400
+chunk_overlap_tokens = 80
+
+[heartbeat]
+enabled = true
+default_interval_minutes = 30
+
+[[rigs]]
+name = "algostaking"
+prefix = "as"
+repo = "/home/claudedev/algostaking-backend"
+model = "anthropic/claude-sonnet-4-20250514"
+max_workers = 4
+worktree_root = "/home/claudedev/worktrees"
+
+[[rigs]]
+name = "riftdecks"
+prefix = "rd"
+repo = "/home/claudedev/riftdecks"
+model = "anthropic/claude-haiku-4-5-20251001"
+max_workers = 2
+
+[[rigs]]
+name = "entity-legal"
+prefix = "el"
+repo = "/home/claudedev/entity-legal"
+model = "anthropic/claude-sonnet-4-20250514"
+max_workers = 2

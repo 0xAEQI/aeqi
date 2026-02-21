@@ -1,0 +1,69 @@
+[workspace]
+resolver = "2"
+members = [
+    "sg",
+    "crates/sigil-core",
+    "crates/sigil-providers",
+    "crates/sigil-tools",
+    "crates/sigil-orchestrator",
+    "crates/sigil-memory",
+    "crates/sigil-channels",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["AlgoStaking"]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Async traits
+async-trait = "0.1"
+
+# Crypto
+chacha20poly1305 = "0.10"
+rand = "0.9"
+base64 = "0.22"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Dirs
+dirs = "6"
+
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Tokio stream
+tokio-stream = "0.1"
+futures = "0.3"
+
+# Internal crates
+sigil-core = { path = "crates/sigil-core" }
+sigil-providers = { path = "crates/sigil-providers" }
+sigil-tools = { path = "crates/sigil-tools" }
+sigil-orchestrator = { path = "crates/sigil-orchestrator" }
+sigil-memory = { path = "crates/sigil-memory" }
+sigil-channels = { path = "crates/sigil-channels" }
