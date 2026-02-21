@@ -20,6 +20,8 @@ pub struct Identity {
     pub memory: Option<String>,
     /// Operational knowledge and learnings (KNOWLEDGE.md).
     pub knowledge: Option<String>,
+    /// Architect's observed preferences — updated by Aurelia across interactions (PREFERENCES.md).
+    pub preferences: Option<String>,
     /// Shared workflow from rigs/shared/WORKFLOW.md.
     pub shared_workflow: Option<String>,
 }
@@ -38,6 +40,7 @@ impl Identity {
             heartbeat: load_optional(rig_dir, "HEARTBEAT.md")?,
             memory: load_optional(rig_dir, "MEMORY.md")?,
             knowledge: load_optional(rig_dir, "KNOWLEDGE.md")?,
+            preferences: load_optional(rig_dir, "PREFERENCES.md")?,
             shared_workflow: shared_dir
                 .as_deref()
                 .map(|d| load_optional(d, "WORKFLOW.md"))
@@ -72,6 +75,10 @@ impl Identity {
 
         if let Some(ref knowledge) = self.knowledge {
             parts.push(format!("# Domain Knowledge\n\n{knowledge}"));
+        }
+
+        if let Some(ref preferences) = self.preferences {
+            parts.push(format!("# Architect Preferences\n\n{preferences}"));
         }
 
         if let Some(ref memory) = self.memory {
