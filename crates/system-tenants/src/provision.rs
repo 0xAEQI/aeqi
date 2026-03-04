@@ -3,6 +3,7 @@ use std::path::Path;
 use tracing::info;
 
 use crate::tenant::TenantId;
+use system_core::{AgentRole, AgentVoice, ExecutionMode, PeerAgentConfig};
 
 /// Provision a new tenant's on-disk structure from templates.
 pub fn provision_tenant(
@@ -77,6 +78,25 @@ pub fn provision_tenant(
     Ok(())
 }
 
+/// Derive a `PeerAgentConfig` from a companion's traits.
+pub fn companion_to_agent_config(companion: &system_companions::Companion) -> PeerAgentConfig {
+    PeerAgentConfig {
+        name: companion.name.clone(),
+        prefix: "cmp".to_string(),
+        model: Some(companion.rarity.default_model().to_string()),
+        role: AgentRole::Advisor,
+        voice: AgentVoice::Vocal,
+        execution_mode: ExecutionMode::Agent,
+        max_workers: 1,
+        max_turns: None,
+        max_budget_usd: Some(companion.rarity.default_budget_usd()),
+        default_repo: None,
+        expertise: companion.archetype.default_expertise(),
+        capabilities: vec![],
+        telegram_token_secret: None,
+    }
+}
+
 /// Materialize a companion as a full agent on disk (synchronous — fast, no LLM).
 /// Writes fallback SOUL.md + IDENTITY.md immediately.
 pub fn materialize_companion(
@@ -126,43 +146,52 @@ pub fn materialize_companion(
     let emo = system_orchestrator::EmotionalState::new(&companion.name);
     emo.save(&system_orchestrator::EmotionalState::path_for_agent(&agent_dir))?;
 
+    // agent.toml — execution config derived from companion traits.
+    let agent_config = companion_to_agent_config(companion);
+    let agent_toml = toml::to_string_pretty(&agent_config)
+        .unwrap_or_else(|_| format!("name = \"{}\"\n", companion.name));
+    std::fs::write(agent_dir.join("agent.toml"), agent_toml)?;
+
     info!(companion = %companion.name, dir = %agent_dir.display(), "companion materialized (sync)");
     Ok(agent_dir)
 }
 
 /// Async portrait generation — calls image generation API to produce portrait.png.
 /// Writes the image to the companion's agent directory and updates portrait_status.
+/// Fires a `TenantEvent::PortraitReady` on completion or failure.
 pub async fn materialize_companion_portrait(
     data_dir: &Path,
     companion: &system_companions::Companion,
     platform: &crate::config::PlatformConfig,
     companion_store: &system_companions::CompanionStore,
+    event_tx: &tokio::sync::broadcast::Sender<crate::events::TenantEvent>,
 ) -> Result<()> {
     let agent_dir = data_dir.join("agents").join(&companion.name);
     std::fs::create_dir_all(&agent_dir)?;
 
     // Update status to generating.
-    if let Ok(Some(mut c)) = companion_store.get_companion(&companion.id) {
+    let _ = companion_store.update_companion(&companion.id, |c| {
         c.portrait_status = system_companions::PortraitStatus::Generating;
-        let _ = companion_store.save_companion(&c);
-    }
+    });
 
-    // Build provider — use OpenRouter (same as persona gen).
+    // Build provider — use OpenRouter. Model is determined by portrait_gen::DEFAULT_IMAGE_MODEL.
     let provider = if let Some(ref openrouter) = platform.providers.openrouter {
         system_providers::OpenRouterProvider::new(
             openrouter.api_key.clone(),
-            "openai/gpt-5-image".to_string(),
+            "".to_string(),
         )
     } else {
-        // Update status to failed.
-        if let Ok(Some(mut c)) = companion_store.get_companion(&companion.id) {
+        let _ = companion_store.update_companion(&companion.id, |c| {
             c.portrait_status = system_companions::PortraitStatus::Failed;
-            let _ = companion_store.save_companion(&c);
-        }
+        });
+        let _ = event_tx.send(crate::events::TenantEvent::PortraitReady {
+            companion_name: companion.name.clone(),
+            success: false,
+        });
         anyhow::bail!("no OpenRouter provider configured for portrait generation");
     };
 
-    let model = "openai/gpt-5-image";
+    let model = ""; // Uses DEFAULT_IMAGE_MODEL (Gemini Flash) in portrait_gen
 
     match crate::portrait_gen::generate_portrait(companion, &provider, model).await {
         Ok(bytes) => {
@@ -170,20 +199,26 @@ pub async fn materialize_companion_portrait(
             std::fs::write(agent_dir.join("portrait.png"), &bytes)?;
 
             // Update status to complete.
-            if let Ok(Some(mut c)) = companion_store.get_companion(&companion.id) {
+            companion_store.update_companion(&companion.id, |c| {
                 c.portrait_status = system_companions::PortraitStatus::Complete;
-                companion_store.save_companion(&c)?;
-            }
+            })?;
+
+            let _ = event_tx.send(crate::events::TenantEvent::PortraitReady {
+                companion_name: companion.name.clone(),
+                success: true,
+            });
 
             info!(companion = %companion.name, bytes = bytes.len(), "portrait written (async)");
             Ok(())
         }
         Err(e) => {
-            // Update status to failed.
-            if let Ok(Some(mut c)) = companion_store.get_companion(&companion.id) {
+            let _ = companion_store.update_companion(&companion.id, |c| {
                 c.portrait_status = system_companions::PortraitStatus::Failed;
-                let _ = companion_store.save_companion(&c);
-            }
+            });
+            let _ = event_tx.send(crate::events::TenantEvent::PortraitReady {
+                companion_name: companion.name.clone(),
+                success: false,
+            });
             Err(e)
         }
     }
@@ -192,13 +227,23 @@ pub async fn materialize_companion_portrait(
 /// Async persona generation — calls LLM to generate PERSONA.md.
 /// Identity::load() prefers PERSONA.md over SOUL.md, so this automatically
 /// takes precedence once written.
+/// Fires a `TenantEvent::PersonaReady` on completion or failure.
 pub async fn materialize_companion_persona(
     data_dir: &Path,
     companion: &system_companions::Companion,
     platform: &crate::config::PlatformConfig,
     parents: Option<(system_companions::Companion, system_companions::Companion)>,
+    event_tx: &tokio::sync::broadcast::Sender<crate::events::TenantEvent>,
+    companion_store: &system_companions::CompanionStore,
 ) -> Result<()> {
     use system_core::traits::Provider;
+
+    let agent_dir = data_dir.join("agents").join(&companion.name);
+
+    // Update persona status to generating.
+    let _ = companion_store.update_companion(&companion.id, |c| {
+        c.persona_status = system_companions::PersonaStatus::Generating;
+    });
 
     // Build provider — use OpenRouter with MiniMax M2.5 (cheap, high quality).
     let (provider, model): (Box<dyn Provider>, String) =
@@ -219,19 +264,45 @@ pub async fn materialize_companion_persona(
                 "claude-haiku-4-5".to_string(),
             )
         } else {
+            let _ = companion_store.update_companion(&companion.id, |c| {
+                c.persona_status = system_companions::PersonaStatus::Failed;
+            });
+            let _ = event_tx.send(crate::events::TenantEvent::PersonaReady {
+                companion_name: companion.name.clone(),
+                success: false,
+            });
             anyhow::bail!("no provider configured for persona generation");
         };
 
-    // Update persona status to generating.
-    let agent_dir = data_dir.join("agents").join(&companion.name);
-
     let parent_refs = parents.as_ref().map(|(a, b)| (a, b));
-    let persona_text = crate::persona_gen::generate_persona(companion, provider.as_ref(), &model, parent_refs).await?;
+    match crate::persona_gen::generate_persona(companion, provider.as_ref(), &model, parent_refs).await {
+        Ok(persona_text) => {
+            // Write PERSONA.md — this takes precedence over SOUL.md.
+            std::fs::create_dir_all(&agent_dir)?;
+            std::fs::write(agent_dir.join("PERSONA.md"), &persona_text)?;
 
-    // Write PERSONA.md — this takes precedence over SOUL.md.
-    std::fs::create_dir_all(&agent_dir)?;
-    std::fs::write(agent_dir.join("PERSONA.md"), &persona_text)?;
+            // Update persona status to complete.
+            let _ = companion_store.update_companion(&companion.id, |c| {
+                c.persona_status = system_companions::PersonaStatus::Complete;
+            });
 
-    info!(companion = %companion.name, "persona written (async)");
-    Ok(())
+            let _ = event_tx.send(crate::events::TenantEvent::PersonaReady {
+                companion_name: companion.name.clone(),
+                success: true,
+            });
+
+            info!(companion = %companion.name, "persona written (async)");
+            Ok(())
+        }
+        Err(e) => {
+            let _ = companion_store.update_companion(&companion.id, |c| {
+                c.persona_status = system_companions::PersonaStatus::Failed;
+            });
+            let _ = event_tx.send(crate::events::TenantEvent::PersonaReady {
+                companion_name: companion.name.clone(),
+                success: false,
+            });
+            Err(e)
+        }
+    }
 }

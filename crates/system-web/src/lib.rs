@@ -1,5 +1,14 @@
+//! Axum-based REST API and WebSocket server for the companion chat platform.
+//!
+//! Provides endpoints for authentication, companion CRUD, gacha pulls/fusion,
+//! squad management, project/task/mission CRUD, Stripe billing, and admin stats.
+//! The WebSocket handler ([`ws`]) drives real-time companion chat with agent tool
+//! execution, advisor routing, and bond XP progression. Chat logic lives in [`chat`].
+
 pub mod routes;
 pub mod auth;
+pub mod chat;
+pub mod error;
 pub mod ws;
 pub mod api_chat;
 pub mod api_gacha;

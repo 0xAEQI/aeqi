@@ -1,10 +1,10 @@
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
 use axum::Json;
 use std::sync::Arc;
 
 use crate::AppState;
 use crate::auth::AuthTenant;
+use crate::error::AppError;
 use crate::types::*;
 
 fn task_to_info(t: &system_tasks::Task) -> TaskInfo {
@@ -52,7 +52,7 @@ fn tenant_team(tenant: &system_tenants::Tenant) -> Option<TeamInfo> {
 pub async fn list_projects(
     AuthTenant(tenant): AuthTenant,
     State(_state): State<Arc<AppState>>,
-) -> Result<Json<Vec<ProjectInfo>>, (StatusCode, String)> {
+) -> Result<Json<Vec<ProjectInfo>>, AppError> {
     let team = tenant_team(&tenant);
     let summaries = tenant.registry.list_project_summaries().await;
     let infos: Vec<ProjectInfo> = summaries.into_iter().map(|s| ProjectInfo {
@@ -72,9 +72,9 @@ pub async fn get_project(
     AuthTenant(tenant): AuthTenant,
     State(_state): State<Arc<AppState>>,
     Path(name): Path<String>,
-) -> Result<Json<ProjectInfo>, (StatusCode, String)> {
+) -> Result<Json<ProjectInfo>, AppError> {
     let project = tenant.registry.get_project(&name).await
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("project not found: {name}")))?;
+        .ok_or_else(|| AppError::NotFound(format!("project not found: {name}")))?;
 
     let board = project.tasks.lock().await;
     let all_tasks = board.all();
@@ -100,9 +100,9 @@ pub async fn get_project(
 pub async fn list_missions(
     AuthTenant(tenant): AuthTenant,
     Path(name): Path<String>,
-) -> Result<Json<Vec<MissionInfo>>, (StatusCode, String)> {
+) -> Result<Json<Vec<MissionInfo>>, AppError> {
     let project = tenant.registry.get_project(&name).await
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("project not found: {name}")))?;
+        .ok_or_else(|| AppError::NotFound(format!("project not found: {name}")))?;
 
     let board = project.tasks.lock().await;
     let all_tasks = board.all();
@@ -115,13 +115,13 @@ pub async fn list_missions(
 pub async fn get_mission(
     AuthTenant(tenant): AuthTenant,
     Path((name, mission_id)): Path<(String, String)>,
-) -> Result<Json<MissionInfo>, (StatusCode, String)> {
+) -> Result<Json<MissionInfo>, AppError> {
     let project = tenant.registry.get_project(&name).await
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("project not found: {name}")))?;
+        .ok_or_else(|| AppError::NotFound(format!("project not found: {name}")))?;
 
     let board = project.tasks.lock().await;
     let mission = board.get_mission(&mission_id)
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("mission not found: {mission_id}")))?;
+        .ok_or_else(|| AppError::NotFound(format!("mission not found: {mission_id}")))?;
     let all_tasks = board.all();
     Ok(Json(mission_to_info(mission, &all_tasks)))
 }
@@ -131,9 +131,9 @@ pub async fn list_tasks(
     AuthTenant(tenant): AuthTenant,
     Path(name): Path<String>,
     Query(params): Query<TaskQueryParams>,
-) -> Result<Json<Vec<TaskInfo>>, (StatusCode, String)> {
+) -> Result<Json<Vec<TaskInfo>>, AppError> {
     let project = tenant.registry.get_project(&name).await
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("project not found: {name}")))?;
+        .ok_or_else(|| AppError::NotFound(format!("project not found: {name}")))?;
 
     let board = project.tasks.lock().await;
     let mut tasks: Vec<&system_tasks::Task> = board.by_prefix(&project.prefix);
@@ -153,13 +153,13 @@ pub async fn list_tasks(
 pub async fn get_task(
     AuthTenant(tenant): AuthTenant,
     Path((name, task_id)): Path<(String, String)>,
-) -> Result<Json<TaskInfo>, (StatusCode, String)> {
+) -> Result<Json<TaskInfo>, AppError> {
     let project = tenant.registry.get_project(&name).await
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("project not found: {name}")))?;
+        .ok_or_else(|| AppError::NotFound(format!("project not found: {name}")))?;
 
     let board = project.tasks.lock().await;
     let task = board.get(&task_id)
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("task not found: {task_id}")))?;
+        .ok_or_else(|| AppError::NotFound(format!("task not found: {task_id}")))?;
 
     Ok(Json(task_to_info(task)))
 }
@@ -169,13 +169,12 @@ pub async fn create_task(
     AuthTenant(tenant): AuthTenant,
     Path(name): Path<String>,
     Json(req): Json<CreateTaskRequest>,
-) -> Result<Json<TaskInfo>, (StatusCode, String)> {
+) -> Result<Json<TaskInfo>, AppError> {
     let project = tenant.registry.get_project(&name).await
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("project not found: {name}")))?;
+        .ok_or_else(|| AppError::NotFound(format!("project not found: {name}")))?;
 
     let mut board = project.tasks.lock().await;
-    let mut task = board.create(&project.prefix, &req.subject)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let mut task = board.create(&project.prefix, &req.subject)?;
 
     // Apply optional fields
     let task_id = task.id.0.clone();
@@ -195,7 +194,7 @@ pub async fn create_task(
             if let Some(ref mid) = req.mission_id {
                 t.mission_id = Some(mid.clone());
             }
-        }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        })?;
     }
 
     Ok(Json(task_to_info(&task)))
@@ -206,15 +205,15 @@ pub async fn update_task(
     AuthTenant(tenant): AuthTenant,
     Path((name, task_id)): Path<(String, String)>,
     Json(req): Json<UpdateTaskRequest>,
-) -> Result<Json<TaskInfo>, (StatusCode, String)> {
+) -> Result<Json<TaskInfo>, AppError> {
     let project = tenant.registry.get_project(&name).await
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("project not found: {name}")))?;
+        .ok_or_else(|| AppError::NotFound(format!("project not found: {name}")))?;
 
     let mut board = project.tasks.lock().await;
 
     // Verify task exists
     board.get(&task_id)
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("task not found: {task_id}")))?;
+        .ok_or_else(|| AppError::NotFound(format!("task not found: {task_id}")))?;
 
     let task = board.update(&task_id, |t| {
         if let Some(ref status) = req.status {
@@ -233,7 +232,7 @@ pub async fn update_task(
         if let Some(ref desc) = req.description {
             t.description = desc.clone();
         }
-    }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    })?;
 
     Ok(Json(task_to_info(&task)))
 }
@@ -241,7 +240,7 @@ pub async fn update_task(
 // GET /api/active-project
 pub async fn get_active_project(
     AuthTenant(tenant): AuthTenant,
-) -> Result<Json<ActiveProjectResponse>, (StatusCode, String)> {
+) -> Result<Json<ActiveProjectResponse>, AppError> {
     let active = tenant.active_project().await;
     Ok(Json(ActiveProjectResponse { active_project: active }))
 }
@@ -250,14 +249,13 @@ pub async fn get_active_project(
 pub async fn set_active_project(
     AuthTenant(tenant): AuthTenant,
     Json(req): Json<SetActiveProjectRequest>,
-) -> Result<Json<ActiveProjectResponse>, (StatusCode, String)> {
+) -> Result<Json<ActiveProjectResponse>, AppError> {
     // Validate project exists if setting one
     if let Some(ref name) = req.name {
         tenant.registry.get_project(name).await
-            .ok_or_else(|| (StatusCode::NOT_FOUND, format!("project not found: {name}")))?;
+            .ok_or_else(|| AppError::NotFound(format!("project not found: {name}")))?;
     }
-    tenant.set_active_project(req.name.clone()).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    tenant.set_active_project(req.name.clone()).await?;
     Ok(Json(ActiveProjectResponse { active_project: req.name }))
 }
 
@@ -265,10 +263,10 @@ pub async fn set_active_project(
 pub async fn delete_project(
     AuthTenant(tenant): AuthTenant,
     Path(name): Path<String>,
-) -> Result<Json<DeleteProjectResponse>, (StatusCode, String)> {
+) -> Result<Json<DeleteProjectResponse>, AppError> {
     // Check project exists
     tenant.registry.get_project(&name).await
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("project not found: {name}")))?;
+        .ok_or_else(|| AppError::NotFound(format!("project not found: {name}")))?;
 
     // Remove from registry
     tenant.registry.remove_project(&name).await;
@@ -279,11 +277,10 @@ pub async fn delete_project(
     }
 
     // Remove project directory from disk — but only if it's under data_dir (tenant-owned).
-    // If projects_source is set and the project lives there, skip physical deletion.
     let local_project_dir = tenant.data_dir.join("projects").join(&name);
     if local_project_dir.is_dir() {
         std::fs::remove_dir_all(&local_project_dir)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to remove project dir: {e}")))?;
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("failed to remove project dir: {e}")))?;
     }
 
     Ok(Json(DeleteProjectResponse { deleted: true }))
@@ -294,18 +291,17 @@ pub async fn create_mission(
     AuthTenant(tenant): AuthTenant,
     Path(name): Path<String>,
     Json(req): Json<CreateMissionRequest>,
-) -> Result<Json<MissionInfo>, (StatusCode, String)> {
+) -> Result<Json<MissionInfo>, AppError> {
     let project = tenant.registry.get_project(&name).await
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("project not found: {name}")))?;
+        .ok_or_else(|| AppError::NotFound(format!("project not found: {name}")))?;
 
     let mut board = project.tasks.lock().await;
-    let mut mission = board.create_mission(&project.prefix, &req.name)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let mut mission = board.create_mission(&project.prefix, &req.name)?;
 
     if let Some(ref desc) = req.description {
         mission = board.update_mission(&mission.id, |m| {
             m.description = desc.clone();
-        }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        })?;
     }
 
     let all_tasks = board.all();

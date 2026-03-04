@@ -9,6 +9,7 @@ use system_companions::CompanionStore;
 use system_orchestrator::{ProjectRegistry, ConversationStore, CostLedger, DispatchBus};
 
 use crate::config::TierConfig;
+use crate::events::TenantEvent;
 
 /// Opaque tenant identifier (UUID string).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -62,6 +63,7 @@ pub struct Tenant {
     pub cost_ledger: Arc<CostLedger>,
     pub companion_store: Arc<CompanionStore>,
     pub conversation_store: Arc<ConversationStore>,
+    pub event_tx: tokio::sync::broadcast::Sender<TenantEvent>,
     pub last_active: AtomicU64,
     pub created_at: DateTime<Utc>,
     pub active_project: RwLock<Option<String>>,

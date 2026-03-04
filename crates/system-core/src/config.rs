@@ -723,14 +723,20 @@ impl SystemConfig {
     }
 
     /// Validate that all team references point to defined agents.
+    /// Skips validation if no agents are defined (they may be discovered from disk later).
     pub fn validate_teams(&self) -> Vec<String> {
         let mut errors = Vec::new();
         let agent_names: std::collections::HashSet<&str> = self.agents.iter()
             .map(|a| a.name.as_str())
             .collect();
 
+        // Skip team validation if no agents defined yet (they'll be discovered from disk).
+        if agent_names.is_empty() {
+            return errors;
+        }
+
         // Validate system team leader.
-        if !agent_names.is_empty() && !agent_names.contains(self.team.leader.as_str()) {
+        if !agent_names.contains(self.team.leader.as_str()) {
             errors.push(format!(
                 "system team leader '{}' is not a defined agent",
                 self.team.leader
@@ -853,6 +859,118 @@ impl SystemConfig {
         errors.extend(self.validate_teams());
 
         errors
+    }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Agent discovery from disk
+// ──────────────────────────────────────────────────────────────
+
+/// Load a single agent's execution config from `agent_dir/agent.toml`.
+pub fn load_agent_config(agent_dir: &Path) -> Result<PeerAgentConfig> {
+    let path = agent_dir.join("agent.toml");
+    let content = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read agent.toml: {}", path.display()))?;
+    let config: PeerAgentConfig = toml::from_str(&content)
+        .with_context(|| format!("failed to parse agent.toml: {}", path.display()))?;
+    Ok(config)
+}
+
+/// Discover all agents by scanning subdirectories of `agents_dir`.
+/// Skips `shared` and any directory without an `agent.toml`.
+/// Returns agents sorted by name for determinism.
+pub fn discover_agents(agents_dir: &Path) -> Result<Vec<PeerAgentConfig>> {
+    let mut agents = Vec::new();
+
+    let entries = match std::fs::read_dir(agents_dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(agents),
+        Err(e) => return Err(e).context(format!("failed to read agents dir: {}", agents_dir.display())),
+    };
+
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let dir_name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        // Skip shared directory.
+        if dir_name == "shared" {
+            continue;
+        }
+        let agent_toml = path.join("agent.toml");
+        if !agent_toml.exists() {
+            continue;
+        }
+        match load_agent_config(&path) {
+            Ok(mut config) => {
+                // Validate name matches directory.
+                if config.name != dir_name {
+                    warn!(
+                        dir = %dir_name,
+                        config_name = %config.name,
+                        "agent.toml name doesn't match directory, using directory name"
+                    );
+                    config.name = dir_name;
+                }
+                agents.push(config);
+            }
+            Err(e) => {
+                warn!(dir = %dir_name, error = %e, "failed to load agent.toml, skipping");
+            }
+        }
+    }
+
+    agents.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(agents)
+}
+
+impl SystemConfig {
+    /// Discover agents from disk and merge with any `[[agents]]` in TOML config.
+    /// Disk agents take precedence over TOML agents (by name).
+    /// Returns warnings for overlaps.
+    pub fn discover_and_merge_agents(&mut self, agents_dir: &Path) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        let disk_agents = match discover_agents(agents_dir) {
+            Ok(a) => a,
+            Err(e) => {
+                warnings.push(format!("agent discovery failed: {e}"));
+                return warnings;
+            }
+        };
+
+        if disk_agents.is_empty() {
+            // No agent.toml files found — TOML agents still work (backward compat).
+            return warnings;
+        }
+
+        let disk_names: std::collections::HashSet<&str> =
+            disk_agents.iter().map(|a| a.name.as_str()).collect();
+
+        // Warn about overlaps (TOML agents that will be replaced by disk).
+        for toml_agent in &self.agents {
+            if disk_names.contains(toml_agent.name.as_str()) {
+                warnings.push(format!(
+                    "agent '{}' found in both [[agents]] and agents/{}/agent.toml — using disk version",
+                    toml_agent.name, toml_agent.name,
+                ));
+            }
+        }
+
+        // Keep TOML agents that are NOT on disk, then add all disk agents.
+        let mut merged: Vec<PeerAgentConfig> = self.agents.drain(..)
+            .filter(|a| !disk_names.contains(a.name.as_str()))
+            .collect();
+        merged.extend(disk_agents);
+        merged.sort_by(|a, b| a.name.cmp(&b.name));
+
+        self.agents = merged;
+        warnings
     }
 }
 
@@ -1187,5 +1305,168 @@ role = "orchestrator"
         let config = SystemConfig::parse(toml).unwrap();
         assert_eq!(config.team.agents, vec!["aurelia"]);
         assert_eq!(config.system_leader(), "aurelia");
+    }
+
+    #[test]
+    fn test_discover_agents_from_disk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let agents_dir = tmp.path().join("agents");
+
+        // Create agent directories with agent.toml.
+        for (name, role) in &[("alice", "orchestrator"), ("bob", "advisor")] {
+            let dir = agents_dir.join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            let toml = format!(
+                "name = \"{name}\"\nprefix = \"{}\"\nrole = \"{role}\"\n",
+                &name[..2],
+            );
+            std::fs::write(dir.join("agent.toml"), toml).unwrap();
+        }
+
+        // Create shared dir (should be skipped).
+        std::fs::create_dir_all(agents_dir.join("shared")).unwrap();
+        std::fs::write(agents_dir.join("shared/agent.toml"), "name = \"shared\"\n").unwrap();
+
+        // Create dir without agent.toml (should be skipped).
+        std::fs::create_dir_all(agents_dir.join("noconfig")).unwrap();
+
+        let agents = discover_agents(&agents_dir).unwrap();
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0].name, "alice");
+        assert_eq!(agents[0].role, AgentRole::Orchestrator);
+        assert_eq!(agents[1].name, "bob");
+        assert_eq!(agents[1].role, AgentRole::Advisor);
+    }
+
+    #[test]
+    fn test_discover_agents_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let agents_dir = tmp.path().join("agents");
+        std::fs::create_dir_all(&agents_dir).unwrap();
+
+        let agents = discover_agents(&agents_dir).unwrap();
+        assert!(agents.is_empty());
+    }
+
+    #[test]
+    fn test_discover_agents_nonexistent_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let agents = discover_agents(&tmp.path().join("nope")).unwrap();
+        assert!(agents.is_empty());
+    }
+
+    #[test]
+    fn test_discover_and_merge_disk_precedence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let agents_dir = tmp.path().join("agents");
+        let dir = agents_dir.join("alice");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("agent.toml"),
+            "name = \"alice\"\nprefix = \"al\"\nrole = \"advisor\"\nmodel = \"disk-model\"\n",
+        ).unwrap();
+
+        let toml_str = r#"
+[system]
+name = "test"
+
+[[agents]]
+name = "alice"
+prefix = "al"
+role = "orchestrator"
+model = "toml-model"
+
+[[agents]]
+name = "charlie"
+prefix = "ch"
+role = "advisor"
+"#;
+        let mut config = SystemConfig::parse(toml_str).unwrap();
+        let warnings = config.discover_and_merge_agents(&agents_dir);
+
+        // Disk alice should replace TOML alice.
+        assert!(warnings.iter().any(|w| w.contains("alice")));
+        assert_eq!(config.agents.len(), 2);
+
+        let alice = config.agent("alice").unwrap();
+        assert_eq!(alice.model.as_deref(), Some("disk-model"));
+        assert_eq!(alice.role, AgentRole::Advisor); // disk version
+
+        // Charlie from TOML should be preserved.
+        assert!(config.agent("charlie").is_some());
+    }
+
+    #[test]
+    fn test_discover_and_merge_backward_compat() {
+        let tmp = tempfile::tempdir().unwrap();
+        let agents_dir = tmp.path().join("agents");
+        std::fs::create_dir_all(&agents_dir).unwrap();
+        // No agent.toml files — TOML agents should remain.
+
+        let toml_str = r#"
+[system]
+name = "test"
+
+[[agents]]
+name = "alice"
+prefix = "al"
+role = "orchestrator"
+"#;
+        let mut config = SystemConfig::parse(toml_str).unwrap();
+        let warnings = config.discover_and_merge_agents(&agents_dir);
+
+        assert!(warnings.is_empty());
+        assert_eq!(config.agents.len(), 1);
+        assert_eq!(config.agents[0].name, "alice");
+    }
+
+    #[test]
+    fn test_load_agent_config_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let agent_dir = tmp.path();
+        let config = PeerAgentConfig {
+            name: "test".to_string(),
+            prefix: "tt".to_string(),
+            model: Some("claude-opus-4-6".to_string()),
+            role: AgentRole::Advisor,
+            voice: AgentVoice::Vocal,
+            execution_mode: ExecutionMode::ClaudeCode,
+            max_workers: 2,
+            max_turns: Some(15),
+            max_budget_usd: Some(1.0),
+            default_repo: Some("sigil".to_string()),
+            expertise: vec!["testing".to_string()],
+            capabilities: vec!["memory".to_string()],
+            telegram_token_secret: Some("TOKEN".to_string()),
+        };
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        std::fs::write(agent_dir.join("agent.toml"), &toml_str).unwrap();
+
+        let loaded = load_agent_config(agent_dir).unwrap();
+        assert_eq!(loaded.name, "test");
+        assert_eq!(loaded.prefix, "tt");
+        assert_eq!(loaded.model.as_deref(), Some("claude-opus-4-6"));
+        assert_eq!(loaded.role, AgentRole::Advisor);
+        assert_eq!(loaded.execution_mode, ExecutionMode::ClaudeCode);
+        assert_eq!(loaded.max_workers, 2);
+        assert_eq!(loaded.max_turns, Some(15));
+        assert_eq!(loaded.expertise, vec!["testing"]);
+    }
+
+    #[test]
+    fn test_discover_agents_name_mismatch_corrected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let agents_dir = tmp.path().join("agents");
+        let dir = agents_dir.join("alice");
+        std::fs::create_dir_all(&dir).unwrap();
+        // agent.toml has wrong name — should be corrected to dir name.
+        std::fs::write(
+            dir.join("agent.toml"),
+            "name = \"wrong\"\nprefix = \"al\"\nrole = \"advisor\"\n",
+        ).unwrap();
+
+        let agents = discover_agents(&agents_dir).unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].name, "alice");
     }
 }

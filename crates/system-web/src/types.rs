@@ -244,6 +244,23 @@ pub enum WsServerMessage {
         content: String,
         timestamp: i64,
     },
+    #[serde(rename = "tool_activity")]
+    ToolActivity {
+        companion: String,
+        tool_name: String,
+        tool_input: String,
+        tool_output: String,
+        is_error: bool,
+        iteration: u32,
+        timestamp: i64,
+    },
+    #[serde(rename = "companion_status")]
+    CompanionStatus {
+        companion: String,
+        status_type: String,
+        status: String,
+        timestamp: i64,
+    },
 }
 
 // --- Party / Squad ---

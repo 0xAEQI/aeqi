@@ -62,6 +62,20 @@ impl Archetype {
         }
     }
 
+    /// Default expertise keywords for this archetype (used in agent.toml generation).
+    pub fn default_expertise(&self) -> Vec<String> {
+        match self {
+            Self::Guardian => vec!["security", "protection", "stability", "infrastructure"],
+            Self::Strategist => vec!["planning", "architecture", "systems", "strategy"],
+            Self::Builder => vec!["implementation", "shipping", "coding", "velocity"],
+            Self::Librarian => vec!["research", "analysis", "data", "documentation"],
+            Self::Muse => vec!["design", "creativity", "aesthetics", "UX"],
+            Self::Healer => vec!["support", "maintenance", "debugging", "wellness"],
+            Self::Trickster => vec!["creative", "unconventional", "optimization", "lateral-thinking"],
+            Self::Archivist => vec!["memory", "history", "patterns", "knowledge"],
+        }.into_iter().map(String::from).collect()
+    }
+
     pub fn domain_affinity(&self) -> &str {
         match self {
             Self::Guardian => "risk, protection, monitoring",
@@ -305,6 +319,26 @@ impl Rarity {
         }
     }
 
+    /// Default LLM model for this rarity tier.
+    pub fn default_model(&self) -> &str {
+        match self {
+            Self::C | Self::B => "claude-haiku-4-5",
+            Self::A | Self::S => "claude-sonnet-4-6",
+            Self::SS => "claude-opus-4-6",
+        }
+    }
+
+    /// Default per-task budget (USD) for this rarity tier.
+    pub fn default_budget_usd(&self) -> f64 {
+        match self {
+            Self::C => 0.10,
+            Self::B => 0.25,
+            Self::A => 0.50,
+            Self::S => 1.00,
+            Self::SS => 2.00,
+        }
+    }
+
     pub fn fusion_cost(&self) -> u32 {
         match self {
             Self::C => 2,
@@ -420,6 +454,23 @@ impl Companion {
             }
         }
         leveled
+    }
+
+    /// Recalculate bond_level from bond_xp and update familiar_eligible.
+    /// Used after fusion to correctly set level from inherited XP.
+    pub fn recalculate_bond_level(&mut self) {
+        self.bond_level = 0;
+        loop {
+            let next = Self::bond_xp_for_level(self.bond_level + 1);
+            if self.bond_xp >= next {
+                self.bond_level += 1;
+            } else {
+                break;
+            }
+        }
+        if self.rarity >= Rarity::SS && self.bond_level >= 5 {
+            self.familiar_eligible = true;
+        }
     }
 
     pub fn system_prompt_fragment(&self) -> String {

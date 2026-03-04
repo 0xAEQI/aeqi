@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::Path;
 
 /// Identity files loaded from agent + project directories.
@@ -171,15 +171,10 @@ impl Identity {
 
 fn load_optional(dir: &Path, filename: &str) -> Result<Option<String>> {
     let path = dir.join(filename);
-    if path.exists() {
-        let content = std::fs::read_to_string(&path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        if content.trim().is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(content))
-        }
-    } else {
-        Ok(None)
+    match std::fs::read_to_string(&path) {
+        Ok(content) if content.trim().is_empty() => Ok(None),
+        Ok(content) => Ok(Some(content)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(anyhow::anyhow!("failed to read {}: {e}", path.display())),
     }
 }

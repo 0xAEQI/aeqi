@@ -1,3 +1,10 @@
+//! Tool implementations for the `Tool` trait, available to agent workers.
+//!
+//! Provides shell execution ([`ShellTool`]), file read/write ([`FileReadTool`],
+//! [`FileWriteTool`], [`ListDirTool`]), git worktree management ([`GitWorktreeTool`]),
+//! task CRUD ([`BeadsCreateTool`] et al.), cross-agent delegation ([`DelegateTool`]),
+//! DNS management via Porkbun ([`PorkbunTool`]), and skill invocation ([`Skill`]).
+
 pub mod beads;
 pub mod delegate;
 pub mod file;

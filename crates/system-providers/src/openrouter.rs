@@ -144,7 +144,7 @@ struct ApiRequest {
 
 #[derive(Debug, Serialize)]
 struct ProviderRouting {
-    /// Disable content moderation on the provider side.
+    /// Disable fallback to alternative providers on the OpenRouter side.
     #[serde(skip_serializing_if = "Option::is_none")]
     allow_fallbacks: Option<bool>,
 }

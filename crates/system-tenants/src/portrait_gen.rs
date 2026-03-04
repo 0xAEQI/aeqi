@@ -3,7 +3,7 @@ use system_companions::Companion;
 use system_providers::OpenRouterProvider;
 use tracing::info;
 
-const DEFAULT_IMAGE_MODEL: &str = "openai/gpt-5-image";
+const DEFAULT_IMAGE_MODEL: &str = "google/gemini-2.5-flash-preview-image";
 
 /// Build an image generation prompt from companion traits.
 pub fn build_portrait_prompt(companion: &Companion) -> String {
@@ -53,8 +53,8 @@ pub fn build_portrait_prompt(companion: &Companion) -> String {
          Setting/cultural hints: {region} — {region_flavor}.\n\
          {anime_style}\n\
          Quality: {detail_level}.\n\
-         Style: high quality anime illustration, ecchi style, detailed expressive eyes, \
-         beautiful character design, card game art, vibrant colors, clean composition.",
+         Style: WLOP and Guweiz inspired illustration, Arknights character art style, \
+         detailed anime portrait, cinematic lighting, clean composition.",
         name = companion.name,
         region = companion.region,
     )
@@ -125,7 +125,7 @@ mod tests {
         assert!(prompt.contains("Muse"), "missing archetype");
         assert!(prompt.contains("Harajuku"), "missing region");
         assert!(prompt.contains("energetic"), "missing genki pose");
-        assert!(prompt.contains("ecchi"), "missing style");
+        assert!(prompt.contains("WLOP"), "missing style");
         assert!(prompt.contains("3:4"), "missing aspect ratio");
     }
 

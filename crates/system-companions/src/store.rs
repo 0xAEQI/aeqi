@@ -65,6 +65,7 @@ impl CompanionStore {
                 PRIMARY KEY (agent_a, agent_b)
             );
 
+            CREATE INDEX IF NOT EXISTS idx_companions_name ON companions(json_extract(data, '$.name'));
             CREATE INDEX IF NOT EXISTS idx_companions_rarity ON companions(rarity);
             CREATE INDEX IF NOT EXISTS idx_companions_familiar ON companions(is_familiar);
             CREATE INDEX IF NOT EXISTS idx_companions_roster ON companions(is_rostered);
@@ -115,9 +116,34 @@ impl CompanionStore {
         }
     }
 
+    /// Get-modify-save a companion in one call. Returns error if companion not found.
+    pub fn update_companion<F>(&self, id: &str, f: F) -> Result<()>
+    where
+        F: FnOnce(&mut Companion),
+    {
+        let mut companion = self
+            .get_companion(id)?
+            .ok_or_else(|| anyhow::anyhow!("companion not found: {id}"))?;
+        f(&mut companion);
+        self.save_companion(&companion)
+    }
+
     pub fn get_companion_by_name(&self, name: &str) -> Result<Option<Companion>> {
-        let all = self.list_all()?;
-        Ok(all.into_iter().find(|c| c.name == name))
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock: {e}"))?;
+        let result = conn
+            .query_row(
+                "SELECT data FROM companions WHERE json_extract(data, '$.name') = ?1 LIMIT 1",
+                rusqlite::params![name],
+                |row| {
+                    let data: String = row.get(0)?;
+                    Ok(data)
+                },
+            )
+            .optional()?;
+        match result {
+            Some(data) => Ok(Some(serde_json::from_str(&data)?)),
+            None => Ok(None),
+        }
     }
 
     pub fn list_all(&self) -> Result<Vec<Companion>> {

@@ -1,3 +1,13 @@
+//! Agent orchestration engine — the operational heart of Sigil.
+//!
+//! Coordinates worker execution ([`AgentWorker`]), supervisor patrol ([`Supervisor`]),
+//! Gemini Flash router classification ([`AgentRouter`]), project registry ([`ProjectRegistry`]),
+//! dispatch bus ([`DispatchBus`]), cost ledger ([`CostLedger`]), Prometheus metrics
+//! ([`SystemMetrics`]), lifecycle engine ([`LifecycleEngine`]), and conversation storage.
+//!
+//! Workers spawn via Claude Code (`claude -p`) with full tool access. The supervisor
+//! enforces budgets and escalation chains (worker → project leader → system leader → human).
+
 pub mod operation;
 pub mod schedule;
 pub mod daemon;

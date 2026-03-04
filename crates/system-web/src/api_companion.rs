@@ -5,16 +5,13 @@ use std::sync::Arc;
 
 use crate::AppState;
 use crate::auth::AuthTenant;
+use crate::error::AppError;
 use crate::types::*;
 
 pub async fn list_companions(
     AuthTenant(tenant): AuthTenant,
-) -> Result<Json<Vec<CompanionInfo>>, (StatusCode, String)> {
-    let companions = tenant
-        .companion_store
-        .list_all()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
+) -> Result<Json<Vec<CompanionInfo>>, AppError> {
+    let companions = tenant.companion_store.list_all()?;
     let infos: Vec<CompanionInfo> = companions.iter().map(CompanionInfo::from_companion).collect();
     Ok(Json(infos))
 }
@@ -22,36 +19,20 @@ pub async fn list_companions(
 pub async fn get_companion(
     AuthTenant(tenant): AuthTenant,
     Path(name): Path<String>,
-) -> Result<Json<CompanionInfo>, (StatusCode, String)> {
-    let companions = tenant
-        .companion_store
-        .list_all()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let companion = companions.iter()
-        .find(|c| c.name == name)
-        .ok_or((StatusCode::NOT_FOUND, "companion not found".to_string()))?;
-
-    Ok(Json(CompanionInfo::from_companion(companion)))
+) -> Result<Json<CompanionInfo>, AppError> {
+    let companion = tenant.companion_store.get_companion_by_name(&name)?
+        .ok_or_else(|| AppError::NotFound("companion not found".to_string()))?;
+    Ok(Json(CompanionInfo::from_companion(&companion)))
 }
 
 pub async fn set_familiar(
     AuthTenant(tenant): AuthTenant,
     Json(req): Json<SetFamiliarRequest>,
-) -> Result<Json<CompanionInfo>, (StatusCode, String)> {
-    let companions = tenant
-        .companion_store
-        .list_all()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+) -> Result<Json<CompanionInfo>, AppError> {
+    let companion = tenant.companion_store.get_companion_by_name(&req.name)?
+        .ok_or_else(|| AppError::NotFound("companion not found".to_string()))?;
 
-    let companion = companions.iter()
-        .find(|c| c.name == req.name)
-        .ok_or((StatusCode::NOT_FOUND, "companion not found".to_string()))?;
-
-    tenant
-        .companion_store
-        .set_familiar(&companion.id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    tenant.companion_store.set_familiar(&companion.id)?;
 
     let mut updated = companion.clone();
     updated.is_familiar = true;
@@ -60,13 +41,9 @@ pub async fn set_familiar(
 
 pub async fn get_familiar(
     AuthTenant(tenant): AuthTenant,
-) -> Result<Json<CompanionInfo>, (StatusCode, String)> {
-    let familiar = tenant
-        .companion_store
-        .get_familiar()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "no familiar set".to_string()))?;
-
+) -> Result<Json<CompanionInfo>, AppError> {
+    let familiar = tenant.companion_store.get_familiar()?
+        .ok_or_else(|| AppError::NotFound("no familiar set".to_string()))?;
     Ok(Json(CompanionInfo::from_companion(&familiar)))
 }
 
@@ -113,11 +90,8 @@ pub async fn get_portrait(
 pub async fn backfill_portraits(
     AuthTenant(tenant): AuthTenant,
     State(state): State<Arc<AppState>>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let companions = tenant
-        .companion_store
-        .list_all()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+) -> Result<Json<serde_json::Value>, AppError> {
+    let companions = tenant.companion_store.list_all()?;
 
     let mut spawned = 0u32;
     for companion in &companions {
@@ -126,21 +100,10 @@ pub async fn backfill_portraits(
             continue;
         }
 
-        let data_dir = tenant.data_dir.clone();
-        let companion_clone = companion.clone();
-        let platform = state.platform.clone();
-        let store = tenant.companion_store.clone();
-        tokio::spawn(async move {
-            if let Err(e) = system_tenants::provision::materialize_companion_portrait(
-                &data_dir, &companion_clone, &platform, &store,
-            ).await {
-                tracing::warn!(
-                    companion = %companion_clone.name,
-                    error = %e,
-                    "backfill portrait generation failed"
-                );
-            }
-        });
+        crate::api_gacha::spawn_portrait_gen(
+            tenant.data_dir.clone(), companion.clone(), state.platform.clone(),
+            tenant.companion_store.clone(), tenant.event_tx.clone(),
+        );
         spawned += 1;
     }
 
@@ -150,15 +113,12 @@ pub async fn backfill_portraits(
 pub async fn get_relationships(
     AuthTenant(tenant): AuthTenant,
     Path(name): Path<String>,
-) -> Result<Json<Vec<RelationshipInfo>>, (StatusCode, String)> {
-    let companions = tenant
-        .companion_store
-        .list_all()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+) -> Result<Json<Vec<RelationshipInfo>>, AppError> {
+    let companions = tenant.companion_store.list_all()?;
 
     let target = companions.iter()
         .find(|c| c.name == name)
-        .ok_or((StatusCode::NOT_FOUND, "companion not found".to_string()))?;
+        .ok_or_else(|| AppError::NotFound("companion not found".to_string()))?;
 
     // Build relationships with all other companions (lazy seed).
     let mut relationships = Vec::new();
@@ -166,10 +126,7 @@ pub async fn get_relationships(
         if other.id == target.id {
             continue;
         }
-        let rel = tenant
-            .companion_store
-            .get_or_seed_relationship(target, other)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let rel = tenant.companion_store.get_or_seed_relationship(target, other)?;
 
         relationships.push(RelationshipInfo {
             companion_a: rel.agent_a.clone(),

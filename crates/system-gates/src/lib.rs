@@ -1,3 +1,9 @@
+//! Communication channel implementations for the `Channel` trait.
+//!
+//! Provides Telegram ([`TelegramChannel`]), Discord ([`DiscordChannel`]),
+//! and Slack ([`SlackChannel`]) integrations for agent-to-human messaging,
+//! escalation notifications, and interactive command handling.
+
 pub mod discord;
 pub mod slack;
 pub mod telegram;

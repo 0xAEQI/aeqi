@@ -722,6 +722,8 @@ impl TenantManager {
             .ok()
             .and_then(|m| m.active_project);
 
+        let (event_tx, _) = tokio::sync::broadcast::channel(32);
+
         Ok(Tenant {
             id: tenant_id.clone(),
             display_name: display_name.to_string(),
@@ -735,6 +737,7 @@ impl TenantManager {
             cost_ledger,
             companion_store,
             conversation_store,
+            event_tx,
             last_active: std::sync::atomic::AtomicU64::new(now),
             created_at: chrono::Utc::now(),
             active_project: tokio::sync::RwLock::new(active_project),

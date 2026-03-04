@@ -47,57 +47,8 @@ router_model = "google/gemini-2.0-flash-001"
 router_cooldown_secs = 60
 max_background_cost_usd = 0.50
 
-# Agents = personalities (equal peers)
-[[agents]]
-name = "aurelia"
-prefix = "fa"
-model = "claude-opus-4-6"
-role = "orchestrator"
-voice = "vocal"
-execution_mode = "claude_code"
-max_workers = 2
-max_turns = 25
-default_repo = "sigil"
-telegram_token_secret = "TELEGRAM_BOT_TOKEN"
-capabilities = ["orchestration", "memory"]
-
-[[agents]]
-name = "kael"
-prefix = "fk"
-model = "claude-opus-4-6"
-role = "advisor"
-voice = "vocal"
-execution_mode = "claude_code"
-max_workers = 1
-max_turns = 15
-default_repo = "algostaking"
-expertise = ["algostaking"]
-telegram_token_secret = "KAEL_TELEGRAM_TOKEN"
-
-[[agents]]
-name = "mira"
-prefix = "fm"
-model = "claude-sonnet-4-6"
-role = "advisor"
-voice = "vocal"
-execution_mode = "claude_code"
-max_workers = 1
-max_turns = 15
-default_repo = "riftdecks"
-expertise = ["riftdecks-shop", "entity-legal"]
-telegram_token_secret = "MIRA_TELEGRAM_TOKEN"
-
-[[agents]]
-name = "void"
-prefix = "fv"
-model = "claude-sonnet-4-6"
-role = "advisor"
-voice = "silent"
-execution_mode = "claude_code"
-max_workers = 1
-max_turns = 15
-default_repo = "sigil"
-expertise = ["gacha-agency"]
+# Agents discovered from agents/{name}/agent.toml files on disk.
+# See: agents/aurelia/agent.toml, agents/kael/agent.toml, etc.
 
 [channels.telegram]
 token_secret = "TELEGRAM_BOT_TOKEN"

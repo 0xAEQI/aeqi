@@ -197,6 +197,24 @@ enum Commands {
         #[arg(short, long)]
         platform_config: PathBuf,
     },
+
+    /// Manage agent discovery and configuration.
+    Agent {
+        #[command(subcommand)]
+        action: AgentAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum AgentAction {
+    /// List all discovered agents (from disk + TOML).
+    List,
+    /// Migrate [[agents]] from system.toml to agent.toml files on disk.
+    Migrate {
+        /// Overwrite existing agent.toml files.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -378,6 +396,7 @@ async fn main() -> Result<()> {
         Commands::SeedProjects { tenant, platform_config } => {
             cmd_seed_projects(&cli.config, &tenant, &platform_config).await
         }
+        Commands::Agent { action } => cmd_agent(&cli.config, action).await,
     }
 }
 
@@ -389,6 +408,17 @@ fn load_config(config_path: &Option<PathBuf>) -> Result<(SystemConfig, PathBuf)>
     } else {
         SystemConfig::discover()
     }
+}
+
+/// Load config and discover agents from disk, merging with any [[agents]] in TOML.
+fn load_config_with_agents(config_path: &Option<PathBuf>) -> Result<(SystemConfig, PathBuf)> {
+    let (mut config, path) = load_config(config_path)?;
+    let agents_dir = resolve_agents_dir(&path);
+    let warnings = config.discover_and_merge_agents(&agents_dir);
+    for w in &warnings {
+        warn!("{w}");
+    }
+    Ok((config, path))
 }
 
 fn find_project_dir(name: &str) -> Result<PathBuf> {
@@ -1133,7 +1163,7 @@ async fn cmd_doctor(config_path: &Option<PathBuf>, fix: bool) -> Result<()> {
     let mut issues = 0u32;
     let mut fixed = 0u32;
 
-    match load_config(config_path) {
+    match load_config_with_agents(config_path) {
         Ok((config, path)) => {
             println!("[OK] Config: {}", path.display());
 
@@ -1294,7 +1324,7 @@ async fn cmd_doctor(config_path: &Option<PathBuf>, fix: bool) -> Result<()> {
 }
 
 async fn cmd_status(config_path: &Option<PathBuf>) -> Result<()> {
-    let (config, _) = load_config(config_path)?;
+    let (config, _) = load_config_with_agents(config_path)?;
 
     println!("Realm: {}\n", config.system.name);
 
@@ -1587,7 +1617,7 @@ fn pid_file_path(config: &SystemConfig) -> PathBuf {
 async fn cmd_daemon(config_path: &Option<PathBuf>, action: SummonerAction) -> Result<()> {
     match action {
         SummonerAction::Start => {
-            let (config, _) = load_config(config_path)?;
+            let (config, _) = load_config_with_agents(config_path)?;
 
             // Check if already running.
             let pid_path = pid_file_path(&config);
@@ -3234,7 +3264,7 @@ async fn cmd_done(config_path: &Option<PathBuf>, task_id: &str, reason: &str) ->
 }
 
 async fn cmd_team(config_path: &Option<PathBuf>, project_filter: Option<&str>) -> Result<()> {
-    let (config, _) = load_config(config_path)?;
+    let (config, _) = load_config_with_agents(config_path)?;
 
     // Show system team.
     println!("System Team");
@@ -3427,4 +3457,102 @@ async fn cmd_seed_projects(config_path: &Option<PathBuf>, tenant_id: &str, platf
 
     println!("\nSeeded {} projects for tenant {}", seeded.len(), tenant_id);
     Ok(())
+}
+
+async fn cmd_agent(config_path: &Option<PathBuf>, action: AgentAction) -> Result<()> {
+    let (config, config_path_resolved) = load_config(config_path)?;
+    let agents_dir = resolve_agents_dir(&config_path_resolved);
+
+    match action {
+        AgentAction::List => {
+            // Show agents from TOML.
+            let toml_names: std::collections::HashSet<&str> =
+                config.agents.iter().map(|a| a.name.as_str()).collect();
+
+            // Discover from disk.
+            let disk_agents = system_core::discover_agents(&agents_dir).unwrap_or_default();
+            let disk_names: std::collections::HashSet<&str> =
+                disk_agents.iter().map(|a| a.name.as_str()).collect();
+
+            // Merge: all unique agents.
+            let mut all_agents: Vec<(&str, &str, &str)> = Vec::new(); // (name, source, role)
+            for a in &config.agents {
+                let source = if disk_names.contains(a.name.as_str()) { "both" } else { "toml" };
+                all_agents.push((&a.name, source, role_str(&a.role)));
+            }
+            for a in &disk_agents {
+                if !toml_names.contains(a.name.as_str()) {
+                    all_agents.push((&a.name, "disk", role_str(&a.role)));
+                }
+            }
+            all_agents.sort_by_key(|a| a.0);
+
+            println!("Discovered Agents ({}):\n", all_agents.len());
+            for (name, source, role) in &all_agents {
+                println!("  {name:<15} role={role:<12} source={source}");
+            }
+        }
+        AgentAction::Migrate { force } => {
+            println!("Migrating [[agents]] from system.toml to agent.toml files...\n");
+            let mut migrated = 0;
+            let mut skipped = 0;
+
+            for agent_cfg in &config.agents {
+                let agent_dir = agents_dir.join(&agent_cfg.name);
+                let toml_path = agent_dir.join("agent.toml");
+
+                if toml_path.exists() && !force {
+                    println!("  {} — skipped (agent.toml exists, use --force)", agent_cfg.name);
+                    skipped += 1;
+                    continue;
+                }
+
+                if !agent_dir.exists() {
+                    println!("  {} — skipped (agent dir not found)", agent_cfg.name);
+                    skipped += 1;
+                    continue;
+                }
+
+                let toml_str = toml::to_string_pretty(agent_cfg)
+                    .context(format!("failed to serialize config for {}", agent_cfg.name))?;
+                std::fs::write(&toml_path, &toml_str)?;
+                println!("  {} — written: {}", agent_cfg.name, toml_path.display());
+                migrated += 1;
+            }
+
+            println!("\nMigrated: {migrated}, Skipped: {skipped}");
+            if migrated > 0 {
+                println!("\nYou can now remove the [[agents]] blocks from system.toml.");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn role_str(role: &system_core::AgentRole) -> &str {
+    match role {
+        system_core::AgentRole::Orchestrator => "orchestrator",
+        system_core::AgentRole::Worker => "worker",
+        system_core::AgentRole::Advisor => "advisor",
+    }
+}
+
+/// Resolve the agents/ directory relative to config file path.
+fn resolve_agents_dir(config_path: &Path) -> PathBuf {
+    // Config is typically at config/system.toml, so agents/ is at config/../agents
+    if let Some(parent) = config_path.parent() {
+        let candidate = parent.join("../agents");
+        if candidate.exists() {
+            return candidate;
+        }
+        // Try parent's parent (if config is nested deeper)
+        if let Some(grandparent) = parent.parent() {
+            let candidate = grandparent.join("agents");
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+    // Fallback: look from cwd
+    PathBuf::from("agents")
 }

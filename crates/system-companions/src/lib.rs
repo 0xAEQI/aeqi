@@ -1,3 +1,10 @@
+//! Gacha companion system with rarity tiers, archetypes, and fusion mechanics.
+//!
+//! Companions have a rich trait system — [`Rarity`] (C/B/A/S/SS), [`Archetype`] (8 types),
+//! [`DereType`] (7 personality modes), [`Region`], [`Aesthetic`], and anime inspirations.
+//! The [`GachaEngine`] handles weighted pulls with pity tracking. [`fuse`] and [`fuse_multi`]
+//! combine companions into higher-rarity results. [`CompanionStore`] persists everything in SQLite.
+
 pub mod anime;
 pub mod companion;
 pub mod fusion;

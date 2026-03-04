@@ -391,6 +391,11 @@ impl TaskOutcome {
     pub fn parse(result_text: &str) -> Self {
         let trimmed = result_text.trim();
 
+        // Empty or whitespace-only responses are failures — never silently mark done.
+        if trimmed.is_empty() {
+            return Self::Failed("Worker returned empty response".to_string());
+        }
+
         // Get the first non-empty line to check for outcome prefix.
         let first_line = trimmed
             .lines()
@@ -490,6 +495,15 @@ mod tests {
     #[test]
     fn test_worker_outcome_failed() {
         let outcome = TaskOutcome::parse("FAILED:\ncargo build returned 3 errors in pms/src/main.rs");
+        assert!(matches!(outcome, TaskOutcome::Failed(_)));
+    }
+
+    #[test]
+    fn test_worker_outcome_empty_is_failed() {
+        let outcome = TaskOutcome::parse("");
+        assert!(matches!(outcome, TaskOutcome::Failed(_)));
+
+        let outcome = TaskOutcome::parse("   \n  \n  ");
         assert!(matches!(outcome, TaskOutcome::Failed(_)));
     }
 

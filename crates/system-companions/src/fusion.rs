@@ -130,22 +130,7 @@ pub fn fuse(a: &Companion, b: &Companion) -> Result<Companion, FusionError> {
         last_name,
     };
 
-    let mut level_check = true;
-    while level_check {
-        level_check = result.add_bond_xp(0);
-    }
-    loop {
-        let next = Companion::bond_xp_for_level(result.bond_level + 1);
-        if result.bond_xp >= next {
-            result.bond_level += 1;
-        } else {
-            break;
-        }
-    }
-
-    if result.rarity >= Rarity::SS && result.bond_level >= 5 {
-        result.familiar_eligible = true;
-    }
+    result.recalculate_bond_level();
 
     Ok(result)
 }
@@ -266,18 +251,7 @@ pub fn fuse_multi(companions: &[&Companion]) -> Result<Companion, FusionError> {
         last_name,
     };
 
-    loop {
-        let next = Companion::bond_xp_for_level(result.bond_level + 1);
-        if result.bond_xp >= next {
-            result.bond_level += 1;
-        } else {
-            break;
-        }
-    }
-
-    if result.rarity >= Rarity::SS && result.bond_level >= 5 {
-        result.familiar_eligible = true;
-    }
+    result.recalculate_bond_level();
 
     Ok(result)
 }
