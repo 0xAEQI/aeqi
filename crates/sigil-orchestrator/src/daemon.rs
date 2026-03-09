@@ -1,17 +1,18 @@
 use anyhow::Result;
+use chrono::Utc;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
-use crate::schedule::ScheduleStore;
 use crate::heartbeat::Heartbeat;
-use crate::reflection::Reflection;
-use crate::session_tracker::SessionTracker;
-use crate::message::DispatchBus;
 use crate::lifecycle::LifecycleEngine;
+use crate::message::{Dispatch, DispatchBus};
+use crate::reflection::Reflection;
 use crate::registry::ProjectRegistry;
+use crate::schedule::ScheduleStore;
+use crate::session_tracker::SessionTracker;
 use crate::watchdog::WatchdogEngine;
 
 const ACK_RETRY_AGE_SECS: u64 = 60;
@@ -131,10 +132,11 @@ impl Daemon {
     /// Check if a daemon is already running by reading the PID file.
     pub fn is_running_from_pid(pid_path: &Path) -> bool {
         if let Ok(content) = std::fs::read_to_string(pid_path)
-            && let Ok(pid) = content.trim().parse::<u32>() {
-                // Check if process exists.
-                return Path::new(&format!("/proc/{pid}")).exists();
-            }
+            && let Ok(pid) = content.trim().parse::<u32>()
+        {
+            // Check if process exists.
+            return Path::new(&format!("/proc/{pid}")).exists();
+        }
         false
     }
 
@@ -160,9 +162,9 @@ impl Daemon {
         {
             let config_reloaded = self.config_reloaded.clone();
             tokio::spawn(async move {
-                let mut signal = tokio::signal::unix::signal(
-                    tokio::signal::unix::SignalKind::hangup(),
-                ).expect("failed to register SIGHUP handler");
+                let mut signal =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
+                        .expect("failed to register SIGHUP handler");
                 loop {
                     signal.recv().await;
                     info!("received SIGHUP, flagging config reload");
@@ -177,9 +179,9 @@ impl Daemon {
             let running = self.running.clone();
             let shutdown_notify = self.shutdown_notify.clone();
             tokio::spawn(async move {
-                let mut signal = tokio::signal::unix::signal(
-                    tokio::signal::unix::SignalKind::terminate(),
-                ).expect("failed to register SIGTERM handler");
+                let mut signal =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                        .expect("failed to register SIGTERM handler");
                 signal.recv().await;
                 info!("received SIGTERM, shutting down...");
                 running.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -205,9 +207,14 @@ impl Daemon {
                     info!(path = %sock_path.display(), "IPC socket listening");
                     tokio::spawn(async move {
                         Self::socket_accept_loop(
-                            listener, registry, dispatch_bus,
-                            pulse_count, cron_store, running,
-                        ).await;
+                            listener,
+                            registry,
+                            dispatch_bus,
+                            pulse_count,
+                            cron_store,
+                            running,
+                        )
+                        .await;
                     });
                 }
                 Err(e) => {
@@ -285,16 +292,28 @@ impl Daemon {
             if let Some(ref cron_store) = self.cron_store {
                 let due_jobs = {
                     let store = cron_store.lock().await;
-                    store.due_jobs()
+                    store
+                        .due_jobs()
                         .into_iter()
-                        .map(|j| (j.name.clone(), j.project.clone(), j.prompt.clone(), j.isolated))
+                        .map(|j| {
+                            (
+                                j.name.clone(),
+                                j.project.clone(),
+                                j.prompt.clone(),
+                                j.isolated,
+                            )
+                        })
                         .collect::<Vec<_>>()
                 };
 
                 for (name, project, prompt, _isolated) in due_jobs {
                     info!(name = %name, project = %project, "cron job triggered");
 
-                    match self.registry.assign(&project, &format!("[cron] {name}"), &prompt).await {
+                    match self
+                        .registry
+                        .assign(&project, &format!("[cron] {name}"), &prompt)
+                        .await
+                    {
                         Ok(task) => {
                             info!(task = %task.id, "cron job created task");
                         }
@@ -313,20 +332,27 @@ impl Daemon {
             }
 
             // 6. Check for config reload signal (SIGHUP).
-            if self.config_reloaded.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            if self
+                .config_reloaded
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
                 info!("config reload requested (SIGHUP received)");
                 match sigil_core::config::SigilConfig::discover() {
                     Ok((new_config, path)) => {
                         // Apply runtime-safe fields from the reloaded config.
 
                         // (a) Global daily budget.
-                        self.registry.cost_ledger.set_daily_budget(new_config.security.max_cost_per_day_usd);
+                        self.registry
+                            .cost_ledger
+                            .set_daily_budget(new_config.security.max_cost_per_day_usd);
 
                         // (b) Per-project budgets + worker counts + orchestrator params.
                         let orch = &new_config.orchestrator;
                         for pcfg in &new_config.projects {
                             if let Some(budget) = pcfg.max_cost_per_day_usd {
-                                self.registry.cost_ledger.set_project_budget(&pcfg.name, budget);
+                                self.registry
+                                    .cost_ledger
+                                    .set_project_budget(&pcfg.name, budget);
                             }
 
                             // Update supervisor parameters.
@@ -380,6 +406,10 @@ impl Daemon {
                     "retrying unacknowledged dispatch"
                 );
             }
+            self.registry
+                .metrics
+                .dispatch_retries
+                .inc_by(retried.len() as u64);
             let dead_letters = self.dispatch_bus.dead_letters().await;
             for dispatch in &dead_letters {
                 warn!(
@@ -393,8 +423,23 @@ impl Daemon {
             // 9. Update daily cost gauge.
             let (spent, _, _) = self.registry.cost_ledger.budget_status();
             self.registry.metrics.daily_cost_usd.set(spent);
-            let pending_dispatches = self.dispatch_bus.pending_count();
-            self.registry.metrics.dispatch_queue_depth.set(pending_dispatches as f64);
+            let dispatch_health = self.dispatch_bus.health(ACK_RETRY_AGE_SECS).await;
+            self.registry
+                .metrics
+                .dispatch_queue_depth
+                .set(dispatch_health.unread as f64);
+            self.registry
+                .metrics
+                .dispatches_awaiting_ack
+                .set(dispatch_health.awaiting_ack as f64);
+            self.registry
+                .metrics
+                .dispatches_overdue_ack
+                .set(dispatch_health.overdue_ack as f64);
+            self.registry
+                .metrics
+                .dispatch_dead_letters
+                .set(dispatch_health.dead_letters as f64);
 
             // 10. Prune old cost entries (older than 7 days) every cycle.
             self.registry.cost_ledger.prune_old();
@@ -411,7 +456,11 @@ impl Daemon {
                 && let Some(ref audit) = self.registry.audit_log
             {
                 let (spent, budget, _) = self.registry.cost_ledger.budget_status();
-                let budget_pct = if budget > 0.0 { Some(spent / budget) } else { None };
+                let budget_pct = if budget > 0.0 {
+                    Some(spent / budget)
+                } else {
+                    None
+                };
                 let fired = watchdog.evaluate(audit, budget_pct);
                 for (name, _action) in &fired {
                     info!(rule = %name, "watchdog rule fired");
@@ -462,9 +511,14 @@ impl Daemon {
                     let cron_store = cron_store.clone();
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_socket_connection(
-                            stream, registry, dispatch_bus,
-                            pulse_count, cron_store,
-                        ).await {
+                            stream,
+                            registry,
+                            dispatch_bus,
+                            pulse_count,
+                            cron_store,
+                        )
+                        .await
+                        {
                             debug!(error = %e, "IPC connection error");
                         }
                     });
@@ -493,7 +547,10 @@ impl Daemon {
             let request: serde_json::Value = serde_json::from_str(&line)
                 .unwrap_or_else(|_| serde_json::json!({"cmd": "unknown"}));
 
-            let cmd = request.get("cmd").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let cmd = request
+                .get("cmd")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
 
             let response = match cmd {
                 "ping" => serde_json::json!({"ok": true, "pong": true}),
@@ -501,7 +558,8 @@ impl Daemon {
                 "status" => {
                     let project_names: Vec<String> = registry.project_names().await;
                     let worker_count = registry.total_max_workers().await;
-                    let mail_count = dispatch_bus.pending_count();
+                    let dispatch_health = dispatch_bus.health(ACK_RETRY_AGE_SECS).await;
+                    let mail_count = dispatch_health.unread;
                     let cron_count = if let Some(ref cs) = cron_store {
                         cs.lock().await.jobs.len()
                     } else {
@@ -510,16 +568,20 @@ impl Daemon {
 
                     let (spent, budget, remaining) = registry.cost_ledger.budget_status();
                     let project_budgets = registry.cost_ledger.all_project_budget_statuses();
-                    let project_budget_info: serde_json::Map<String, serde_json::Value> = project_budgets
-                        .into_iter()
-                        .map(|(name, (spent, budget, remaining))| {
-                            (name, serde_json::json!({
-                                "spent_usd": spent,
-                                "budget_usd": budget,
-                                "remaining_usd": remaining,
-                            }))
-                        })
-                        .collect();
+                    let project_budget_info: serde_json::Map<String, serde_json::Value> =
+                        project_budgets
+                            .into_iter()
+                            .map(|(name, (spent, budget, remaining))| {
+                                (
+                                    name,
+                                    serde_json::json!({
+                                        "spent_usd": spent,
+                                        "budget_usd": budget,
+                                        "remaining_usd": remaining,
+                                    }),
+                                )
+                            })
+                            .collect();
 
                     serde_json::json!({
                         "ok": true,
@@ -529,6 +591,13 @@ impl Daemon {
                         "pulses": pulse_count,
                         "cron_jobs": cron_count,
                         "pending_mail": mail_count,
+                        "dispatch_health": {
+                            "unread": dispatch_health.unread,
+                            "awaiting_ack": dispatch_health.awaiting_ack,
+                            "retrying_delivery": dispatch_health.retrying_delivery,
+                            "overdue_ack": dispatch_health.overdue_ack,
+                            "dead_letters": dispatch_health.dead_letters,
+                        },
                         "cost_today_usd": spent,
                         "daily_budget_usd": budget,
                         "budget_remaining_usd": remaining,
@@ -543,15 +612,53 @@ impl Daemon {
 
                 "mail" => {
                     let messages = dispatch_bus.drain();
-                    let msgs: Vec<serde_json::Value> = messages.iter().map(|m| {
-                        serde_json::json!({
-                            "from": m.from,
-                            "to": m.to,
-                            "subject": m.kind.subject_tag(),
-                            "body": m.kind.body_text(),
+                    let msgs: Vec<serde_json::Value> = messages
+                        .iter()
+                        .map(|m| {
+                            serde_json::json!({
+                                "from": m.from,
+                                "to": m.to,
+                                "subject": m.kind.subject_tag(),
+                                "body": m.kind.body_text(),
+                            })
                         })
-                    }).collect();
+                        .collect();
                     serde_json::json!({"ok": true, "messages": msgs})
+                }
+
+                "dispatches" => {
+                    let recipient = request.get("recipient").and_then(|v| v.as_str());
+                    let state = request.get("state").and_then(|v| v.as_str());
+                    let limit =
+                        request.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+                    let overdue_cutoff =
+                        Utc::now() - chrono::Duration::seconds(ACK_RETRY_AGE_SECS as i64);
+                    let mut dispatches = dispatch_bus.all().await;
+                    if let Some(recipient) = recipient {
+                        dispatches.retain(|d| d.to == recipient);
+                    }
+                    if let Some(state) = state {
+                        dispatches.retain(|d| dispatch_state(d, overdue_cutoff) == state);
+                    }
+                    dispatches.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                    dispatches.truncate(limit);
+                    let items: Vec<serde_json::Value> = dispatches
+                        .iter()
+                        .map(|d| dispatch_summary_json(d, overdue_cutoff))
+                        .collect();
+                    let health = dispatch_bus.health(ACK_RETRY_AGE_SECS).await;
+                    serde_json::json!({
+                        "ok": true,
+                        "count": items.len(),
+                        "dispatch_health": {
+                            "unread": health.unread,
+                            "awaiting_ack": health.awaiting_ack,
+                            "retrying_delivery": health.retrying_delivery,
+                            "overdue_ack": health.overdue_ack,
+                            "dead_letters": health.dead_letters,
+                        },
+                        "dispatches": items,
+                    })
                 }
 
                 "metrics" => {
@@ -563,16 +670,20 @@ impl Daemon {
                     let (spent, budget, remaining) = registry.cost_ledger.budget_status();
                     let report = registry.cost_ledger.daily_report();
                     let project_budgets = registry.cost_ledger.all_project_budget_statuses();
-                    let project_budget_info: serde_json::Map<String, serde_json::Value> = project_budgets
-                        .into_iter()
-                        .map(|(name, (spent, budget, remaining))| {
-                            (name, serde_json::json!({
-                                "spent_usd": spent,
-                                "budget_usd": budget,
-                                "remaining_usd": remaining,
-                            }))
-                        })
-                        .collect();
+                    let project_budget_info: serde_json::Map<String, serde_json::Value> =
+                        project_budgets
+                            .into_iter()
+                            .map(|(name, (spent, budget, remaining))| {
+                                (
+                                    name,
+                                    serde_json::json!({
+                                        "spent_usd": spent,
+                                        "budget_usd": budget,
+                                        "remaining_usd": remaining,
+                                    }),
+                                )
+                            })
+                            .collect();
                     serde_json::json!({
                         "ok": true,
                         "spent_today_usd": spent,
@@ -593,62 +704,84 @@ impl Daemon {
                             } else {
                                 audit.query_recent(last).unwrap_or_default()
                             };
-                            let items: Vec<serde_json::Value> = events.iter().map(|e| {
-                                serde_json::json!({
-                                    "timestamp": e.timestamp.to_rfc3339(),
-                                    "project": e.project,
-                                    "decision_type": e.decision_type.to_string(),
-                                    "task_id": e.task_id,
-                                    "agent": e.agent,
-                                    "reasoning": e.reasoning,
+                            let items: Vec<serde_json::Value> = events
+                                .iter()
+                                .map(|e| {
+                                    serde_json::json!({
+                                        "timestamp": e.timestamp.to_rfc3339(),
+                                        "project": e.project,
+                                        "decision_type": e.decision_type.to_string(),
+                                        "task_id": e.task_id,
+                                        "agent": e.agent,
+                                        "reasoning": e.reasoning,
+                                    })
                                 })
-                            }).collect();
+                                .collect();
                             serde_json::json!({"ok": true, "events": items})
                         }
-                        None => serde_json::json!({"ok": false, "error": "audit log not initialized"}),
+                        None => {
+                            serde_json::json!({"ok": false, "error": "audit log not initialized"})
+                        }
                     }
                 }
 
                 "blackboard" => {
-                    let project_filter = request.get("project").and_then(|v| v.as_str()).unwrap_or("*");
+                    let project_filter = request
+                        .get("project")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("*");
                     let limit = request.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
                     match &registry.blackboard {
                         Some(bb) => {
-                            let entries = bb.list_project(project_filter, limit).unwrap_or_default();
-                            let items: Vec<serde_json::Value> = entries.iter().map(|e| {
-                                serde_json::json!({
-                                    "key": e.key,
-                                    "content": e.content,
-                                    "agent": e.agent,
-                                    "project": e.project,
-                                    "tags": e.tags,
-                                    "created_at": e.created_at.to_rfc3339(),
-                                    "expires_at": e.expires_at.to_rfc3339(),
+                            let entries =
+                                bb.list_project(project_filter, limit).unwrap_or_default();
+                            let items: Vec<serde_json::Value> = entries
+                                .iter()
+                                .map(|e| {
+                                    serde_json::json!({
+                                        "key": e.key,
+                                        "content": e.content,
+                                        "agent": e.agent,
+                                        "project": e.project,
+                                        "tags": e.tags,
+                                        "created_at": e.created_at.to_rfc3339(),
+                                        "expires_at": e.expires_at.to_rfc3339(),
+                                    })
                                 })
-                            }).collect();
+                                .collect();
                             serde_json::json!({"ok": true, "entries": items})
                         }
-                        None => serde_json::json!({"ok": false, "error": "blackboard not initialized"}),
+                        None => {
+                            serde_json::json!({"ok": false, "error": "blackboard not initialized"})
+                        }
                     }
                 }
 
                 "expertise" => {
-                    let domain = request.get("domain").and_then(|v| v.as_str()).unwrap_or("general");
+                    let domain = request
+                        .get("domain")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("general");
                     match &registry.expertise_ledger {
                         Some(ledger) => {
                             let scores = ledger.rank_for_domain(domain).unwrap_or_default();
-                            let items: Vec<serde_json::Value> = scores.iter().map(|s| {
-                                serde_json::json!({
-                                    "agent": s.agent_name,
-                                    "success_rate": s.success_rate,
-                                    "avg_cost": s.avg_cost,
-                                    "total_tasks": s.total_tasks,
-                                    "confidence": s.confidence,
+                            let items: Vec<serde_json::Value> = scores
+                                .iter()
+                                .map(|s| {
+                                    serde_json::json!({
+                                        "agent": s.agent_name,
+                                        "success_rate": s.success_rate,
+                                        "avg_cost": s.avg_cost,
+                                        "total_tasks": s.total_tasks,
+                                        "confidence": s.confidence,
+                                    })
                                 })
-                            }).collect();
+                                .collect();
                             serde_json::json!({"ok": true, "scores": items})
                         }
-                        None => serde_json::json!({"ok": false, "error": "expertise ledger not initialized"}),
+                        None => {
+                            serde_json::json!({"ok": false, "error": "expertise ledger not initialized"})
+                        }
                     }
                 }
 
@@ -673,4 +806,42 @@ impl Daemon {
     pub fn is_running(&self) -> bool {
         self.running.load(std::sync::atomic::Ordering::SeqCst)
     }
+}
+
+fn dispatch_state(dispatch: &Dispatch, overdue_cutoff: chrono::DateTime<Utc>) -> &'static str {
+    if dispatch.requires_ack && dispatch.retry_count >= dispatch.max_retries {
+        "dead_letter"
+    } else if dispatch.requires_ack && dispatch.read && dispatch.timestamp < overdue_cutoff {
+        "overdue_ack"
+    } else if dispatch.requires_ack && dispatch.read {
+        "awaiting_ack"
+    } else if dispatch.requires_ack && !dispatch.read && dispatch.retry_count > 0 {
+        "retrying_delivery"
+    } else if !dispatch.read {
+        "unread"
+    } else {
+        "handled"
+    }
+}
+
+fn dispatch_summary_json(
+    dispatch: &Dispatch,
+    overdue_cutoff: chrono::DateTime<Utc>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": dispatch.id,
+        "from": dispatch.from,
+        "to": dispatch.to,
+        "subject": dispatch.kind.subject_tag(),
+        "body": dispatch.kind.body_text(),
+        "timestamp": dispatch.timestamp.to_rfc3339(),
+        "first_sent_at": dispatch.first_sent_at.to_rfc3339(),
+        "read": dispatch.read,
+        "requires_ack": dispatch.requires_ack,
+        "retry_count": dispatch.retry_count,
+        "max_retries": dispatch.max_retries,
+        "state": dispatch_state(dispatch, overdue_cutoff),
+        "age_seconds": (Utc::now() - dispatch.timestamp).num_seconds().max(0),
+        "delivery_seconds": (Utc::now() - dispatch.first_sent_at).num_seconds().max(0),
+    })
 }

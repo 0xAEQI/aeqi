@@ -230,9 +230,10 @@ daemon.run() {
 
 **IPC socket** at `~/.sigil/sigil.sock`:
 - `ping` -> `pong`
-- `status` -> project counts, worker states, cost summary
+- `status` -> project counts, worker states, cost summary, dispatch health
 - `projects` -> project info JSON
-- `dispatches` -> recent dispatch messages
+- `dispatches` -> non-destructive recent dispatch inspection (optional `recipient`, `state`, `limit`)
+- `mail` -> drain unread dispatches
 - `metrics` -> Prometheus text exposition
 - `cost` -> budget status with per-project breakdown
 

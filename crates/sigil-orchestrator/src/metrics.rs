@@ -4,8 +4,8 @@
 //! serialized to Prometheus text exposition format.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct Counter {
     value: AtomicU64,
@@ -138,12 +138,16 @@ pub struct SigilMetrics {
     pub workers_spawned: Counter,
     pub workers_timed_out: Counter,
     pub dispatches_sent: Counter,
+    pub dispatch_retries: Counter,
     pub escalations_total: Counter,
     pub patrol_cycles: Counter,
 
     pub workers_active: Gauge,
     pub tasks_pending: Gauge,
     pub dispatch_queue_depth: Gauge,
+    pub dispatches_awaiting_ack: Gauge,
+    pub dispatches_overdue_ack: Gauge,
+    pub dispatch_dead_letters: Gauge,
     pub daily_cost_usd: Gauge,
 
     pub worker_duration_seconds: Histogram,
@@ -191,10 +195,7 @@ impl ProjectMetrics {
 impl SigilMetrics {
     pub fn new() -> Self {
         Self {
-            tasks_completed: Counter::new(
-                "sigil_tasks_completed_total",
-                "Total tasks completed",
-            ),
+            tasks_completed: Counter::new("sigil_tasks_completed_total", "Total tasks completed"),
             tasks_failed: Counter::new("sigil_tasks_failed_total", "Total tasks failed"),
             tasks_blocked: Counter::new("sigil_tasks_blocked_total", "Total tasks blocked"),
             workers_spawned: Counter::new("sigil_workers_spawned_total", "Total workers spawned"),
@@ -203,12 +204,28 @@ impl SigilMetrics {
                 "Total workers timed out",
             ),
             dispatches_sent: Counter::new("sigil_dispatches_sent_total", "Total dispatches sent"),
+            dispatch_retries: Counter::new(
+                "sigil_dispatch_retries_total",
+                "Total critical dispatch retries",
+            ),
             escalations_total: Counter::new("sigil_escalations_total", "Total escalations"),
             patrol_cycles: Counter::new("sigil_patrol_cycles_total", "Total patrol cycles"),
 
             workers_active: Gauge::new("sigil_workers_active", "Currently active workers"),
             tasks_pending: Gauge::new("sigil_tasks_pending", "Currently pending tasks"),
             dispatch_queue_depth: Gauge::new("sigil_dispatch_queue_depth", "Dispatch queue depth"),
+            dispatches_awaiting_ack: Gauge::new(
+                "sigil_dispatches_awaiting_ack",
+                "Critical dispatches awaiting explicit acknowledgment",
+            ),
+            dispatches_overdue_ack: Gauge::new(
+                "sigil_dispatches_overdue_ack",
+                "Critical dispatches overdue for acknowledgment",
+            ),
+            dispatch_dead_letters: Gauge::new(
+                "sigil_dispatch_dead_letters",
+                "Critical dispatches in dead-letter state",
+            ),
             daily_cost_usd: Gauge::new("sigil_daily_cost_usd", "Cost today in USD"),
 
             worker_duration_seconds: Histogram::new(
@@ -249,12 +266,16 @@ impl SigilMetrics {
         render_counter(&mut out, &self.workers_spawned);
         render_counter(&mut out, &self.workers_timed_out);
         render_counter(&mut out, &self.dispatches_sent);
+        render_counter(&mut out, &self.dispatch_retries);
         render_counter(&mut out, &self.escalations_total);
         render_counter(&mut out, &self.patrol_cycles);
 
         render_gauge(&mut out, &self.workers_active);
         render_gauge(&mut out, &self.tasks_pending);
         render_gauge(&mut out, &self.dispatch_queue_depth);
+        render_gauge(&mut out, &self.dispatches_awaiting_ack);
+        render_gauge(&mut out, &self.dispatches_overdue_ack);
+        render_gauge(&mut out, &self.dispatch_dead_letters);
         render_gauge(&mut out, &self.daily_cost_usd);
 
         render_histogram(&mut out, &self.worker_duration_seconds);

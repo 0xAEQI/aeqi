@@ -249,6 +249,21 @@ pub struct Dispatch {
     pub first_sent_at: DateTime<Utc>,
 }
 
+/// Snapshot of control-plane delivery state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DispatchHealth {
+    /// Messages currently unread by their recipient.
+    pub unread: usize,
+    /// Ack-required messages that were delivered but not yet acknowledged.
+    pub awaiting_ack: usize,
+    /// Ack-required messages that are back in the unread queue after a retry.
+    pub retrying_delivery: usize,
+    /// Awaiting-ack messages older than the patrol retry threshold.
+    pub overdue_ack: usize,
+    /// Messages that exhausted retries and are now in dead-letter state.
+    pub dead_letters: usize,
+}
+
 fn default_dispatch_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
@@ -654,6 +669,13 @@ impl DispatchBus {
         }
     }
 
+    /// Summarize current control-plane delivery health.
+    pub async fn health(&self, overdue_age_secs: u64) -> DispatchHealth {
+        let overdue_cutoff = Utc::now() - chrono::Duration::seconds(overdue_age_secs as i64);
+        let dispatches = self.all().await;
+        Self::summarize_health(&dispatches, overdue_cutoff)
+    }
+
     pub fn drain(&self) -> Vec<Dispatch> {
         match &self.backend {
             BusBackend::Memory { queues } => queues
@@ -897,6 +919,36 @@ impl DispatchBus {
         }
 
         result
+    }
+
+    fn summarize_health(dispatches: &[Dispatch], overdue_cutoff: DateTime<Utc>) -> DispatchHealth {
+        let mut health = DispatchHealth::default();
+
+        for dispatch in dispatches {
+            if !dispatch.read {
+                health.unread += 1;
+            }
+
+            if !dispatch.requires_ack {
+                continue;
+            }
+
+            if dispatch.retry_count >= dispatch.max_retries {
+                health.dead_letters += 1;
+                continue;
+            }
+
+            if dispatch.read {
+                health.awaiting_ack += 1;
+                if dispatch.timestamp < overdue_cutoff {
+                    health.overdue_ack += 1;
+                }
+            } else if dispatch.retry_count > 0 {
+                health.retrying_delivery += 1;
+            }
+        }
+
+        health
     }
 }
 
@@ -1186,6 +1238,159 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_dispatch_health_tracks_delivery_states() {
+        let bus = DispatchBus::new();
+        let old_ts = Utc::now() - chrono::Duration::seconds(120);
+
+        bus.send(Dispatch {
+            from: "a".into(),
+            to: "leader".into(),
+            kind: DispatchKind::TaskProposal {
+                project: "demo".into(),
+                prefix: "dm".into(),
+                subject: "idea".into(),
+                description: "new idea".into(),
+                confidence: 0.9,
+                reasoning: "gap detected".into(),
+            },
+            timestamp: Utc::now(),
+            read: false,
+            id: default_dispatch_id(),
+            requires_ack: false,
+            retry_count: 0,
+            max_retries: 3,
+            first_sent_at: Utc::now(),
+        })
+        .await;
+
+        bus.send(Dispatch {
+            from: "a".into(),
+            to: "leader".into(),
+            kind: DispatchKind::Resolution {
+                task_id: "t-overdue".into(),
+                answer: "answer".into(),
+            },
+            timestamp: old_ts,
+            read: true,
+            id: default_dispatch_id(),
+            requires_ack: true,
+            retry_count: 0,
+            max_retries: 3,
+            first_sent_at: old_ts,
+        })
+        .await;
+        bus.send(Dispatch {
+            from: "a".into(),
+            to: "leader".into(),
+            kind: DispatchKind::Escalation {
+                project: "demo".into(),
+                task_id: "t-retry".into(),
+                subject: "blocked".into(),
+                description: "help".into(),
+                attempts: 1,
+            },
+            timestamp: Utc::now(),
+            read: false,
+            id: default_dispatch_id(),
+            requires_ack: true,
+            retry_count: 1,
+            max_retries: 3,
+            first_sent_at: old_ts,
+        })
+        .await;
+        bus.send(Dispatch {
+            from: "a".into(),
+            to: "leader".into(),
+            kind: DispatchKind::TaskFailed {
+                task_id: "t-dead".into(),
+                error: "boom".into(),
+            },
+            timestamp: Utc::now(),
+            read: false,
+            id: default_dispatch_id(),
+            requires_ack: true,
+            retry_count: 2,
+            max_retries: 2,
+            first_sent_at: old_ts,
+        })
+        .await;
+
+        let health = bus.health(60).await;
+        assert_eq!(health.unread, 3);
+        assert_eq!(health.awaiting_ack, 1);
+        assert_eq!(health.retrying_delivery, 1);
+        assert_eq!(health.overdue_ack, 1);
+        assert_eq!(health.dead_letters, 1);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_dispatch_health_tracks_delivery_states() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("dispatches.jsonl");
+        let bus = DispatchBus::with_persistence(path);
+
+        let old_ts = Utc::now() - chrono::Duration::seconds(120);
+        bus.send(Dispatch {
+            from: "a".into(),
+            to: "leader".into(),
+            kind: DispatchKind::Resolution {
+                task_id: "t-overdue".into(),
+                answer: "answer".into(),
+            },
+            timestamp: old_ts,
+            read: true,
+            id: default_dispatch_id(),
+            requires_ack: true,
+            retry_count: 0,
+            max_retries: 2,
+            first_sent_at: old_ts,
+        })
+        .await;
+        bus.send(Dispatch {
+            from: "a".into(),
+            to: "leader".into(),
+            kind: DispatchKind::Escalation {
+                project: "demo".into(),
+                task_id: "t-retry".into(),
+                subject: "blocked".into(),
+                description: "help".into(),
+                attempts: 1,
+            },
+            timestamp: Utc::now(),
+            read: false,
+            id: default_dispatch_id(),
+            requires_ack: true,
+            retry_count: 1,
+            max_retries: 3,
+            first_sent_at: old_ts,
+        })
+        .await;
+        bus.send(Dispatch {
+            from: "a".into(),
+            to: "leader".into(),
+            kind: DispatchKind::TaskFailed {
+                task_id: "t-dead".into(),
+                error: "boom".into(),
+            },
+            timestamp: Utc::now(),
+            read: false,
+            id: default_dispatch_id(),
+            requires_ack: true,
+            retry_count: 2,
+            max_retries: 2,
+            first_sent_at: old_ts,
+        })
+        .await;
+
+        let health = bus.health(60).await;
+        assert_eq!(health.unread, 2);
+        assert_eq!(health.awaiting_ack, 1);
+        assert_eq!(health.retrying_delivery, 1);
+        assert_eq!(health.overdue_ack, 1);
+        assert_eq!(health.dead_letters, 1);
+    }
+
+    #[tokio::test]
     async fn test_sqlite_ack_metadata_survives_round_trip() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("dispatches.jsonl");
@@ -1215,33 +1420,39 @@ mod tests {
 
     #[test]
     fn test_critical_dispatches_require_ack_by_default() {
-        assert!(Dispatch::new_typed(
-            "a",
-            "leader",
-            DispatchKind::TaskDone {
-                task_id: "t1".into(),
-                summary: "done".into(),
-            },
-        )
-        .requires_ack);
-        assert!(Dispatch::new_typed(
-            "a",
-            "leader",
-            DispatchKind::Resolution {
-                task_id: "t1".into(),
-                answer: "yes".into(),
-            },
-        )
-        .requires_ack);
-        assert!(!Dispatch::new_typed(
-            "a",
-            "leader",
-            DispatchKind::PatrolReport {
-                project: "demo".into(),
-                active: 1,
-                pending: 2,
-            },
-        )
-        .requires_ack);
+        assert!(
+            Dispatch::new_typed(
+                "a",
+                "leader",
+                DispatchKind::TaskDone {
+                    task_id: "t1".into(),
+                    summary: "done".into(),
+                },
+            )
+            .requires_ack
+        );
+        assert!(
+            Dispatch::new_typed(
+                "a",
+                "leader",
+                DispatchKind::Resolution {
+                    task_id: "t1".into(),
+                    answer: "yes".into(),
+                },
+            )
+            .requires_ack
+        );
+        assert!(
+            !Dispatch::new_typed(
+                "a",
+                "leader",
+                DispatchKind::PatrolReport {
+                    project: "demo".into(),
+                    active: 1,
+                    pending: 2,
+                },
+            )
+            .requires_ack
+        );
     }
 }

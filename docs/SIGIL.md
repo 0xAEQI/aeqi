@@ -996,11 +996,15 @@ Zero external dependencies. Uses `AtomicU64` for lock-free operations.
 | Counter | `sigil_workers_spawned_total` | Total workers spawned |
 | Counter | `sigil_workers_timed_out_total` | Workers timed out |
 | Counter | `sigil_dispatches_sent_total` | Dispatches sent |
+| Counter | `sigil_dispatch_retries_total` | Critical dispatch retries |
 | Counter | `sigil_escalations_total` | Escalations triggered |
 | Counter | `sigil_patrol_cycles_total` | Patrol cycles run |
 | Gauge | `sigil_workers_active` | Current active workers |
 | Gauge | `sigil_tasks_pending` | Current pending tasks |
 | Gauge | `sigil_dispatch_queue_depth` | Message queue depth |
+| Gauge | `sigil_dispatches_awaiting_ack` | Delivered critical mail awaiting ack |
+| Gauge | `sigil_dispatches_overdue_ack` | Critical mail overdue for ack |
+| Gauge | `sigil_dispatch_dead_letters` | Critical mail in dead-letter state |
 | Gauge | `sigil_daily_cost_usd` | Today's spend |
 
 **Histograms**:
@@ -1511,7 +1515,7 @@ Global flags: `--config <PATH>`, `--log-level <LEVEL>` (default: "info")
 | `sigil daemon start` | Start daemon in foreground |
 | `sigil daemon stop` | Stop running daemon |
 | `sigil daemon status` | Check daemon state |
-| `sigil daemon query <CMD>` | Query daemon: `ping`, `status`, `projects`, `dispatches`, `metrics`, `cost` |
+| `sigil daemon query <CMD>` | Query daemon: `ping`, `status`, `projects`, `dispatches`, `mail`, `metrics`, `cost` |
 
 ### Pipelines
 
