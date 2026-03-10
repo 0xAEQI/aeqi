@@ -1,6 +1,8 @@
 use anyhow::Result;
 use sigil_core::config::{ExecutionMode, ProjectTeamConfig};
-use sigil_core::traits::{Channel, Memory, OutgoingMessage, Provider, Tool};
+use sigil_core::traits::{
+    Channel, ChatRequest, Memory, Message, MessageContent, OutgoingMessage, Provider, Role, Tool,
+};
 use sigil_tasks::{TaskBoard, TaskStatus};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
@@ -11,11 +13,13 @@ use crate::audit::{AuditEvent, AuditLog, DecisionType};
 use crate::blackboard::Blackboard;
 use crate::checkpoint::AgentCheckpoint;
 use crate::cost_ledger::{CostEntry, CostLedger};
+use crate::decomposition::DecompositionResult;
 use crate::emotional_state::EmotionalState;
 use crate::executor::{ClaudeCodeExecutor, TaskOutcome};
 use crate::expertise::{ExpertiseLedger, ExpertiseRecord, TaskOutcomeKind};
 use crate::message::{Dispatch, DispatchBus, DispatchKind};
 use crate::metrics::SigilMetrics;
+use crate::preflight::{PreflightAssessment, PreflightVerdict};
 use crate::project::Project;
 
 /// Label prefix for tracking escalation depth on tasks.
@@ -94,6 +98,21 @@ pub struct Supervisor {
     pub expertise_ledger: Option<Arc<ExpertiseLedger>>,
     /// Inter-agent blackboard for shared knowledge (Phase 3).
     pub blackboard: Option<Arc<Blackboard>>,
+    /// Enable expertise-based routing for task assignment.
+    pub expertise_routing: bool,
+    /// Enable pre-flight assessment before worker spawn.
+    pub preflight_enabled: bool,
+    pub preflight_model: String,
+    pub preflight_max_cost_usd: f64,
+    /// Enable adaptive retry with failure analysis.
+    pub adaptive_retry: bool,
+    pub failure_analysis_model: String,
+    /// Paused by watchdog — skip task assignment.
+    pub paused: bool,
+    /// Enable auto-redecomposition of stalled missions.
+    pub auto_redecompose: bool,
+    /// Model for mission decomposition / redecomposition.
+    pub decomposition_model: String,
 }
 
 impl Supervisor {
@@ -138,6 +157,15 @@ impl Supervisor {
             audit_log: None,
             expertise_ledger: None,
             blackboard: None,
+            expertise_routing: false,
+            preflight_enabled: false,
+            preflight_model: String::new(),
+            preflight_max_cost_usd: 0.01,
+            adaptive_retry: false,
+            failure_analysis_model: String::new(),
+            paused: false,
+            auto_redecompose: false,
+            decomposition_model: String::new(),
         }
     }
 
@@ -164,7 +192,7 @@ impl Supervisor {
     }
 
     /// Create a worker based on the rig's execution mode.
-    async fn create_worker(&self, worker_name: String) -> AgentWorker {
+    async fn create_worker(&self, worker_name: String, task: &sigil_tasks::Task) -> AgentWorker {
         // Enrich identity with emotional state context if available.
         let identity = if let Some(ref emo) = self.emotional_state {
             let emo_guard = emo.lock().await;
@@ -219,6 +247,33 @@ impl Supervisor {
         if let Some(ref provider) = self.reflect_provider {
             worker = worker.with_reflect(provider.clone(), self.reflect_model.clone());
         }
+
+        // Pass adaptive retry config to the worker.
+        if self.adaptive_retry {
+            worker = worker.with_adaptive_retry(self.failure_analysis_model.clone());
+        }
+
+        // Pass blackboard + audit log for failure analysis mode-specific strategies.
+        worker.blackboard = self.blackboard.clone();
+        worker.audit_log = self.audit_log.clone();
+
+        // Inject relevant blackboard entries into worker identity preamble.
+        if let Some(ref bb) = self.blackboard {
+            let tags: Vec<String> = task.labels.clone();
+            let entries = bb.query(&self.project_name, &tags, 5).unwrap_or_default();
+            if !entries.is_empty() {
+                let bb_context = entries
+                    .iter()
+                    .map(|e| format!("- [{}] {}: {}", e.agent, e.key, e.content))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let existing = worker.identity.memory.clone().unwrap_or_default();
+                worker.identity.memory = Some(format!(
+                    "{existing}\n\n## Blackboard (shared knowledge)\n{bb_context}"
+                ));
+            }
+        }
+
         worker.with_max_task_retries(self.max_task_retries)
     }
 
@@ -363,6 +418,28 @@ impl Supervisor {
         self.handle_blocked_tasks().await;
 
         // 3. Assign + launch ready tasks.
+        if self.paused {
+            debug!(project = %self.project_name, "project paused — skipping task assignment");
+            // Skip straight to reporting.
+            let active = self.running_tasks.len();
+            let pending = {
+                let store = self.tasks.lock().await;
+                store.ready().len()
+            };
+            let current = (active, pending);
+            if current != self.last_report {
+                self.last_report = current;
+            }
+            if let Some(ref m) = self.metrics {
+                m.patrol_cycles.inc();
+                m.patrol_cycle_seconds
+                    .observe(patrol_start.elapsed().as_secs_f64());
+                m.workers_active.set(active as f64);
+                m.tasks_pending.set(pending as f64);
+            }
+            return Ok(());
+        }
+
         let ready_tasks = {
             let store = self.tasks.lock().await;
             store.ready().into_iter().cloned().collect::<Vec<_>>()
@@ -404,6 +481,153 @@ impl Supervisor {
 
             let worker_idx = self.running_tasks.len() + 1;
             let worker_name = format!("{}-worker-{}", self.project_name, worker_idx);
+
+            // Expertise routing: query ledger for domain rankings.
+            if self.expertise_routing
+                && let Some(ref ledger) = self.expertise_ledger
+            {
+                let domain = ExpertiseLedger::extract_domain(&task.labels, &task.subject);
+                let rankings = ledger.rank_for_domain(&domain).unwrap_or_default();
+
+                // Check if this worker's agent is deprioritized for the domain.
+                if ledger
+                    .is_deprioritized(&worker_name, &domain)
+                    .unwrap_or(false)
+                {
+                    info!(
+                        project = %self.project_name,
+                        task = %task.id,
+                        domain = %domain,
+                        "agent deprioritized for domain, skipping this cycle"
+                    );
+                    if let Some(ref audit) = self.audit_log {
+                        let _ = audit.record(
+                            &AuditEvent::new(
+                                &self.project_name,
+                                DecisionType::RouteDecision,
+                                format!("Skipped: agent deprioritized for domain '{domain}'"),
+                            )
+                            .with_task(&task.id.0)
+                            .with_agent(&worker_name),
+                        );
+                    }
+                    continue;
+                }
+
+                // Record routing decision with rankings.
+                if let Some(ref audit) = self.audit_log {
+                    let ranking_info = if rankings.is_empty() {
+                        "no expertise data".to_string()
+                    } else {
+                        rankings
+                            .iter()
+                            .take(3)
+                            .map(|s| format!("{}({:.0}%)", s.agent_name, s.confidence * 100.0))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
+                    let _ = audit.record(
+                        &AuditEvent::new(
+                            &self.project_name,
+                            DecisionType::RouteDecision,
+                            format!("Domain '{domain}' → {worker_name} [rankings: {ranking_info}]"),
+                        )
+                        .with_task(&task.id.0)
+                        .with_agent(&worker_name),
+                    );
+                }
+            }
+            // Preflight assessment: evaluate task before committing resources.
+            if self.preflight_enabled && !self.preflight_model.is_empty() {
+                let pf_provider = self.reflect_provider.as_ref().unwrap_or(&self.provider);
+                let prompt =
+                    PreflightAssessment::assessment_prompt(&task.subject, &task.description);
+                let request = ChatRequest {
+                    model: self.preflight_model.clone(),
+                    messages: vec![Message {
+                        role: Role::User,
+                        content: MessageContent::text(&prompt),
+                    }],
+                    tools: vec![],
+                    max_tokens: 256,
+                    temperature: 0.0,
+                };
+                if let Ok(response) = pf_provider.chat(&request).await
+                    && let Some(ref text) = response.content
+                {
+                    let assessment = PreflightAssessment::parse(text);
+                    let budget_remaining = self
+                        .cost_ledger
+                        .as_ref()
+                        .map(|l| l.project_budget_status(&self.project_name).2)
+                        .unwrap_or(10.0);
+                    let agent_success_rate = self
+                        .expertise_ledger
+                        .as_ref()
+                        .and_then(|l| {
+                            let domain =
+                                ExpertiseLedger::extract_domain(&task.labels, &task.subject);
+                            l.rank_for_domain(&domain)
+                                .ok()
+                                .and_then(|scores| scores.first().map(|s| s.success_rate))
+                        })
+                        .unwrap_or(1.0);
+
+                    let verdict = assessment.evaluate(budget_remaining, agent_success_rate);
+                    match &verdict {
+                        PreflightVerdict::Reject { reason } => {
+                            info!(
+                                project = %self.project_name,
+                                task = %task.id,
+                                reason = %reason,
+                                "preflight rejected task"
+                            );
+                            if let Some(ref audit) = self.audit_log {
+                                let _ = audit.record(
+                                    &AuditEvent::new(
+                                        &self.project_name,
+                                        DecisionType::PreflightRejected,
+                                        format!("Rejected: {reason}"),
+                                    )
+                                    .with_task(&task.id.0)
+                                    .with_agent(&worker_name),
+                                );
+                            }
+                            // Store assessment in task metadata.
+                            let mut store = self.tasks.lock().await;
+                            let _ = store.update(&task.id.0, |b| {
+                                b.labels.push(format!(
+                                    "preflight:rejected:{}",
+                                    reason.chars().take(50).collect::<String>()
+                                ));
+                            });
+                            continue;
+                        }
+                        PreflightVerdict::Reroute { reason } => {
+                            info!(
+                                project = %self.project_name,
+                                task = %task.id,
+                                reason = %reason,
+                                "preflight rerouted task"
+                            );
+                            if let Some(ref audit) = self.audit_log {
+                                let _ = audit.record(
+                                    &AuditEvent::new(
+                                        &self.project_name,
+                                        DecisionType::PreflightRejected,
+                                        format!("Rerouted: {reason}"),
+                                    )
+                                    .with_task(&task.id.0)
+                                    .with_agent(&worker_name),
+                                );
+                            }
+                            continue;
+                        }
+                        PreflightVerdict::Proceed => {}
+                    }
+                }
+            }
+
             info!(
                 project = %self.project_name,
                 worker = %worker_name,
@@ -426,7 +650,7 @@ impl Supervisor {
                 );
             }
 
-            let mut worker = self.create_worker(worker_name.clone()).await;
+            let mut worker = self.create_worker(worker_name.clone(), &task).await;
 
             // If there's a previous external checkpoint for this task, inject it into the
             // task description so the new worker has context about the prior attempt's git state.
@@ -663,6 +887,88 @@ impl Supervisor {
                 started_at: std::time::Instant::now(),
                 child_pid: child_pid_tracker,
             });
+        }
+
+        // 3.5. Detect stalled missions (all tasks blocked/cancelled) and redecompose.
+        if self.auto_redecompose && !self.decomposition_model.is_empty() {
+            let store = self.tasks.lock().await;
+            let active_missions = store.active_missions(None);
+            for mission in &active_missions {
+                let tasks = store.mission_tasks(&mission.id);
+                if tasks.is_empty() {
+                    continue;
+                }
+                let all_stalled = tasks
+                    .iter()
+                    .all(|t| t.status == TaskStatus::Blocked || t.status == TaskStatus::Cancelled);
+                if all_stalled {
+                    info!(
+                        project = %self.project_name,
+                        mission = %mission.id,
+                        "stalled mission detected — all tasks blocked/cancelled"
+                    );
+                    // Drop store lock before async LLM call.
+                    let mission_id = mission.id.clone();
+                    let mission_name = mission.name.clone();
+                    let mission_desc = mission.description.clone();
+                    drop(store);
+
+                    let prompt =
+                        DecompositionResult::decomposition_prompt(&mission_name, &mission_desc);
+                    let request = ChatRequest {
+                        model: self.decomposition_model.clone(),
+                        messages: vec![Message {
+                            role: Role::User,
+                            content: MessageContent::text(&prompt),
+                        }],
+                        tools: vec![],
+                        max_tokens: 2048,
+                        temperature: 0.0,
+                    };
+                    let provider = self.reflect_provider.as_ref().unwrap_or(&self.provider);
+                    if let Ok(response) = provider.chat(&request).await
+                        && let Some(ref text) = response.content
+                    {
+                        let mut result = DecompositionResult::parse(text);
+                        let mut store = self.tasks.lock().await;
+                        let prefix = mission_id.split('-').next().unwrap_or("xx");
+                        match result.materialize(&mut store, prefix, &mission_id) {
+                            Ok(task_ids) => {
+                                info!(
+                                    project = %self.project_name,
+                                    mission = %mission_id,
+                                    new_tasks = task_ids.len(),
+                                    "redecomposed stalled mission"
+                                );
+                                if let Some(ref audit) = self.audit_log {
+                                    let _ = audit.record(
+                                        &AuditEvent::new(
+                                            &self.project_name,
+                                            DecisionType::MissionDecomposed,
+                                            format!(
+                                                "Redecomposed stalled mission {} into {} tasks",
+                                                mission_id,
+                                                task_ids.len()
+                                            ),
+                                        )
+                                        .with_task(&mission_id),
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                warn!(
+                                    project = %self.project_name,
+                                    mission = %mission_id,
+                                    error = %e,
+                                    "redecomposition materialization failed"
+                                );
+                            }
+                        }
+                    }
+                    // Only redecompose one mission per patrol to avoid thrashing.
+                    break;
+                }
+            }
         }
 
         // 4. Report to Leader Agent (only on state change).

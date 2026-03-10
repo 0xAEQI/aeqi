@@ -55,6 +55,57 @@ token_secret = "TELEGRAM_BOT_TOKEN"
 allowed_chats = [-5229229023]
 debounce_window_ms = 3000
 
+# Orchestration tuning — v3 feature activation
+[orchestrator]
+expertise_routing = true
+adaptive_retry = true
+failure_analysis_model = "minimax/minimax-m2.5"
+preflight_enabled = true
+preflight_model = "minimax/minimax-m2.5"
+preflight_max_cost_usd = 0.02
+decomposition_model = "minimax/minimax-m2.5"
+auto_redecompose = true
+infer_deps_threshold = 0.6
+blackboard_transient_ttl_hours = 48
+blackboard_durable_ttl_days = 14
+
+# Watchdog rules — event-driven automation
+[[watchdogs]]
+name = "failure-spike"
+cooldown_secs = 7200
+enabled = true
+[watchdogs.condition]
+event = "task_failed"
+project_filter = "gacha-agency"
+count_threshold = 3
+window_secs = 3600
+[watchdogs.action.escalate]
+message = "3+ task failures in gacha-agency within 1 hour"
+
+[[watchdogs]]
+name = "budget-warning"
+cooldown_secs = 14400
+enabled = true
+[watchdogs.condition]
+event = "budget_threshold_reached"
+count_threshold = 1
+window_secs = 86400
+budget_threshold = 0.8
+[watchdogs.action.escalate]
+message = "Budget usage exceeded 80%"
+
+[[watchdogs]]
+name = "worker-timeout-alert"
+cooldown_secs = 3600
+enabled = true
+[watchdogs.condition]
+event = "worker_timeout"
+project_filter = "gacha-agency"
+count_threshold = 2
+window_secs = 1800
+[watchdogs.action.escalate]
+message = "Multiple worker timeouts in gacha-agency"
+
 # Projects (repos, tasks, knowledge)
 [[projects]]
 name = "gacha-agency"
@@ -64,6 +115,7 @@ model = "claude-sonnet-4-6"
 max_workers = 2
 execution_mode = "claude_code"
 worker_timeout_secs = 1800
+max_turns = 20
 team.leader = "void"
 team.agents = ["void"]
 
