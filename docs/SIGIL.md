@@ -7,7 +7,7 @@ This is the live reference for the Sigil workspace as it exists today.
 - Cargo workspace with 8 crates
 - CLI binary in `sigil-cli/`
 - 25 top-level CLI commands
-- 204 unit tests currently passing
+- 212 unit tests currently passing
 
 ## Command Surface
 
@@ -143,6 +143,8 @@ Top-level sections in `sigil.toml`:
 - `[memory]`: backend and ranking parameters
 - `[heartbeat]`: periodic heartbeats and reflections
 - `[team]`: leader, advisor roster, router model, background budget
+- `[[organizations]]`: reusable org graphs with units, roles, relationships, and rituals
+- `team.org` / `team.unit` on `[[projects]]`: bind a project to an org unit
 - `[session]`, `[context_budget]`, `[lifecycle]`, `[orchestrator]`: orchestration tuning
 - `[repos]`: named repository pool
 - `[[projects]]`: project definitions
@@ -150,8 +152,8 @@ Top-level sections in `sigil.toml`:
 
 Provider reality:
 
-- Worker/provider runtime presets are wired in the main CLI and daemon factory today
-- Anthropic and Ollama clients exist in the workspace, but are not selected by the common factory yet
+- Runtime presets now drive provider selection in the CLI and daemon for OpenRouter, Anthropic, and Ollama
+- A few control-plane paths are still OpenRouter-oriented, especially advisor routing and usage-credit inspection
 
 ## Identity Assembly
 
@@ -174,6 +176,15 @@ Loaded project-side files:
 - `HEARTBEAT.md`
 
 This is the main prompt-building path for both the internal agent loop and Claude Code workers.
+
+Sigil now also appends organizational context when an agent is mapped into an `[[organizations]]` graph. That context includes:
+
+- organization and unit
+- role title, mandate, goals, permissions, and budget authority
+- manager, direct reports, peers, delegates, reviewers, advisors, escalation targets
+- recurring rituals the agent owns or participates in
+
+The intent is to keep the core modular: Sigil models graphs of responsibility and communication, not just a fixed CEO/CTO hierarchy.
 
 ## Persistence
 
@@ -220,6 +231,7 @@ Useful extension targets:
 - Cost inspection is daemon-driven via `sigil daemon query cost`
 - Readiness inspection is daemon-driven via `sigil daemon query readiness`
 - Daemon service install/print/uninstall is available via `sigil daemon ...`
+- `sigil team`, `sigil status`, and `sigil agent list` expose the current organization model and resolved org context
 - Claude Code recursion requires an external `claude` installation and authentication
 
 ## Recommended Validation

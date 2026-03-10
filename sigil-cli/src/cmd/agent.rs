@@ -40,7 +40,20 @@ pub(crate) async fn cmd_agent(
 
             println!("Discovered Agents ({}):\n", all_agents.len());
             for (name, source, role) in &all_agents {
-                println!("  {name:<15} role={role:<12} source={source}");
+                let org_hint = config
+                    .agent_org_context(name)
+                    .map(|ctx| {
+                        let mut parts = vec![format!("org={}", ctx.organization)];
+                        if let Some(unit) = ctx.unit {
+                            parts.push(format!("unit={unit}"));
+                        }
+                        if let Some(title) = ctx.title {
+                            parts.push(format!("title={title}"));
+                        }
+                        format!(" {}", parts.join(" "))
+                    })
+                    .unwrap_or_default();
+                println!("  {name:<15} role={role:<12} source={source}{org_hint}");
             }
         }
         crate::cli::AgentAction::Migrate { force } => {
@@ -62,10 +75,7 @@ pub(crate) async fn cmd_agent(
                 }
 
                 if !agent_dir.exists() {
-                    println!(
-                        "  {} — skipped (agent dir not found)",
-                        agent_cfg.name
-                    );
+                    println!("  {} — skipped (agent dir not found)", agent_cfg.name);
                     skipped += 1;
                     continue;
                 }

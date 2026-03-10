@@ -11,9 +11,9 @@ Sigil currently has two real execution paths:
 
 - 8 crates in one Cargo workspace
 - 25 top-level CLI commands
-- 209 unit tests passing with `cargo test --workspace`
+- 212 unit tests passing with `cargo test --workspace`
 - `cargo clippy --workspace --all-targets -- -D warnings` clean
-- Implemented subsystems: task DAGs, missions, operations, memory, audit log, blackboard, schedules, watchdogs, project teams, Telegram ingress, Claude Code worker execution
+- Implemented subsystems: task DAGs, missions, operations, memory, audit log, blackboard, schedules, watchdogs, project teams, organization kernel config, Telegram ingress, Claude Code worker execution
 
 What changed in this documentation pass:
 
@@ -31,6 +31,7 @@ sigil secrets set OPENROUTER_API_KEY sk-or-...
 
 # add projects/<name>/ plus config/sigil.toml entries
 sigil doctor --strict
+sigil team
 
 sigil run "summarize the repository layout"
 sigil daemon install --start
@@ -86,6 +87,24 @@ Runtime presets now select the worker provider and execution mode per project or
 - `ollama_agent`
 - `ollama_claude_code`
 
+### Organization Kernel
+
+Sigil now has a first-class organization model in `sigil.toml`:
+
+- `[[organizations]]`: top-level org graphs
+- `[[organizations.units]]`: teams, departments, councils, squads
+- `[[organizations.roles]]`: mandate, goals, permissions, budget per agent
+- `[[organizations.relationships]]`: manages, advises, reviews, delegates, escalates, collaborates
+- `[[organizations.rituals]]`: recurring reviews, planning loops, incident cadences
+
+Project teams can bind to an org unit with `team.org` and `team.unit`. Agent identity assembly now injects organizational context, so leaders, peers, advisors, direct reports, and rituals are visible in the system prompt for `sigil run`, `sigil skill run`, and daemon-supervised workers.
+
+Use these operator surfaces to inspect the model:
+
+- `sigil team`
+- `sigil status`
+- `sigil agent list`
+
 ### Claude Code Workers
 
 In `claude_code` execution mode, supervisors launch external Claude Code subprocesses with:
@@ -136,6 +155,7 @@ The worker protocol supports `DONE`, `BLOCKED:`, `FAILED:`, and `HANDOFF:` outco
 - There is no first-class `sigil council` CLI subcommand. Council mode is driven from the daemon's message path, most visibly through Telegram `/council ...`.
 - There is no top-level `sigil cost` CLI subcommand. Use `sigil daemon query cost`.
 - Readiness is daemon-driven. Use `sigil daemon query readiness` for a machine-readable “can this harness accept work now?” answer.
+- The organization kernel is native, but per-role direct chat surfaces like `@ceo` or `@incident-lead` are not first-class CLI commands yet. Today the org model primarily shapes identity, project-team resolution, and operator inspection.
 - Worker/provider runtime presets are wired through the CLI and daemon now, but advisor routing and usage-credit inspection are still OpenRouter-oriented.
 - Recursive worker orchestration depends on an installed, authenticated `claude` binary when projects use `claude_code`.
 

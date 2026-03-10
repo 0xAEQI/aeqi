@@ -46,7 +46,7 @@ CLI command
 
 Key properties:
 
-- Provider selection is currently wired through the OpenRouter path in `sigil-cli/src/helpers.rs`
+- Provider selection follows the configured runtime preset in `sigil-cli/src/helpers.rs`
 - Tool execution happens inside Sigil, not through Claude Code
 - Memory recall is injected into the system prompt before the loop starts
 - This path is the simplest way to work on providers, tools, identity, and memory behavior
@@ -140,6 +140,26 @@ System prompt order from `sigil-core/src/identity.rs`:
 
 Claude Code workers receive that identity plus the worker protocol that defines `DONE`, `BLOCKED:`, `FAILED:`, and `HANDOFF:`.
 
+### Organization Kernel
+
+`sigil-core::SigilConfig` now also supports a first-class organization graph:
+
+- `organizations`
+- `units`
+- `roles`
+- `relationships`
+- `rituals`
+
+This is deliberately more general than a corporate title tree. A Sigil organization can represent a company, open-source maintainer group, incident cell, research lab, or any other operating structure.
+
+At runtime, Sigil resolves:
+
+- org-linked project teams through `team.org` and `team.unit`
+- per-agent org context through roles, unit membership, relationships, and ritual participation
+- hierarchy-aware prompt context via the identity `operational` section
+
+That gives the current runtime a native way to express leaders, peers, direct reports, advisors, reviewers, and escalation paths without hardcoding a specific org chart into the core.
+
 ## State and Persistence
 
 Global state under `~/.sigil/`:
@@ -183,6 +203,7 @@ Examples:
 - Council mode exists in the daemon message path and Telegram flow, not as `sigil council`
 - Budget inspection exists through daemon IPC, not as `sigil cost`
 - Worker/provider runtime presets now select OpenRouter, Anthropic, or Ollama per project or agent
+- Organization graphs are first-class config and identity input, but per-role chat surfaces are not a dedicated top-level CLI yet
 - Agent routing and usage-credit inspection still assume OpenRouter in a few control-plane paths
 
 When documenting or extending Sigil, treat the daemon and CLI entrypoints as the source of truth for what operators can use today.

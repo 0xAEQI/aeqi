@@ -42,19 +42,80 @@ pub(crate) async fn cmd_team(
         } else {
             "system fallback"
         };
+        let org_hint = project_cfg
+            .team
+            .as_ref()
+            .map(|team| {
+                let resolved_org = team.org.clone().or_else(|| {
+                    team.unit
+                        .as_deref()
+                        .and_then(|_| config.resolve_organization(None))
+                        .map(|org| org.name.clone())
+                });
+                match (resolved_org, team.unit.as_deref()) {
+                    (Some(org), Some(unit)) => format!(" org={org} unit={unit}"),
+                    (Some(org), None) => format!(" org={org}"),
+                    (None, Some(unit)) => format!(" unit={unit}"),
+                    (None, None) => String::new(),
+                }
+            })
+            .unwrap_or_default();
         println!(
-            "  {} → leader={} agents=[{}] ({})",
+            "  {} → leader={} agents=[{}] ({}){}",
             project_cfg.name,
             team.leader,
             team.effective_agents().join(", "),
             source,
+            org_hint,
         );
     }
 
-    // Validate teams.
-    let issues = config.validate_teams();
+    if !config.organizations.is_empty() {
+        println!("\nOrganizations:");
+        for org in &config.organizations {
+            let default_marker = if org.default { " [default]" } else { "" };
+            let kind = org.kind.as_deref().unwrap_or("org");
+            println!("  {}{} kind={}", org.name, default_marker, kind);
+            for unit in &org.units {
+                let lead = unit.lead.as_deref().unwrap_or("unassigned");
+                let members = if unit.members.is_empty() {
+                    "-".to_string()
+                } else {
+                    unit.members.join(", ")
+                };
+                println!("    unit={} lead={} members=[{}]", unit.name, lead, members);
+            }
+            for role in &org.roles {
+                let unit = role.unit.as_deref().unwrap_or("-");
+                println!("    role={} agent={} unit={}", role.title, role.agent, unit);
+            }
+            for relationship in &org.relationships {
+                println!(
+                    "    rel={} {} {}",
+                    relationship.from, relationship.kind, relationship.to
+                );
+            }
+            for ritual in &org.rituals {
+                let cadence = ritual.cadence.as_deref().unwrap_or("unscheduled");
+                let participants = if ritual.participants.is_empty() {
+                    "-".to_string()
+                } else {
+                    ritual.participants.join(", ")
+                };
+                println!(
+                    "    ritual={} owner={} cadence={} participants=[{}]",
+                    ritual.name, ritual.owner, cadence, participants
+                );
+            }
+        }
+    }
+
+    let mut issues = config.validate_teams();
+    issues.extend(config.validate_organizations());
+    issues.sort();
+    issues.dedup();
     if !issues.is_empty() {
-        println!("\nTeam validation warnings:");
+        println!("\nValidation warnings:");
         for issue in &issues {
             println!("  ! {issue}");
         }

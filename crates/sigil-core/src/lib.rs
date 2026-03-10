@@ -14,9 +14,10 @@ pub mod traits;
 
 pub use agent::{Agent, AgentConfig, AgentResult};
 pub use config::{
-    AgentRole, AgentVoice, ContextBudgetConfig, ExecutionMode, PeerAgentConfig, ProjectConfig,
-    ProjectTeamConfig, ProviderKind, RuntimePresetConfig, SigilConfig, TeamConfig, discover_agents,
-    load_agent_config,
+    AgentOrgContext, AgentRole, AgentVoice, ContextBudgetConfig, ExecutionMode,
+    OrgRelationshipConfig, OrgRelationshipKind, OrgRitualConfig, OrgRoleConfig, OrgUnitConfig,
+    OrganizationConfig, PeerAgentConfig, ProjectConfig, ProjectTeamConfig, ProviderKind,
+    RuntimePresetConfig, SigilConfig, TeamConfig, discover_agents, load_agent_config,
 };
 pub use identity::Identity;
 pub use security::SecretStore;

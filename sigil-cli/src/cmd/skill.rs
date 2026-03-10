@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use crate::cli::SkillAction;
 use crate::helpers::{
-    build_project_tools, build_provider, find_project_dir, load_config, open_memory,
+    augment_identity_with_org_context, build_project_tools, build_provider, find_project_dir,
+    load_config, open_memory,
 };
 
 fn discover_project_skills(project_dir: &Path) -> Result<Vec<Skill>> {
@@ -101,6 +102,12 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
 
             // Build identity with skill system prompt.
             let identity = Identity::load_from_dir(&project_dir).unwrap_or_default();
+            let identity = augment_identity_with_org_context(
+                &config,
+                identity,
+                Some(config.leader()),
+                Some(&project),
+            );
             let base_prompt = identity.system_prompt();
 
             let mut skill_identity = identity.clone();
@@ -113,14 +120,7 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
             };
 
             let observer: Arc<dyn Observer> = Arc::new(LogObserver);
-            let model = project_cfg.model.clone().unwrap_or_else(|| {
-                config
-                    .providers
-                    .openrouter
-                    .as_ref()
-                    .map(|or| or.default_model.clone())
-                    .unwrap_or_else(|| "minimax/minimax-m2.5".to_string())
-            });
+            let model = config.model_for_project(&project);
 
             let agent_config = AgentConfig {
                 model,

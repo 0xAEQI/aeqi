@@ -29,8 +29,21 @@ pub(crate) async fn cmd_status(config_path: &Option<PathBuf>) -> Result<()> {
             } else {
                 ""
             };
+            let org_hint = config
+                .agent_org_context(&agent_cfg.name)
+                .map(|ctx| {
+                    let mut parts = vec![format!("org={}", ctx.organization)];
+                    if let Some(unit) = ctx.unit {
+                        parts.push(format!("unit={unit}"));
+                    }
+                    if let Some(title) = ctx.title {
+                        parts.push(format!("title={title}"));
+                    }
+                    format!(" {}", parts.join(" "))
+                })
+                .unwrap_or_default();
             println!(
-                "  {} [{}] role={:?} voice={:?} model={}{} expertise=[{}]",
+                "  {} [{}] role={:?} voice={:?} model={}{} expertise=[{}]{}",
                 agent_cfg.name,
                 agent_cfg.prefix,
                 agent_cfg.role,
@@ -38,6 +51,7 @@ pub(crate) async fn cmd_status(config_path: &Option<PathBuf>) -> Result<()> {
                 agent_cfg.model.as_deref().unwrap_or("default"),
                 leader_marker,
                 expertise,
+                org_hint,
             );
         }
         println!();
@@ -66,6 +80,24 @@ pub(crate) async fn cmd_status(config_path: &Option<PathBuf>) -> Result<()> {
                 .collect();
             let ready = store.ready().len();
             print!(" | tasks: {} open, {} ready", open.len(), ready);
+        }
+        if let Some(team_cfg) = project_cfg.team.as_ref() {
+            let org_name = team_cfg
+                .org
+                .clone()
+                .or_else(|| {
+                    team_cfg
+                        .unit
+                        .as_deref()
+                        .and_then(|_| config.resolve_organization(None))
+                        .map(|org| org.name.clone())
+                })
+                .unwrap_or_else(|| "default".to_string());
+            if let Some(unit) = team_cfg.unit.as_deref() {
+                print!(" | org={} unit={}", org_name, unit);
+            } else if team_cfg.org.is_some() {
+                print!(" | org={}", org_name);
+            }
         }
         println!();
     }

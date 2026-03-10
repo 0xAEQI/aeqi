@@ -16,9 +16,10 @@ use tracing::{info, warn};
 
 use crate::cli::DaemonAction;
 use crate::helpers::{
-    build_project_tools, build_provider, build_provider_for_agent, build_provider_for_project,
-    build_tools, find_agent_dir, find_project_dir, get_api_key, handle_fast_lane, load_config,
-    load_config_with_agents, open_memory, pid_file_path,
+    augment_identity_with_org_context, build_project_tools, build_provider,
+    build_provider_for_agent, build_provider_for_project, build_tools, find_agent_dir,
+    find_project_dir, get_api_key, handle_fast_lane, load_config, load_config_with_agents,
+    open_memory, pid_file_path,
 };
 use crate::service::{install_user_service, render_user_service, uninstall_user_service};
 
@@ -146,6 +147,12 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 // Wire per-project team if configured.
                 let project_team = config.project_team(&project_cfg.name);
                 witness.set_team(project_team, config.leader());
+                witness.identity = augment_identity_with_org_context(
+                    &config,
+                    witness.identity.clone(),
+                    Some(&witness.escalation_target),
+                    Some(&project_cfg.name),
+                );
 
                 // Wire v3 orchestrator config fields.
                 witness.expertise_routing = project_orch.expertise_routing;
@@ -213,7 +220,12 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                         continue;
                     }
                 };
-                let agent_identity = Identity::load(&agent_dir, None).unwrap_or_default();
+                let agent_identity = augment_identity_with_org_context(
+                    &config,
+                    Identity::load(&agent_dir, None).unwrap_or_default(),
+                    Some(&agent_cfg.name),
+                    None,
+                );
                 let agent_tasks_dir = agent_dir.join(".tasks");
                 std::fs::create_dir_all(&agent_tasks_dir).ok();
                 let agent_task_board = sigil_tasks::TaskBoard::open(&agent_tasks_dir)?;
@@ -407,7 +419,12 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 .expect("no leader agent configured");
             let fa_agent_dir =
                 find_agent_dir(&leader_name).unwrap_or_else(|_| PathBuf::from("agents/aurelia"));
-            let fa_identity = Identity::load(&fa_agent_dir, None).unwrap_or_default();
+            let fa_identity = augment_identity_with_org_context(
+                &config,
+                Identity::load(&fa_agent_dir, None).unwrap_or_default(),
+                Some(&leader_name),
+                None,
+            );
             let fa_tasks_dir = fa_agent_dir.join(".tasks");
             std::fs::create_dir_all(&fa_tasks_dir).ok();
             let fa_task_board = sigil_tasks::TaskBoard::open(&fa_tasks_dir)?;

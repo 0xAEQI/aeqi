@@ -127,10 +127,12 @@ pub(crate) async fn cmd_setup(runtime: &str, service: bool, force: bool) -> Resu
     if starter.execution_mode == Some(ExecutionMode::ClaudeCode) {
         println!("  2. Ensure `claude` is installed and authenticated");
         println!("  3. sigil doctor --strict");
-        println!("  4. sigil daemon install --start");
+        println!("  4. sigil team");
+        println!("  5. sigil daemon install --start");
     } else {
         println!("  2. sigil doctor --strict");
-        println!("  3. sigil daemon install --start");
+        println!("  3. sigil team");
+        println!("  4. sigil daemon install --start");
     }
 
     Ok(())
@@ -193,6 +195,63 @@ router_model = \"google/gemini-2.0-flash-001\"\n\
 router_cooldown_secs = 60\n\
 max_background_cost_usd = 0.5\n\
 \n\
+[[organizations]]\n\
+name = \"core\"\n\
+kind = \"workspace\"\n\
+default = true\n\
+mission = \"Maintain the workspace, keep execution moving, and preserve operator trust.\"\n\
+\n\
+[[organizations.units]]\n\
+name = \"control-plane\"\n\
+kind = \"core\"\n\
+mission = \"Coordinate work, gather evidence, and verify delivery.\"\n\
+lead = \"leader\"\n\
+members = [\"researcher\", \"reviewer\"]\n\
+\n\
+[[organizations.roles]]\n\
+agent = \"leader\"\n\
+title = \"Orchestrator\"\n\
+unit = \"control-plane\"\n\
+mandate = \"Break work down, route specialists, and keep the system legible.\"\n\
+goals = [\"Keep work moving\", \"Protect operator trust\"]\n\
+permissions = [\"delegate\", \"approve\", \"escalate\"]\n\
+\n\
+[[organizations.roles]]\n\
+agent = \"researcher\"\n\
+title = \"Research Lead\"\n\
+unit = \"control-plane\"\n\
+mandate = \"Turn ambiguity into evidence and options.\"\n\
+permissions = [\"research\", \"brief\"]\n\
+\n\
+[[organizations.roles]]\n\
+agent = \"reviewer\"\n\
+title = \"Quality Lead\"\n\
+unit = \"control-plane\"\n\
+mandate = \"Catch regressions and verify completion.\"\n\
+permissions = [\"review\", \"block\"]\n\
+\n\
+[[organizations.relationships]]\n\
+from = \"leader\"\n\
+to = \"researcher\"\n\
+kind = \"delegates_to\"\n\
+\n\
+[[organizations.relationships]]\n\
+from = \"leader\"\n\
+to = \"reviewer\"\n\
+kind = \"delegates_to\"\n\
+\n\
+[[organizations.relationships]]\n\
+from = \"reviewer\"\n\
+to = \"leader\"\n\
+kind = \"advises\"\n\
+\n\
+[[organizations.rituals]]\n\
+name = \"Daily Ops Review\"\n\
+owner = \"leader\"\n\
+cadence = \"daily\"\n\
+participants = [\"researcher\", \"reviewer\"]\n\
+purpose = \"Review readiness, open work, and blocked tasks.\"\n\
+\n\
 [orchestrator]\n\
 expertise_routing = true\n\
 adaptive_retry = true\n\
@@ -238,6 +297,9 @@ max_workers = 1\n\
 # name = \"sigil\"\n\
 # prefix = \"sg\"\n\
 # repo = \"/absolute/path/to/repo\"\n\
+# team.org = \"core\"\n\
+# team.unit = \"control-plane\"\n\
+# team.leader = \"leader\"\n\
 # runtime = \"{runtime}\"\n",
         render_provider_block(provider, default_model),
     )

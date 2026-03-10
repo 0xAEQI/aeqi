@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use sigil_core::traits::{Provider, Tool};
-use sigil_core::{AgentRole, ExecutionMode, ProviderKind, SecretStore, SigilConfig};
+use sigil_core::{AgentRole, ExecutionMode, Identity, ProviderKind, SecretStore, SigilConfig};
 use sigil_memory::SqliteMemory;
 use sigil_orchestrator::ProjectRegistry;
 use sigil_providers::{AnthropicProvider, OllamaProvider, OpenRouterEmbedder, OpenRouterProvider};
@@ -310,6 +310,60 @@ pub(crate) fn open_memory(
     } else {
         Ok(mem)
     }
+}
+
+pub(crate) fn augment_identity_with_org_context(
+    config: &SigilConfig,
+    mut identity: Identity,
+    agent_name: Option<&str>,
+    project_name: Option<&str>,
+) -> Identity {
+    let mut sections = Vec::new();
+
+    if let Some(agent_name) = agent_name
+        && let Some(ctx) = config.agent_org_context(agent_name)
+    {
+        sections.push(ctx.as_identity_context());
+    }
+
+    if let Some(project_name) = project_name {
+        let team = config.project_team(project_name);
+        let mut lines = vec![format!("Project team leader: {}", team.leader)];
+        lines.push(format!(
+            "Project team agents: {}",
+            team.effective_agents().join(", ")
+        ));
+        if let Some(project) = config.project(project_name)
+            && let Some(team_cfg) = project.team.as_ref()
+        {
+            let resolved_org = team_cfg.org.clone().or_else(|| {
+                team_cfg
+                    .unit
+                    .as_deref()
+                    .and_then(|_| config.resolve_organization(None))
+                    .map(|org| org.name.clone())
+            });
+            if let Some(ref org) = resolved_org {
+                lines.push(format!("Project organization: {org}"));
+            }
+            if let Some(ref unit) = team_cfg.unit {
+                lines.push(format!("Project unit: {unit}"));
+            }
+        }
+        sections.push(format!("# Project Team Context\n\n{}", lines.join("\n")));
+    }
+
+    if !sections.is_empty() {
+        let existing = identity.operational.unwrap_or_default();
+        let appended = sections.join("\n\n---\n\n");
+        identity.operational = Some(if existing.is_empty() {
+            appended
+        } else {
+            format!("{existing}\n\n---\n\n{appended}")
+        });
+    }
+
+    identity
 }
 
 pub(crate) async fn handle_fast_lane(text: &str, reg: &Arc<ProjectRegistry>) -> String {
