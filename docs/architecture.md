@@ -219,6 +219,8 @@ Examples:
 
 When documenting or extending Sigil, treat the daemon and CLI entrypoints as the source of truth for what operators can use today.
 
+For the proposed terminal operator shell that builds on these primitives, see [docs/chat-interface.md](/home/claudedev/sigil/docs/chat-interface.md).
+
 ## Best Places To Extend
 
 - Provider routing: `sigil-cli/src/helpers.rs`

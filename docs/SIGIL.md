@@ -258,6 +258,8 @@ Useful extension targets:
 - `sigil team`, `sigil status`, and `sigil agent list` expose the current organization model and resolved org context
 - Claude Code recursion requires an external `claude` installation and authentication
 
+For the planned full-screen terminal shell, see [docs/chat-interface.md](/home/claudedev/sigil/docs/chat-interface.md).
+
 ## Recommended Validation
 
 ```bash

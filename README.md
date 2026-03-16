@@ -192,6 +192,7 @@ The worker protocol supports `DONE`, `BLOCKED:`, `FAILED:`, and `HANDOFF:` outco
 Start with:
 
 - [docs/architecture.md](/home/claudedev/sigil/docs/architecture.md)
+- [docs/chat-interface.md](/home/claudedev/sigil/docs/chat-interface.md)
 - [docs/SIGIL.md](/home/claudedev/sigil/docs/SIGIL.md)
 - [docs/competitive-analysis.md](/home/claudedev/sigil/docs/competitive-analysis.md)
 - [docs/claude-code-integration.md](/home/claudedev/sigil/docs/claude-code-integration.md)
