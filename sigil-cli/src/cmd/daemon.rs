@@ -98,6 +98,8 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
 
             let registry = Arc::new(registry_inner);
             let lifecycle_provider = build_provider(&config)?;
+            let event_broadcaster =
+                Arc::new(sigil_orchestrator::EventBroadcaster::new());
             let mut heartbeats = Vec::new();
             let advisor_agents = config.advisor_agents();
             let mut skipped_projects = Vec::new();
@@ -141,6 +143,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 let provider = build_provider_for_project(&config, &project_cfg.name)?;
                 let mut witness =
                     Supervisor::new(&rig, provider.clone(), tools.clone(), dispatch_bus.clone());
+                witness.event_broadcaster = Some(event_broadcaster.clone());
                 let project_orch = config.orchestrator_for_project(&project_cfg.name);
 
                 // Wire memory + reflection for worker post-execution insight extraction.
@@ -283,6 +286,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     agent_tools,
                     dispatch_bus.clone(),
                 );
+                agent_scout.event_broadcaster = Some(event_broadcaster.clone());
 
                 if config.execution_mode_for_agent(&agent_cfg.name) == ExecutionMode::ClaudeCode {
                     agent_scout.set_claude_code_mode(
@@ -523,6 +527,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 fa_tools,
                 dispatch_bus.clone(),
             );
+            fa_witness.event_broadcaster = Some(event_broadcaster.clone());
 
             // Wire memory + reflection for leader agent worker insight extraction.
             if let Ok(mem) = open_memory(&config, Some(&leader_name)) {
@@ -594,6 +599,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             println!("Press Ctrl+C to stop.\n");
 
             let mut daemon = Daemon::new(registry, dispatch_bus);
+            daemon.event_broadcaster = event_broadcaster;
             daemon.chat_engine = chat_engine;
             match sigil_orchestrator::NoteStore::new(&data_dir.join("notes.db")) {
                 Ok(ns) => {

@@ -8,6 +8,7 @@ use tracing::{debug, info, warn};
 
 use crate::chat_engine::{ChatEngine, ChatMessage, ChatSource};
 use crate::conversation_store::web_chat_id;
+use crate::execution_events::{EventBroadcaster, ExecutionEvent};
 use crate::heartbeat::Heartbeat;
 use crate::lifecycle::LifecycleEngine;
 use crate::message::{Dispatch, DispatchBus, DispatchHealth};
@@ -43,6 +44,8 @@ pub struct Daemon {
     pub chat_engine: Option<Arc<ChatEngine>>,
     pub note_store: Option<Arc<NoteStore>>,
     pub anomaly_detector: proactive::AnomalyDetector,
+    pub event_broadcaster: Arc<EventBroadcaster>,
+    pub event_collector: Arc<Mutex<Vec<ExecutionEvent>>>,
     pub pid_file: Option<PathBuf>,
     pub socket_path: Option<PathBuf>,
     session_tracker_shutdown: Option<Arc<tokio::sync::Notify>>,
@@ -66,6 +69,8 @@ impl Daemon {
             chat_engine: None,
             note_store: None,
             anomaly_detector: proactive::AnomalyDetector::new(),
+            event_broadcaster: Arc::new(EventBroadcaster::new()),
+            event_collector: Arc::new(Mutex::new(Vec::new())),
             pid_file: None,
             socket_path: None,
             session_tracker_shutdown: None,
@@ -224,6 +229,23 @@ impl Daemon {
             });
         }
 
+        // Spawn background task to collect execution events from the broadcaster.
+        {
+            let collector = self.event_collector.clone();
+            let mut rx = self.event_broadcaster.subscribe();
+            tokio::spawn(async move {
+                while let Ok(event) = rx.recv().await {
+                    let mut events = collector.lock().await;
+                    events.push(event);
+                    // Keep only last 100 events.
+                    let len = events.len();
+                    if len > 100 {
+                        events.drain(..len - 100);
+                    }
+                }
+            });
+        }
+
         // Start Unix socket listener for IPC queries.
         #[cfg(unix)]
         if let Some(ref sock_path) = self.socket_path {
@@ -240,6 +262,7 @@ impl Daemon {
                     let cron_store = self.cron_store.clone();
                     let chat_engine = self.chat_engine.clone();
                     let note_store = self.note_store.clone();
+                    let event_collector = self.event_collector.clone();
                     let running = self.running.clone();
                     let readiness = self.readiness.clone();
                     info!(path = %sock_path.display(), "IPC socket listening");
@@ -252,6 +275,7 @@ impl Daemon {
                             cron_store,
                             chat_engine,
                             note_store,
+                            event_collector,
                             running,
                             readiness,
                         )
@@ -686,6 +710,7 @@ impl Daemon {
         cron_store: Option<Arc<Mutex<ScheduleStore>>>,
         chat_engine: Option<Arc<ChatEngine>>,
         note_store: Option<Arc<NoteStore>>,
+        event_collector: Arc<Mutex<Vec<ExecutionEvent>>>,
         running: Arc<std::sync::atomic::AtomicBool>,
         readiness: ReadinessContext,
     ) {
@@ -700,6 +725,7 @@ impl Daemon {
                     let cron_store = cron_store.clone();
                     let chat_engine = chat_engine.clone();
                     let note_store = note_store.clone();
+                    let event_collector = event_collector.clone();
                     let readiness = readiness.clone();
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_socket_connection(
@@ -710,6 +736,7 @@ impl Daemon {
                             cron_store,
                             chat_engine,
                             note_store,
+                            event_collector,
                             readiness,
                         )
                         .await
@@ -737,6 +764,7 @@ impl Daemon {
         cron_store: Option<Arc<Mutex<ScheduleStore>>>,
         chat_engine: Option<Arc<ChatEngine>>,
         note_store: Option<Arc<NoteStore>>,
+        event_collector: Arc<Mutex<Vec<ExecutionEvent>>>,
         readiness: ReadinessContext,
     ) -> Result<()> {
         let (reader, mut writer) = stream.into_split();
@@ -821,6 +849,12 @@ impl Daemon {
                 "worker_progress" => {
                     let workers = registry.worker_progress().await;
                     serde_json::json!({"ok": true, "workers": workers})
+                }
+
+                "worker_events" => {
+                    let mut events = event_collector.lock().await;
+                    let drained: Vec<_> = events.drain(..).collect();
+                    serde_json::json!({"ok": true, "events": drained})
                 }
 
                 "projects" => {

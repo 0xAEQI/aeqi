@@ -63,6 +63,20 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, state: AppState
                 {
                     break;
                 }
+
+                // Poll and forward real-time worker execution events.
+                if let Ok(events_resp) = state.ipc.cmd("worker_events").await
+                    && let Some(events) = events_resp.get("events").and_then(|e| e.as_array())
+                {
+                    for event in events {
+                        let msg = serde_json::json!({"event": "worker", "data": event});
+                        if let Ok(text) = serde_json::to_string(&msg)
+                            && socket.send(Message::Text(text.into())).await.is_err()
+                        {
+                            break;
+                        }
+                    }
+                }
             }
             msg = socket.recv() => {
                 match msg {
