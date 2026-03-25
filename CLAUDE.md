@@ -1,6 +1,6 @@
 # Sigil
 
-AI agent orchestration framework in Rust. 9 crates, 217 tests, 28 CLI commands.
+AI agent orchestration framework in Rust. 9 crates, 355 tests, 28 CLI commands.
 
 ## Crates
 
