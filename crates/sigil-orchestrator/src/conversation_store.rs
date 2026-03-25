@@ -16,6 +16,7 @@ pub struct ConversationMessage {
     pub role: String,
     pub content: String,
     pub timestamp: DateTime<Utc>,
+    pub source: Option<String>,
 }
 
 /// Persistent conversation store backed by SQLite.
@@ -70,6 +71,11 @@ impl ConversationStore {
         )
         .context("failed to initialize conversation schema")?;
 
+        // Migration: add source column (idempotent).
+        let _ = conn.execute_batch(
+            "ALTER TABLE conversations ADD COLUMN source TEXT DEFAULT NULL;",
+        );
+
         debug!(path = %path.display(), "conversation store opened");
 
         Ok(Self {
@@ -80,11 +86,22 @@ impl ConversationStore {
 
     /// Record a message in a conversation.
     pub async fn record(&self, chat_id: i64, role: &str, content: &str) -> Result<()> {
+        self.record_with_source(chat_id, role, content, None).await
+    }
+
+    /// Record a message with source tag (e.g. "telegram", "web").
+    pub async fn record_with_source(
+        &self,
+        chat_id: i64,
+        role: &str,
+        content: &str,
+        source: Option<&str>,
+    ) -> Result<()> {
         let db = self.db.lock().await;
         let now = Utc::now().to_rfc3339();
         db.execute(
-            "INSERT INTO conversations (chat_id, role, content, timestamp) VALUES (?1, ?2, ?3, ?4)",
-            params![chat_id, role, content, now],
+            "INSERT INTO conversations (chat_id, role, content, timestamp, source) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![chat_id, role, content, now, source],
         )
         .context("failed to insert conversation message")?;
         Ok(())
@@ -105,7 +122,7 @@ impl ConversationStore {
     ) -> Result<Vec<ConversationMessage>> {
         let db = self.db.lock().await;
         let mut stmt = db.prepare(
-            "SELECT chat_id, role, content, timestamp FROM conversations \
+            "SELECT chat_id, role, content, timestamp, source FROM conversations \
              WHERE chat_id = ?1 AND summarized = 0 \
              ORDER BY id DESC LIMIT ?2 OFFSET ?3",
         )?;
@@ -121,6 +138,7 @@ impl ConversationStore {
                             .map(|dt| dt.with_timezone(&Utc))
                             .unwrap_or_else(|_| Utc::now())
                     })?,
+                    source: row.get(4)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -269,6 +287,16 @@ pub fn department_chat_id(project_name: &str, department: &str) -> i64 {
         hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
     (hash & JS_SAFE_MASK | 4) as i64
+}
+
+/// Deterministic chat ID for a web session.
+pub fn web_chat_id(session_id: &str) -> i64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in format!("web:{session_id}").bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    (hash & JS_SAFE_MASK | 5) as i64
 }
 
 /// Deterministic chat ID for the agency-wide group chat.

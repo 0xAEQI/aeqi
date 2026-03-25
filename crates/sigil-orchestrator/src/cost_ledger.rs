@@ -21,6 +21,32 @@ pub struct CostEntry {
     pub cost_usd: f64,
     pub turns: u32,
     pub timestamp: DateTime<Utc>,
+    /// "claude_code" or "openrouter" — Claude Code with Max subscription = $0 actual cost.
+    #[serde(default = "default_source")]
+    pub source: String,
+    /// Token count (input + output) for tracking usage regardless of cost.
+    #[serde(default)]
+    pub tokens: u64,
+}
+
+fn default_source() -> String {
+    "claude_code".to_string()
+}
+
+impl CostEntry {
+    /// Create a cost entry with defaults for source and tokens.
+    pub fn new(project: &str, task_id: &str, worker: &str, cost_usd: f64, turns: u32) -> Self {
+        Self {
+            project: project.to_string(),
+            task_id: task_id.to_string(),
+            worker: worker.to_string(),
+            cost_usd,
+            turns,
+            timestamp: chrono::Utc::now(),
+            source: "claude_code".to_string(),
+            tokens: 0,
+        }
+    }
 }
 
 /// Cached sum with staleness tracking.
@@ -396,25 +422,11 @@ mod tests {
         let ledger = CostLedger::new(100.0);
 
         ledger
-            .record(CostEntry {
-                project: "test-project".into(),
-                task_id: "as-001".into(),
-                worker: "as-worker-1".into(),
-                cost_usd: 0.50,
-                turns: 5,
-                timestamp: Utc::now(),
-            })
+            .record(CostEntry::new("test-project", "as-001", "as-worker-1", 0.50, 5))
             .unwrap();
 
         ledger
-            .record(CostEntry {
-                project: "project-b".into(),
-                task_id: "rd-001".into(),
-                worker: "rd-worker-1".into(),
-                cost_usd: 0.30,
-                turns: 3,
-                timestamp: Utc::now(),
-            })
+            .record(CostEntry::new("project-b", "rd-001", "rd-worker-1", 0.30, 3))
             .unwrap();
 
         let (spent, budget, remaining) = ledger.budget_status();
@@ -433,14 +445,7 @@ mod tests {
 
         for i in 0..5 {
             ledger
-                .record(CostEntry {
-                    project: "test-project".into(),
-                    task_id: format!("as-{i:03}"),
-                    worker: format!("as-worker-{i}"),
-                    cost_usd: 1.0,
-                    turns: 5,
-                    timestamp: Utc::now(),
-                })
+                .record(CostEntry::new("test-project", &format!("as-{i:03}"), &format!("as-worker-{i}"), 1.0, 5))
                 .unwrap();
         }
 
@@ -455,14 +460,7 @@ mod tests {
 
         let ledger = CostLedger::with_persistence(100.0, path.clone());
         ledger
-            .record(CostEntry {
-                project: "test".into(),
-                task_id: "t-001".into(),
-                worker: "w1".into(),
-                cost_usd: 1.23,
-                turns: 4,
-                timestamp: Utc::now(),
-            })
+            .record(CostEntry::new("test", "t-001", "w1", 1.23, 4))
             .unwrap();
         ledger.save().unwrap();
 
@@ -476,29 +474,17 @@ mod tests {
     fn test_prune_old() {
         let ledger = CostLedger::new(100.0);
 
-        // Add an old entry.
+        // Add an old entry (timestamp set to 8 days ago so it exceeds the 7-day cutoff).
         {
+            let mut entry = CostEntry::new("test", "old", "w", 1.0, 1);
+            entry.timestamp = Utc::now() - Duration::days(8);
             let mut entries = ledger.entries.lock().unwrap();
-            entries.push(CostEntry {
-                project: "test".into(),
-                task_id: "old".into(),
-                worker: "w".into(),
-                cost_usd: 1.0,
-                turns: 1,
-                timestamp: Utc::now() - Duration::days(10),
-            });
+            entries.push(entry);
         }
 
         // Add a recent entry.
         ledger
-            .record(CostEntry {
-                project: "test".into(),
-                task_id: "new".into(),
-                worker: "w".into(),
-                cost_usd: 2.0,
-                turns: 2,
-                timestamp: Utc::now(),
-            })
+            .record(CostEntry::new("test", "new", "w", 2.0, 2))
             .unwrap();
 
         ledger.prune_old();
@@ -513,28 +499,14 @@ mod tests {
 
         // Spend $1.50 in test-project — should still be under project cap.
         ledger
-            .record(CostEntry {
-                project: "test-project".into(),
-                task_id: "as-001".into(),
-                worker: "w1".into(),
-                cost_usd: 1.50,
-                turns: 5,
-                timestamp: Utc::now(),
-            })
+            .record(CostEntry::new("test-project", "as-001", "w1", 1.50, 5))
             .unwrap();
 
         assert!(ledger.can_afford_project("test-project"));
 
         // Spend another $1.00 — now over the $2 project cap.
         ledger
-            .record(CostEntry {
-                project: "test-project".into(),
-                task_id: "as-002".into(),
-                worker: "w2".into(),
-                cost_usd: 1.00,
-                turns: 3,
-                timestamp: Utc::now(),
-            })
+            .record(CostEntry::new("test-project", "as-002", "w2", 1.00, 3))
             .unwrap();
 
         assert!(!ledger.can_afford_project("test-project"));
@@ -549,14 +521,7 @@ mod tests {
 
         // Exhaust test-project's budget.
         ledger
-            .record(CostEntry {
-                project: "test-project".into(),
-                task_id: "as-001".into(),
-                worker: "w1".into(),
-                cost_usd: 2.0,
-                turns: 5,
-                timestamp: Utc::now(),
-            })
+            .record(CostEntry::new("test-project", "as-001", "w1", 2.0, 5))
             .unwrap();
 
         // test-project is blocked.
@@ -571,14 +536,7 @@ mod tests {
         // No project budget set for "project-b".
 
         ledger
-            .record(CostEntry {
-                project: "project-b".into(),
-                task_id: "rd-001".into(),
-                worker: "w1".into(),
-                cost_usd: 3.0,
-                turns: 5,
-                timestamp: Utc::now(),
-            })
+            .record(CostEntry::new("project-b", "rd-001", "w1", 3.0, 5))
             .unwrap();
 
         // Under global budget — still affordable.
@@ -586,14 +544,7 @@ mod tests {
 
         // Exceed global budget.
         ledger
-            .record(CostEntry {
-                project: "project-b".into(),
-                task_id: "rd-002".into(),
-                worker: "w2".into(),
-                cost_usd: 3.0,
-                turns: 5,
-                timestamp: Utc::now(),
-            })
+            .record(CostEntry::new("project-b", "rd-002", "w2", 3.0, 5))
             .unwrap();
 
         // Global budget exceeded — no project can afford.
@@ -607,14 +558,7 @@ mod tests {
         ledger.set_project_budget("test-project", 10.0);
 
         ledger
-            .record(CostEntry {
-                project: "test-project".into(),
-                task_id: "as-001".into(),
-                worker: "w1".into(),
-                cost_usd: 3.50,
-                turns: 5,
-                timestamp: Utc::now(),
-            })
+            .record(CostEntry::new("test-project", "as-001", "w1", 3.50, 5))
             .unwrap();
 
         let (spent, budget, remaining) = ledger.project_budget_status("test-project");
@@ -635,25 +579,11 @@ mod tests {
         ledger.set_project_budget("project-b", 5.0);
 
         ledger
-            .record(CostEntry {
-                project: "test-project".into(),
-                task_id: "as-001".into(),
-                worker: "w1".into(),
-                cost_usd: 2.0,
-                turns: 5,
-                timestamp: Utc::now(),
-            })
+            .record(CostEntry::new("test-project", "as-001", "w1", 2.0, 5))
             .unwrap();
 
         ledger
-            .record(CostEntry {
-                project: "sigil".into(),
-                task_id: "sg-001".into(),
-                worker: "w1".into(),
-                cost_usd: 1.0,
-                turns: 3,
-                timestamp: Utc::now(),
-            })
+            .record(CostEntry::new("sigil", "sg-001", "w1", 1.0, 3))
             .unwrap();
 
         let statuses = ledger.all_project_budget_statuses();
@@ -683,14 +613,7 @@ mod tests {
 
         // Spend enough to exhaust global but not project.
         ledger
-            .record(CostEntry {
-                project: "test-project".into(),
-                task_id: "as-001".into(),
-                worker: "w1".into(),
-                cost_usd: 6.0,
-                turns: 10,
-                timestamp: Utc::now(),
-            })
+            .record(CostEntry::new("test-project", "as-001", "w1", 6.0, 10))
             .unwrap();
 
         // Project has headroom ($6 of $50) but global is exceeded ($6 of $5).

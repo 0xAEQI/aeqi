@@ -84,6 +84,24 @@ enum StreamEvent {
         #[serde(default)]
         duration_ms: u64,
     },
+    #[serde(rename = "rate_limit_event")]
+    RateLimitEvent {
+        #[serde(default)]
+        rate_limit_info: RateLimitInfo,
+    },
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[allow(dead_code)]
+pub struct RateLimitInfo {
+    #[serde(default)]
+    pub status: String,
+    #[serde(default, rename = "resetsAt")]
+    pub resets_at: u64,
+    #[serde(default, rename = "rateLimitType")]
+    pub rate_limit_type: String,
+    #[serde(default, rename = "overageStatus")]
+    pub overage_status: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -102,10 +120,12 @@ pub struct ExecutionResult {
     pub session_id: Option<String>,
     /// Number of agentic turns used.
     pub num_turns: u32,
-    /// Total cost in USD.
+    /// Total cost in USD (informational — $0 with Max subscription).
     pub total_cost_usd: f64,
     /// Wall-clock duration in milliseconds.
     pub duration_ms: u64,
+    /// Rate limit info from the last rate_limit_event.
+    pub rate_limit: Option<RateLimitInfo>,
 }
 
 /// Worker protocol injected into every Claude Code worker's system prompt.
@@ -314,6 +334,7 @@ impl ClaudeCodeExecutor {
         let mut cmd = Command::new(&claude_bin);
 
         cmd.arg("-p").arg(task_context);
+        cmd.arg("--verbose");
         cmd.arg("--output-format").arg("stream-json");
         cmd.arg("--permission-mode").arg("bypassPermissions");
         cmd.arg("--model").arg(&self.model);
@@ -372,6 +393,7 @@ impl ClaudeCodeExecutor {
         let mut final_result: Option<ExecutionResult> = None;
         let mut progress = ExecutionProgress::default();
         let mut aborted = false;
+        let mut last_rate_limit: Option<RateLimitInfo> = None;
 
         let stream_result =
             tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
@@ -407,7 +429,19 @@ impl ClaudeCodeExecutor {
                                 num_turns,
                                 total_cost_usd,
                                 duration_ms: dur,
+                                rate_limit: last_rate_limit.take(),
                             });
+                        }
+                        StreamEvent::RateLimitEvent { rate_limit_info } => {
+                            if rate_limit_info.status == "warning" || rate_limit_info.status == "limited" {
+                                warn!(
+                                    status = %rate_limit_info.status,
+                                    resets_at = rate_limit_info.resets_at,
+                                    rate_limit_type = %rate_limit_info.rate_limit_type,
+                                    "Claude Code rate limit warning"
+                                );
+                            }
+                            last_rate_limit = Some(rate_limit_info);
                         }
                         StreamEvent::ToolUse { ref name } => {
                             progress.last_tool = Some(name.clone());
@@ -563,6 +597,7 @@ impl ClaudeCodeExecutor {
             num_turns,
             total_cost_usd,
             duration_ms,
+            rate_limit: None,
         })
     }
 }

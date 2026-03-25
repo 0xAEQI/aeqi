@@ -1,49 +1,101 @@
 # Sigil
 
-AI agent orchestration workspace in Rust.
+AI agent orchestration framework in Rust. 9 crates, 217 tests, 28 CLI commands.
 
-## What Lives Here
+## Crates
 
-- `sigil-cli/`: CLI commands and daemon wiring
-- `crates/sigil-core/`: traits, config, identity, internal agent loop, secrets
-- `crates/sigil-orchestrator/`: supervisors, daemon, Claude Code executor, dispatch, audit, blackboard, budgets
-- `crates/sigil-tasks/`: task DAGs, missions, dependency inference
-- `crates/sigil-memory/`: SQLite memory and hybrid retrieval
-- `crates/sigil-providers/`: provider clients and pricing
-- `agents/`: agent identity files and advisor task boards
-- `projects/`: project instructions, skills, pipelines, task stores
+| Crate | Path | Purpose |
+|-------|------|---------|
+| `sigil` | `sigil-cli/` | CLI binary and command handlers |
+| `sigil-core` | `crates/sigil-core/` | Config (SigilConfig, WebConfig, DepartmentConfig), traits, agent loop, identity, secrets |
+| `sigil-orchestrator` | `crates/sigil-orchestrator/` | Daemon, Supervisor, AgentWorker, ChatEngine, ConversationStore, DispatchBus, Audit, Expertise, Blackboard, Watchdog, Preflight, Decomposition, FailureAnalysis, Lifecycle |
+| `sigil-web` | `crates/sigil-web/` | Axum REST API + WebSocket server (JWT auth, IPC proxy to daemon) |
+| `sigil-tasks` | `crates/sigil-tasks/` | Task DAG (JSONL), missions, dependency inference |
+| `sigil-memory` | `crates/sigil-memory/` | SQLite+FTS5, vector search (OpenRouter embeddings), hybrid ranking |
+| `sigil-providers` | `crates/sigil-providers/` | OpenRouter, Anthropic, Ollama + cost estimation |
+| `sigil-gates` | `crates/sigil-gates/` | Telegram, Discord, Slack channels |
+| `sigil-tools` | `crates/sigil-tools/` | Shell, file, git, tasks, delegate, skills |
 
-## Current Quality Bar
+## Message Flow
+
+```
+User message (Web / Telegram)
+    ↓
+ChatEngine (orchestrator/src/chat_engine.rs)
+    ├─ QUICK PATH: intent detection (create task, close task, note, status)
+    │   → Immediate response from daemon data
+    └─ FULL PATH: complex work
+        → Creates task → Supervisor assigns to worker
+        → Worker runs Claude Code → Outcome parsed
+        → ChatEngine polls completion → Response delivered
+```
+
+### Key execution chain:
+1. ChatEngine detects intent or creates task via `registry.assign()`
+2. Supervisor patrol picks up task → expertise routing → preflight assessment → spawn worker
+3. AgentWorker builds context (memory + blackboard + checkpoints + skill prompt)
+4. Worker executes via Claude Code subprocess or internal agent loop
+5. Outcome: DONE (close task), BLOCKED (escalate), HANDOFF (re-queue), FAILED (analyze + retry)
+6. Reflection extracts insights → stored in memory SQLite
+7. ChatEngine detects completion → delivers response to channel
+
+## Quality Bar
 
 ```bash
-cargo test --workspace
+cargo test --workspace    # 217 tests
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Current status:
+## Runtime
 
-- 204 unit tests passing
-- Clippy clean across workspace targets
+- `sigil daemon start` — long-running orchestration plane (systemd: sigil-daemon.service)
+- `sigil web start` — Axum REST API on :8400 (systemd: sigil-web.service)
+- `sigil run` — one-shot agent execution
+- IPC via Unix socket at `~/.sigil/rm.sock` (JSON-line protocol)
+- Claude Code execution: shells out to external `claude` binary
 
-## Runtime Facts
+## IPC Commands
 
-- `sigil run` uses the internal agent loop.
-- `sigil daemon start` is the long-running orchestration plane.
-- `claude_code` execution mode shells out to the external `claude` binary.
-- Budget and daemon state are queried with `sigil daemon query ...`, not `sigil cost`.
-- Council flow exists in the daemon message path, not as a first-class CLI subcommand.
+**Read:** ping, status, readiness, projects, tasks, missions, agents, audit, blackboard, expertise, cost, crons, watchdogs, brief
+**Write:** create_task, close_task, post_blackboard
+**Chat:** chat (quick), chat_full (agent execution), chat_poll (completion), chat_history, chat_channels
 
 ## Important Directories
 
-- `agents/shared/WORKFLOW.md`: shared workflow context for agent identities
-- `projects/shared/skills/`: shared skill catalog
-- `projects/shared/pipelines/`: shared pipeline catalog
-- `projects/<name>/.tasks/`: JSONL task storage
-- `~/.sigil/`: daemon state, audit log, blackboard, budget ledger, IPC socket
+- `config/sigil.toml` — master config (projects, agents, providers, orchestrator, watchdogs, web)
+- `agents/{name}/` — agent identity (agent.toml, PERSONA.md, IDENTITY.md)
+- `agents/rei/` — system leader (Rei, 零, The Living Sigil)
+- `projects/{name}/` — project config (project.toml, skills, .tasks/)
+- `projects/shared/` — shared skills, pipelines
+- `~/.sigil/` — daemon state (audit.db, blackboard.db, expertise.db, dispatches.db, memory.db, cost_ledger.jsonl, rm.sock)
+
+## Lock Architecture (CRITICAL)
+
+IPC handlers use `try_lock()` on task boards — return partial data rather than blocking when patrol holds locks. Never use `.lock().await` in IPC read paths.
+
+- `list_project_summaries()`: snapshots project list first, releases RwLocks, then try_lock each task board
+- `tasks`/`missions` IPC: `try_lock()` per project, skip if locked
+- Write commands (`create_task`, `close_task`): use `.lock().await` (must wait for consistency)
+
+## Config Structure
+
+```toml
+[sigil]           # System name, data_dir
+[web]             # bind, cors_origins, auth_secret
+[providers.*]     # OpenRouter, Anthropic, Ollama
+[security]        # autonomy, budget limits
+[memory]          # SQLite backend, embedding config
+[team]            # System leader (rei), router model
+[orchestrator]    # Expertise routing, preflight, decomposition, retry
+[[watchdogs]]     # Event-driven alert rules
+[[projects]]      # Each project: name, prefix, repo, team, departments, missions
+```
 
 ## Extension Points
 
-- New tool: implement `Tool`, export it, then wire it into the builder path you need
-- New provider: implement `Provider`; the CLI factory currently only selects the OpenRouter path
-- New channel: implement `Channel`, then register it in daemon startup
-- New project capability: prefer putting reusable assets in `projects/shared/` first
+- New tool: implement `Tool` trait, wire into builder
+- New provider: implement `Provider` trait
+- New channel: implement `Channel` trait, register in daemon startup
+- New IPC command: add match arm in `daemon.rs` handle_socket_connection
+- New web route: add to `sigil-web/src/routes/mod.rs`
+- New department: add `[[projects.departments]]` to sigil.toml

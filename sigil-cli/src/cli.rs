@@ -208,6 +208,15 @@ pub enum Commands {
         #[arg(long)]
         apply: Option<f64>,
     },
+
+    /// Start the web API server.
+    Web {
+        #[command(subcommand)]
+        action: WebAction,
+    },
+
+    /// Run as MCP (Model Context Protocol) server for Claude Code integration.
+    Mcp,
 }
 
 #[derive(Subcommand)]
@@ -398,4 +407,14 @@ pub enum PipelineAction {
     },
     /// Show status of a pipeline (parent task and its children).
     Status { id: String },
+}
+
+#[derive(Subcommand)]
+pub enum WebAction {
+    /// Start the web API server.
+    Start {
+        /// Override bind address (default: from config or 0.0.0.0:8400).
+        #[arg(long)]
+        bind: Option<String>,
+    },
 }

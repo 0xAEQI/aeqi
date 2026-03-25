@@ -9,6 +9,7 @@ members = [
     "crates/sigil-orchestrator",
     "crates/sigil-memory",
     "crates/sigil-gates",
+    "crates/sigil-web",
 ]
 
 [workspace.package]
@@ -33,6 +34,10 @@ toml = "0.8"
 
 # HTTP
 reqwest = { version = "0.12", features = ["json", "stream"] }
+axum = { version = "0.8", features = ["ws"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+jsonwebtoken = "9"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -82,6 +87,7 @@ sigil-tools = { path = "crates/sigil-tools" }
 sigil-orchestrator = { path = "crates/sigil-orchestrator" }
 sigil-memory = { path = "crates/sigil-memory" }
 sigil-gates = { path = "crates/sigil-gates" }
+sigil-web = { path = "crates/sigil-web" }
 
 
 [profile.release]

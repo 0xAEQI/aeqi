@@ -8,6 +8,7 @@ use sigil_core::traits::{ChatRequest, Message, MessageContent, Provider, Role};
 
 use crate::audit::{AuditEvent, AuditLog, DecisionType};
 use crate::blackboard::Blackboard;
+use crate::conversation_store::ConversationStore;
 use crate::cost_ledger::CostLedger;
 use crate::decomposition::DecompositionResult;
 use crate::expertise::ExpertiseLedger;
@@ -34,6 +35,14 @@ pub struct ProjectRegistry {
     pub expertise_ledger: Option<Arc<ExpertiseLedger>>,
     /// Inter-agent blackboard for shared knowledge (Phase 3).
     pub blackboard: Option<Arc<Blackboard>>,
+    /// Unified conversation store for all chat channels.
+    pub conversation_store: Option<Arc<ConversationStore>>,
+    /// Names from [[projects]] config (to distinguish from agent entries).
+    pub config_project_names: Vec<String>,
+    /// Watchdog rules config (for IPC query).
+    pub watchdog_rules_config: Vec<serde_json::Value>,
+    /// Latest Claude Code rate limit info.
+    pub rate_limit: std::sync::Mutex<Option<serde_json::Value>>,
 }
 
 impl ProjectRegistry {
@@ -50,6 +59,10 @@ impl ProjectRegistry {
             audit_log: None,
             expertise_ledger: None,
             blackboard: None,
+            conversation_store: None,
+            config_project_names: Vec::new(),
+            watchdog_rules_config: Vec::new(),
+            rate_limit: std::sync::Mutex::new(None),
         }
     }
 
@@ -443,30 +456,64 @@ impl ProjectRegistry {
     }
 
     /// List all projects with summary stats (task counts, mission counts, team info).
+    /// Designed to minimize lock hold times — snapshot project list first, then read each
+    /// project's task board independently without holding the registry-level RwLocks.
     pub async fn list_project_summaries(&self) -> Vec<ProjectSummary> {
-        let projects = self.projects.read().await;
-        let supervisors = self.supervisors.read().await;
+        // Step 1: Snapshot project list + supervisor refs, then release RwLocks immediately.
+        let project_list: Vec<(String, Arc<Project>)> = {
+            let projects = self.projects.read().await;
+            projects
+                .iter()
+                .filter(|(name, _)| {
+                    self.config_project_names.is_empty()
+                        || self.config_project_names.iter().any(|n| n == *name)
+                })
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        }; // projects RwLock RELEASED here.
+
+        let supervisor_refs: Vec<(String, Arc<Mutex<Supervisor>>)> = {
+            let supervisors = self.supervisors.read().await;
+            supervisors
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        }; // supervisors RwLock RELEASED here.
+
+        // Step 2: Read each project's data without holding registry locks.
         let mut summaries = Vec::new();
 
-        for (name, project) in projects.iter() {
-            let board = project.tasks.lock().await;
-            let all_tasks = board.all();
-            let open_tasks = all_tasks.iter().filter(|t| !t.is_closed()).count() as u32;
-            let total_tasks = all_tasks.len() as u32;
+        for (name, project) in &project_list {
+            // Try to acquire task board lock with a short timeout to avoid blocking.
+            let (open_tasks, total_tasks, pending_tasks, in_progress_tasks, done_tasks, cancelled_tasks, active_missions, total_missions) =
+                if let Ok(board) = project.tasks.try_lock() {
+                    let all_tasks = board.all();
+                    let open = all_tasks.iter().filter(|t| !t.is_closed()).count() as u32;
+                    let total = all_tasks.len() as u32;
+                    let pending = all_tasks.iter().filter(|t| t.status == sigil_tasks::task::TaskStatus::Pending).count() as u32;
+                    let in_progress = all_tasks.iter().filter(|t| t.status == sigil_tasks::task::TaskStatus::InProgress).count() as u32;
+                    let done = all_tasks.iter().filter(|t| t.status == sigil_tasks::task::TaskStatus::Done).count() as u32;
+                    let cancelled = all_tasks.iter().filter(|t| t.status == sigil_tasks::task::TaskStatus::Cancelled).count() as u32;
+                    let missions = board.missions(Some(&project.prefix));
+                    let active_m = missions.iter().filter(|m| !m.is_closed()).count() as u32;
+                    let total_m = missions.len() as u32;
+                    (open, total, pending, in_progress, done, cancelled, active_m, total_m)
+                } else {
+                    // Lock held by patrol — return stale/zero data rather than blocking.
+                    (0, 0, 0, 0, 0, 0, 0, 0)
+                };
 
-            let all_missions = board.missions(Some(&project.prefix));
-            let active_missions = all_missions.iter().filter(|m| !m.is_closed()).count() as u32;
-            let total_missions = all_missions.len() as u32;
-
-            let team_info = if let Some(s) = supervisors.get(name) {
-                let guard = s.lock().await;
-                guard.team.as_ref().map(|t| TeamSummary {
-                    leader: t.leader.clone(),
-                    agents: t.effective_agents(),
-                })
-            } else {
-                None
-            };
+            let team_info = supervisor_refs
+                .iter()
+                .find(|(k, _)| k == name)
+                .and_then(|(_, sup)| {
+                    sup.try_lock().ok().and_then(|guard| {
+                        guard.team.as_ref().map(|t| TeamSummary {
+                            leader: t.leader.clone(),
+                            agents: t.effective_agents(),
+                        })
+                    })
+                });
 
             summaries.push(ProjectSummary {
                 name: name.clone(),
@@ -474,8 +521,18 @@ impl ProjectRegistry {
                 team: team_info,
                 open_tasks,
                 total_tasks,
+                pending_tasks,
+                in_progress_tasks,
+                done_tasks,
+                cancelled_tasks,
                 active_missions,
                 total_missions,
+                departments: project.departments.iter().map(|d| DepartmentSummary {
+                    name: d.name.clone(),
+                    lead: d.lead.clone(),
+                    agents: d.agents.clone(),
+                    description: d.description.clone(),
+                }).collect(),
             });
         }
 
@@ -509,8 +566,21 @@ pub struct ProjectSummary {
     pub team: Option<TeamSummary>,
     pub open_tasks: u32,
     pub total_tasks: u32,
+    pub pending_tasks: u32,
+    pub in_progress_tasks: u32,
+    pub done_tasks: u32,
+    pub cancelled_tasks: u32,
     pub active_missions: u32,
     pub total_missions: u32,
+    pub departments: Vec<DepartmentSummary>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DepartmentSummary {
+    pub name: String,
+    pub lead: Option<String>,
+    pub agents: Vec<String>,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -573,6 +643,7 @@ mod tests {
             team: None,
             orchestrator: None,
             missions: Vec::new(),
+            departments: Vec::new(),
         };
         let project = Project::from_config(&config, dir.path(), "test-model")?;
         Ok((Arc::new(project), dir))

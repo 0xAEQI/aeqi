@@ -2,6 +2,12 @@
 name = "emperor-system"
 data_dir = "~/.sigil"
 
+[web]
+enabled = true
+bind = "0.0.0.0:8400"
+cors_origins = ["https://entity.business", "http://localhost:5173"]
+auth_secret = "${SIGIL_WEB_SECRET}"
+
 [providers.openrouter]
 api_key = "${OPENROUTER_API_KEY}"
 default_model = "minimax/minimax-m2.5"
@@ -35,20 +41,28 @@ model = "minimax/MiniMax-M1"
 # Global repo pool — all agents can access all repos
 [repos]
 sigil = "/home/claudedev/sigil"
+sigil-ui = "/home/claudedev/entity-business"
 algostaking = "/home/claudedev/algostaking-backend"
+algostaking-app = "/home/claudedev/algostaking-app"
+algostaking-frontend = "/home/claudedev/algostaking-frontend"
 riftdecks = "/home/claudedev/riftdecks"
 entity-legal = "/home/claudedev/sigil/projects/entity-legal/web"
+aeqi-core = "/home/claudedev/aeqi-core"
+aeqi-app = "/home/claudedev/aeqi-app"
+aeqi-graph = "/home/claudedev/aeqi-graph"
+unifutures = "/home/claudedev/unifutures"
 
-# System team — overarching orchestrator
+# System team — Rei at the helm
 [team]
-leader = "waifu"
-agents = ["waifu"]
+leader = "rei"
+agents = ["rei"]
 router_model = "google/gemini-2.0-flash-001"
 router_cooldown_secs = 60
 max_background_cost_usd = 0.50
 
 # Agents discovered from agents/{name}/agent.toml files on disk.
-# See: agents/waifu/agent.toml, agents/trader/agent.toml, etc.
+# Agents discovered from agents/{name}/agent.toml files on disk.
+# Active: rei, engineer, trader, designer, researcher, reviewer
 
 [channels.telegram]
 token_secret = "TELEGRAM_BOT_TOKEN"
@@ -71,16 +85,16 @@ blackboard_durable_ttl_days = 14
 
 # Watchdog rules — event-driven automation
 [[watchdogs]]
-name = "failure-spike"
+name = "sigil-self-failure"
 cooldown_secs = 7200
 enabled = true
 [watchdogs.condition]
 event = "task_failed"
-project_filter = "gacha-agency"
-count_threshold = 3
+project_filter = "sigil"
+count_threshold = 2
 window_secs = 3600
 [watchdogs.action.escalate]
-message = "3+ task failures in gacha-agency within 1 hour"
+message = "2+ task failures in sigil project — the orchestrator needs attention"
 
 # Algostaking cron jobs: service-heartbeat (5m), pnl-tracker (10m),
 # accuracy-watchdog (15m), health-monitor (30m), training-progress (1h),
@@ -125,30 +139,44 @@ budget_threshold = 0.8
 message = "Budget usage exceeded 80%"
 
 [[watchdogs]]
-name = "worker-timeout-alert"
+name = "general-timeout-alert"
 cooldown_secs = 3600
 enabled = true
 [watchdogs.condition]
 event = "worker_timeout"
-project_filter = "gacha-agency"
-count_threshold = 2
+count_threshold = 3
 window_secs = 1800
 [watchdogs.action.escalate]
-message = "Multiple worker timeouts in gacha-agency"
+message = "3+ worker timeouts across projects in 30 minutes"
 
-# Projects (repos, tasks, knowledge)
+# Projects — each is a product you're building
+# Sigil manages itself — dogfooding is how we make it great
 [[projects]]
-name = "gacha-agency"
-prefix = "ga"
+name = "sigil"
+prefix = "sg"
 repo = "/home/claudedev/sigil"
 model = "claude-sonnet-4-6"
 max_workers = 2
+worktree_root = "/home/claudedev/worktrees"
 execution_mode = "claude_code"
-worker_timeout_secs = 1800
-max_turns = 20
+max_turns = 25
+worker_timeout_secs = 3600
 team.leader = "engineer"
-team.agents = ["engineer"]
+team.agents = ["engineer", "reviewer"]
 
+[[projects.departments]]
+name = "engineering"
+lead = "engineer"
+agents = ["engineer", "reviewer"]
+description = "Core framework, CLI, daemon, web API"
+
+[[projects.departments]]
+name = "product"
+lead = "designer"
+agents = ["designer"]
+description = "Web dashboard, UX, landing page"
+
+# HFT trading engine — the money machine
 [[projects]]
 name = "algostaking"
 prefix = "as"
@@ -157,11 +185,42 @@ model = "claude-sonnet-4-6"
 max_workers = 3
 worktree_root = "/home/claudedev/worktrees"
 execution_mode = "claude_code"
-max_turns = 25
-worker_timeout_secs = 3600
+max_turns = 10
+worker_timeout_secs = 300
 team.leader = "trader"
-team.agents = ["trader"]
+team.agents = ["trader", "engineer"]
 
+[[projects.departments]]
+name = "trading"
+lead = "trader"
+agents = ["trader"]
+description = "Strategy, signals, PMS/OMS/EMS, portfolio management"
+
+[[projects.departments]]
+name = "engineering"
+lead = "engineer"
+agents = ["engineer"]
+description = "Infrastructure, data pipeline, services, deployment"
+
+[[projects.departments]]
+name = "research"
+lead = "researcher"
+agents = ["researcher"]
+description = "Model evaluation, feature research, backtesting"
+
+# aeqi platform
+[[projects]]
+name = "aeqi"
+prefix = "aq"
+repo = "/home/claudedev/aeqi-core"
+model = "claude-sonnet-4-6"
+max_workers = 2
+execution_mode = "claude_code"
+worker_timeout_secs = 1800
+team.leader = "engineer"
+team.agents = ["engineer", "designer"]
+
+# E-commerce
 [[projects]]
 name = "riftdecks-shop"
 prefix = "rd"
@@ -173,6 +232,7 @@ worker_timeout_secs = 1800
 team.leader = "designer"
 team.agents = ["designer"]
 
+# Legal platform
 [[projects]]
 name = "entity-legal"
 prefix = "el"
@@ -183,3 +243,15 @@ execution_mode = "claude_code"
 worker_timeout_secs = 1800
 team.leader = "designer"
 team.agents = ["designer"]
+
+# Futures exchange
+[[projects]]
+name = "unifutures"
+prefix = "uf"
+repo = "/home/claudedev/unifutures"
+model = "claude-sonnet-4-6"
+max_workers = 1
+execution_mode = "claude_code"
+worker_timeout_secs = 1800
+team.leader = "engineer"
+team.agents = ["engineer"]

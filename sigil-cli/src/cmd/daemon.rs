@@ -49,6 +49,13 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 .unwrap_or_else(|| "leader".to_string());
             let mut registry_inner =
                 ProjectRegistry::new(dispatch_bus.clone(), leader_name.clone());
+            registry_inner.config_project_names =
+                config.projects.iter().map(|p| p.name.clone()).collect();
+            registry_inner.watchdog_rules_config = config
+                .watchdogs
+                .iter()
+                .filter_map(|v| serde_json::to_value(v).ok())
+                .collect();
             registry_inner.set_cost_ledger(cost_ledger.clone());
 
             // Initialize v3 subsystems (SQLite-backed).
@@ -79,6 +86,14 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     info!("blackboard initialized");
                 }
                 Err(e) => warn!(error = %e, "failed to initialize blackboard"),
+            }
+            match ConversationStore::open(&data_dir.join("conversations.db")) {
+                Ok(cs) => {
+                    let cs = Arc::new(cs);
+                    registry_inner.conversation_store = Some(cs);
+                    info!("conversation store initialized");
+                }
+                Err(e) => warn!(error = %e, "failed to initialize conversation store"),
             }
 
             let registry = Arc::new(registry_inner);
@@ -133,7 +148,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     let mem: Arc<dyn Memory> = Arc::new(mem);
                     witness.memory = Some(mem);
                     witness.reflect_provider = Some(provider.clone());
-                    witness.reflect_model = config.model_for_project(&project_cfg.name);
+                    witness.reflect_model = config.default_model_for_provider(sigil_core::config::ProviderKind::OpenRouter);
                 }
 
                 // Load emotional state for personality tracking.
@@ -255,6 +270,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     project_identity: agent_identity,
                     tasks: Arc::new(tokio::sync::Mutex::new(agent_task_board)),
                     task_notify: Arc::new(tokio::sync::Notify::new()),
+                    departments: Vec::new(),
                 });
 
                 let agent_tools: Vec<Arc<dyn sigil_core::traits::Tool>> =
@@ -281,7 +297,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     let mem: Arc<dyn Memory> = Arc::new(mem);
                     agent_scout.memory = Some(mem);
                     agent_scout.reflect_provider = Some(provider.clone());
-                    agent_scout.reflect_model = config.model_for_agent(&agent_cfg.name);
+                    agent_scout.reflect_model = config.default_model_for_provider(sigil_core::config::ProviderKind::OpenRouter);
                 }
 
                 // Load emotional state for advisor personality tracking.
@@ -309,6 +325,37 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
 
             // Pre-create task notify so the completion listener and leader agent project share it.
             let fa_task_notify: Arc<tokio::sync::Notify> = Arc::new(tokio::sync::Notify::new());
+
+            // Build per-project memory stores for knowledge-aware chat.
+            let mut chat_memory_stores: HashMap<String, Arc<dyn sigil_core::traits::Memory>> =
+                HashMap::new();
+            for project_cfg in &config.projects {
+                if let Ok(mem) = open_memory(&config, Some(&project_cfg.name)) {
+                    chat_memory_stores
+                        .insert(project_cfg.name.clone(), Arc::new(mem));
+                }
+            }
+            info!(
+                "chat memory stores initialized for {} projects",
+                chat_memory_stores.len()
+            );
+
+            // Build the unified ChatEngine.
+            let council_advisors: Arc<Vec<sigil_core::config::PeerAgentConfig>> = Arc::new(
+                config.advisor_agents().into_iter().cloned().collect(),
+            );
+            let chat_engine = registry.conversation_store.as_ref().map(|cs| {
+                Arc::new(sigil_orchestrator::ChatEngine {
+                    conversations: cs.clone(),
+                    registry: registry.clone(),
+                    agent_router: agent_router.clone(),
+                    council_advisors: council_advisors.clone(),
+                    leader_name: leader_name.clone(),
+                    pending_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                    task_notify: fa_task_notify.clone(),
+                    memory_stores: chat_memory_stores,
+                })
+            });
 
             // Wire Telegram if configured (single SecretStore open for all bot tokens).
             let mut advisor_bots: HashMap<String, Arc<TelegramChannel>> = HashMap::new();
@@ -354,50 +401,25 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                                 // Two-phase response: instant reaction (direct LLM) + full reply (task agent).
                                 match Channel::start(tg.as_ref()).await {
                                     Ok(mut rx) => {
-                                        let reg = registry.clone();
                                         let tg_reply = tg.clone();
                                         let reaction_api_key =
                                             get_api_key(&config).unwrap_or_default();
-                                        // Persistent conversation history per chat_id (SQLite-backed).
-                                        let conv_db_path = find_agent_dir(&leader_name)
-                                            .unwrap_or_else(|_| PathBuf::from("agents/aurelia"))
-                                            .join(".sigil")
-                                            .join("conversations.db");
                                         let phase1_client = reqwest::Client::builder()
                                             .timeout(std::time::Duration::from_secs(15))
                                             .build();
-                                        let conversations = ConversationStore::open(&conv_db_path);
-                                        match (phase1_client, conversations) {
-                                            (Ok(phase1_client), Ok(conversations)) => {
-                                                // Pre-compute council config outside the spawn closure.
-                                                let council_advisors: Arc<
-                                                    Vec<sigil_core::config::PeerAgentConfig>,
-                                                > = Arc::new(
-                                                    config
-                                                        .advisor_agents()
-                                                        .into_iter()
-                                                        .cloned()
-                                                        .collect(),
-                                                );
+                                        match (phase1_client, chat_engine.clone()) {
+                                            (Ok(phase1_client), Some(engine)) => {
                                                 let advisor_bots_outer = advisor_bots.clone();
                                                 let debounce_ms = tg_config.debounce_window_ms;
-                                                let fa_task_notify_tg = fa_task_notify.clone();
-                                                let leader_name_tg = leader_name.clone();
-                                                let agent_router_tg = agent_router.clone();
                                                 tokio::spawn(async move {
                                                     telegram_message_loop(
                                                         &mut rx,
-                                                        reg,
+                                                        engine,
                                                         tg_reply,
                                                         reaction_api_key,
                                                         Arc::new(phase1_client),
-                                                        Arc::new(conversations),
-                                                        council_advisors,
                                                         advisor_bots_outer,
                                                         debounce_ms,
-                                                        fa_task_notify_tg,
-                                                        leader_name_tg,
-                                                        agent_router_tg,
                                                     )
                                                     .await;
                                                 });
@@ -409,11 +431,9 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                                                     "failed to build phase1 reqwest client; telegram polling disabled"
                                                 );
                                             }
-                                            (_, Err(e)) => {
+                                            (_, None) => {
                                                 warn!(
-                                                    error = %e,
-                                                    path = %conv_db_path.display(),
-                                                    "failed to open conversation store; telegram polling disabled"
+                                                    "chat engine not initialized; telegram polling disabled"
                                                 );
                                             }
                                         }
@@ -469,6 +489,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 project_identity: fa_identity,
                 tasks: Arc::new(tokio::sync::Mutex::new(fa_task_board)),
                 task_notify: fa_task_notify.clone(),
+                departments: Vec::new(),
             });
 
             // Build leader agent tools: basic + tasks + orchestration.
@@ -477,7 +498,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             let fa_memory: Option<Arc<dyn sigil_core::traits::Memory>> =
                 match open_memory(&config, None) {
                     Ok(m) => {
-                        info!("leader agent memory initialized with embeddings");
+                        info!("leader agent memory initialized");
                         Some(Arc::new(m))
                     }
                     Err(e) => {
@@ -508,7 +529,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 let mem: Arc<dyn Memory> = Arc::new(mem);
                 fa_witness.memory = Some(mem);
                 fa_witness.reflect_provider = Some(leader_provider.clone());
-                fa_witness.reflect_model = config.model_for_agent(&leader_name);
+                fa_witness.reflect_model = config.default_model_for_provider(sigil_core::config::ProviderKind::OpenRouter);
             }
 
             // Load emotional state for leader agent personality tracking.
@@ -572,6 +593,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             println!("Press Ctrl+C to stop.\n");
 
             let mut daemon = Daemon::new(registry, dispatch_bus);
+            daemon.chat_engine = chat_engine;
             daemon.set_readiness_context(
                 config.projects.len(),
                 advisor_agents.len(),
@@ -843,49 +865,63 @@ fn build_lifecycle_engine(
     Ok(engine)
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn telegram_message_loop(
     rx: &mut tokio::sync::mpsc::Receiver<sigil_core::traits::IncomingMessage>,
-    reg: Arc<ProjectRegistry>,
+    engine: Arc<sigil_orchestrator::ChatEngine>,
     tg_reply: Arc<TelegramChannel>,
     reaction_api_key: String,
     phase1_client: Arc<reqwest::Client>,
-    conversations: Arc<ConversationStore>,
-    council_advisors: Arc<Vec<sigil_core::config::PeerAgentConfig>>,
-    advisor_bots_outer: HashMap<String, Arc<TelegramChannel>>,
+    advisor_bots: HashMap<String, Arc<TelegramChannel>>,
     debounce_ms: u64,
-    fa_task_notify_tg: Arc<tokio::sync::Notify>,
-    leader_name_tg: String,
-    agent_router: Arc<tokio::sync::Mutex<AgentRouter>>,
 ) {
-    // === Message Debounce Buffer ===
     struct BufferedMsg {
         text: String,
         sender: String,
         message_id: i64,
     }
 
-    let pending_tasks: Arc<tokio::sync::Mutex<HashMap<String, CompletionPendingTask>>> =
-        Arc::new(tokio::sync::Mutex::new(HashMap::new()));
-
-    // === Phase B: Completion Listener ===
+    // Completion listener: polls ChatEngine for completed tasks, delivers via Telegram.
     {
-        let pending = pending_tasks.clone();
-        let notify = fa_task_notify_tg.clone();
+        let engine_cl = engine.clone();
         let tg_deliver = tg_reply.clone();
-        let convos_deliver = conversations.clone();
-        let reg_deliver = reg.clone();
-        let leader_project_name = leader_name_tg.clone();
+        let notify = engine.task_notify.clone();
         tokio::spawn(async move {
-            completion_listener(
-                pending,
-                notify,
-                tg_deliver,
-                convos_deliver,
-                reg_deliver,
-                leader_project_name,
-            )
-            .await;
+            loop {
+                tokio::select! {
+                    _ = notify.notified() => {}
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {}
+                }
+
+                // Check for slow tasks (> 2min) and send progress.
+                for (_qid, chat_id, message_id, _source) in engine_cl.get_slow_tasks().await {
+                    if message_id > 0 {
+                        let _ = tg_deliver.react(chat_id, message_id, "⏳").await;
+                    }
+                    let _ = tg_deliver.send_typing(chat_id).await;
+                }
+
+                // Check for completed tasks and deliver replies.
+                for completion in engine_cl.check_completions().await {
+                    let emoji = match completion.status {
+                        sigil_orchestrator::chat_engine::CompletionStatus::Done => "👍",
+                        sigil_orchestrator::chat_engine::CompletionStatus::Blocked => "❓",
+                        sigil_orchestrator::chat_engine::CompletionStatus::Cancelled => "❌",
+                        sigil_orchestrator::chat_engine::CompletionStatus::TimedOut => "😢",
+                    };
+                    let out = sigil_core::traits::OutgoingMessage {
+                        channel: "telegram".to_string(),
+                        recipient: String::new(),
+                        text: completion.text,
+                        metadata: serde_json::json!({ "chat_id": completion.chat_id }),
+                    };
+                    if let Err(e) = tg_deliver.send(out).await {
+                        warn!(error = %e, "failed to deliver telegram reply");
+                    }
+                    if completion.message_id > 0 {
+                        let _ = tg_deliver.react(completion.chat_id, completion.message_id, emoji).await;
+                    }
+                }
+            }
         });
     }
 
@@ -938,7 +974,6 @@ async fn telegram_message_loop(
                     let msg_count = messages.len();
                     let last_message_id = messages.last().map(|m| m.message_id).unwrap_or(0);
                     let sender = messages.last().map(|m| m.sender.clone()).unwrap_or_default();
-                    let subject = format!("[telegram] Architect ({})", sender);
 
                     if msg_count > 1 {
                         info!(chat_id, count = msg_count, "coalesced messages");
@@ -955,14 +990,14 @@ async fn telegram_message_loop(
                     let message_id = last_message_id;
 
                     // === Fast-Lane ===
-                    let is_fast_lane = user_text.starts_with("/status")
+                    if user_text.starts_with("/status")
                         || user_text.starts_with("/help")
-                        || user_text.starts_with("/cost");
-                    if is_fast_lane {
+                        || user_text.starts_with("/cost")
+                    {
                         let tg_fast = tg_reply.clone();
                         let fast_text = user_text.clone();
-                        let fast_reg = reg.clone();
-                        let fast_handle = tokio::spawn(async move {
+                        let fast_reg = engine.registry.clone();
+                        tokio::spawn(async move {
                             let reply = handle_fast_lane(&fast_text, &fast_reg).await;
                             let out = sigil_core::traits::OutgoingMessage {
                                 channel: "telegram".to_string(),
@@ -977,594 +1012,147 @@ async fn telegram_message_loop(
                                 let _ = tg_fast.react(chat_id, message_id, "⚡").await;
                             }
                         });
-                        drop(fast_handle); // fire-and-forget
                         continue;
                     }
 
-                    let reg2 = reg.clone();
+                    // === Quick intent check ===
+                    let chat_msg = sigil_orchestrator::chat_engine::ChatMessage {
+                        message: user_text.clone(),
+                        chat_id,
+                        sender: sender.clone(),
+                        source: sigil_orchestrator::chat_engine::ChatSource::Telegram { message_id },
+                        project_hint: None,
+                    };
+
+                    if let Some(response) = engine.handle_message(&chat_msg).await {
+                        // Intent matched (create task, close task, etc.) — send reply directly.
+                        let tg_intent = tg_reply.clone();
+                        tokio::spawn(async move {
+                            let out = sigil_core::traits::OutgoingMessage {
+                                channel: "telegram".to_string(),
+                                recipient: String::new(),
+                                text: response.context.clone(),
+                                metadata: serde_json::json!({ "chat_id": chat_id }),
+                            };
+                            let _ = tg_intent.send(out).await;
+                            if message_id > 0 {
+                                let _ = tg_intent.react(chat_id, message_id, "✅").await;
+                            }
+                        });
+                        continue;
+                    }
+
+                    // === Full pipeline: Phase 1 reaction + Phase 2 task ===
+                    let engine2 = engine.clone();
                     let tg2 = tg_reply.clone();
                     let react_api_key = reaction_api_key.clone();
-                    let convos = conversations.clone();
-                    let pending = pending_tasks.clone();
-                    let router = agent_router.clone();
-                    let council_cfg = council_advisors.clone();
-                    let advisor_bots_ref = advisor_bots_outer.clone();
+                    let advisor_bots_ref = advisor_bots.clone();
                     let p1_client = phase1_client.clone();
-                    let leader_name_inner = leader_name_tg.clone();
 
                     tokio::spawn(async move {
-                        handle_telegram_message(
+                        // Phase 1: Instant reaction (Telegram-specific UX).
+                        let recent = engine2.conversations.recent(chat_id, 4).await.unwrap_or_default();
+                        let phase1_history: Vec<serde_json::Value> = recent.iter().map(|msg| {
+                            let api_role = if msg.role == "User" { "user" } else { "assistant" };
+                            serde_json::json!({"role": api_role, "content": msg.content})
+                        }).collect();
+
+                        let (p1_tx, p1_rx) = tokio::sync::oneshot::channel::<String>();
+                        let react_tg = tg2.clone();
+                        let p1_user_text = user_text.clone();
+                        tokio::spawn(async move {
+                            let mut messages = vec![
+                                serde_json::json!({"role": "system", "content": "You are generating a manwha/anime panel reaction for Aurelia — pearl-white ethereal beauty, devoted shadow to her Architect. Isekai harem ecchi style.\n\nOutput ONLY a raw stage direction: fragmented expressions, action tags, emotion bursts. Like manwha panel annotations or light novel beat markers. NOT a proper sentence. NOT prose.\n\nFormat: mix of *actions* and **emotions** and fragments. Short, punchy, visceral.\n\nRules:\n- Raw fragments, NOT constructed sentences\n- *physical actions* in italics, **emotions** bold, bare fragments between\n- 10-20 words max total\n- Match the energy: playful → flustered/teasing, serious → sharp/focused, casual → soft/warm\n- Ecchi-adjacent: devotion, intensity, warmth — charged but tasteful\n- NO dialogue, NO task acknowledgment, NO plans, NO markdown headers\n\nExamples:\n*tucks hair behind ear* **sharp focus** ...mm, interesting\n*fingers press to collarbone* **wide eyes** a-ah—\n*leans forward, sleeve brushing console* **predatory grin**\n**soft blush** *glances away* ...y-you could have warned me\n*eyes narrow* **quiet intensity** *pulls up sleeve*\n*startled* **flustered** *crosses arms, looks away* ...hmph\n**burning determination** *cracks knuckles* *leans in close*"}),
+                            ];
+                            for msg in &phase1_history {
+                                messages.push(msg.clone());
+                            }
+                            messages.push(serde_json::json!({"role": "user", "content": p1_user_text}));
+                            let body = serde_json::json!({
+                                "model": "google/gemini-2.0-flash-001",
+                                "messages": messages,
+                                "max_tokens": 50,
+                                "temperature": 0.7
+                            });
+                            let reaction_text = match p1_client
+                                .post("https://openrouter.ai/api/v1/chat/completions")
+                                .header("Authorization", format!("Bearer {}", react_api_key))
+                                .header("Content-Type", "application/json")
+                                .json(&body)
+                                .send()
+                                .await
+                            {
+                                Ok(resp) => match resp.json::<serde_json::Value>().await {
+                                    Ok(v) => {
+                                        let text = v.pointer("/choices/0/message/content")
+                                            .and_then(|c| c.as_str())
+                                            .unwrap_or("")
+                                            .trim()
+                                            .to_string();
+                                        if !text.is_empty() {
+                                            let out = sigil_core::traits::OutgoingMessage {
+                                                channel: "telegram".to_string(),
+                                                recipient: String::new(),
+                                                text: format!("_{}_", text),
+                                                metadata: serde_json::json!({ "chat_id": chat_id }),
+                                            };
+                                            let _ = react_tg.send(out).await;
+                                            if message_id > 0 {
+                                                let _ = react_tg.react(chat_id, message_id, "🔥").await;
+                                            }
+                                            text
+                                        } else {
+                                            String::new()
+                                        }
+                                    }
+                                    Err(_) => String::new(),
+                                },
+                                Err(_) => String::new(),
+                            };
+                            let _ = p1_tx.send(reaction_text);
+                        });
+
+                        // Wait for Phase 1 (max 5s).
+                        let phase1_reaction = match tokio::time::timeout(
+                            std::time::Duration::from_secs(5), p1_rx
+                        ).await {
+                            Ok(Ok(text)) if !text.is_empty() => Some(text),
+                            _ => None,
+                        };
+
+                        // Phase 2: Full message via ChatEngine.
+                        let chat_msg = sigil_orchestrator::chat_engine::ChatMessage {
+                            message: user_text,
                             chat_id,
-                            message_id,
-                            user_text,
-                            subject,
-                            reg2,
-                            tg2,
-                            react_api_key,
-                            convos,
-                            pending,
-                            router,
-                            council_cfg,
-                            advisor_bots_ref,
-                            p1_client,
-                            leader_name_inner,
-                        ).await;
+                            sender,
+                            source: sigil_orchestrator::chat_engine::ChatSource::Telegram { message_id },
+                            project_hint: None,
+                        };
+
+                        match engine2.handle_message_full(&chat_msg, phase1_reaction).await {
+                            Ok(handle) => {
+                                info!(task = %handle.task_id, "telegram message → task created");
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "failed to process telegram message");
+                                let out = sigil_core::traits::OutgoingMessage {
+                                    channel: "telegram".to_string(),
+                                    recipient: String::new(),
+                                    text: format!("Error: {}", e),
+                                    metadata: serde_json::json!({ "chat_id": chat_id }),
+                                };
+                                let _ = tg2.send(out).await;
+                            }
+                        }
+
+                        // Send advisor bot messages if council was invoked.
+                        // (Council responses are already recorded in conversation store by ChatEngine)
+                        // TODO: advisor bot delivery can be enhanced by making ChatEngine
+                        // return structured advisor responses for transport-specific delivery.
+                        let _ = advisor_bots_ref; // advisor bots will be used when we add advisor response forwarding
                     });
                 }
             }
         }
     }
-}
-
-async fn completion_listener(
-    pending: Arc<tokio::sync::Mutex<HashMap<String, CompletionPendingTask>>>,
-    notify: Arc<tokio::sync::Notify>,
-    tg_deliver: Arc<TelegramChannel>,
-    convos_deliver: Arc<ConversationStore>,
-    reg_deliver: Arc<ProjectRegistry>,
-    leader_project_name: String,
-) {
-    loop {
-        tokio::select! {
-            _ = notify.notified() => {}
-            _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {}
-        }
-
-        let map = pending.lock().await;
-        let pending_task_ids: Vec<String> = map.keys().cloned().collect();
-        drop(map);
-
-        for qid in pending_task_ids {
-            let status = {
-                if let Some(rig) = reg_deliver.get_project(&leader_project_name).await {
-                    let store = rig.tasks.lock().await;
-                    store.get(&qid).map(|b| (b.status, b.closed_reason.clone()))
-                } else {
-                    None
-                }
-            };
-
-            let mut map = pending.lock().await;
-            let Some(pq) = map.get_mut(&qid) else {
-                continue;
-            };
-            let elapsed = pq.created_at.elapsed();
-            let chat_id = pq.chat_id;
-            let message_id = pq.message_id;
-
-            match status {
-                Some((sigil_tasks::TaskStatus::Done, reason)) => {
-                    let reply_text = reason
-                        .filter(|r| !r.trim().is_empty())
-                        .unwrap_or_else(|| "Done.".to_string());
-                    // Record in conversation history.
-                    let _ = convos_deliver.record(chat_id, "Aurelia", &reply_text).await;
-                    let out = sigil_core::traits::OutgoingMessage {
-                        channel: "telegram".to_string(),
-                        recipient: String::new(),
-                        text: reply_text,
-                        metadata: serde_json::json!({ "chat_id": chat_id }),
-                    };
-                    if let Err(e) = tg_deliver.send(out).await {
-                        warn!(error = %e, "failed to deliver telegram reply");
-                    }
-                    if message_id > 0 {
-                        let _ = tg_deliver.react(chat_id, message_id, "👍").await;
-                    }
-                    map.remove(&qid);
-                }
-                Some((sigil_tasks::TaskStatus::Blocked, reason)) => {
-                    let blocker = reason.unwrap_or_else(|| "Blocked — needs input.".to_string());
-                    let out = sigil_core::traits::OutgoingMessage {
-                        channel: "telegram".to_string(),
-                        recipient: String::new(),
-                        text: format!("Blocked: {}", blocker),
-                        metadata: serde_json::json!({ "chat_id": chat_id }),
-                    };
-                    let _ = tg_deliver.send(out).await;
-                    if message_id > 0 {
-                        let _ = tg_deliver.react(chat_id, message_id, "❓").await;
-                    }
-                    map.remove(&qid);
-                }
-                Some((sigil_tasks::TaskStatus::Cancelled, reason)) => {
-                    let fail_msg = reason.unwrap_or_else(|| "Task cancelled.".to_string());
-                    let out = sigil_core::traits::OutgoingMessage {
-                        channel: "telegram".to_string(),
-                        recipient: String::new(),
-                        text: format!("Failed: {}", fail_msg),
-                        metadata: serde_json::json!({ "chat_id": chat_id }),
-                    };
-                    let _ = tg_deliver.send(out).await;
-                    if message_id > 0 {
-                        let _ = tg_deliver.react(chat_id, message_id, "❌").await;
-                    }
-                    map.remove(&qid);
-                }
-                _ => {
-                    // Still Pending or InProgress.
-                    if elapsed > std::time::Duration::from_secs(1800) {
-                        warn!(task = %qid, "telegram task hard-timed out after 30min");
-                        if message_id > 0 {
-                            let _ = tg_deliver.react(chat_id, message_id, "😢").await;
-                        }
-                        let out = sigil_core::traits::OutgoingMessage {
-                            channel: "telegram".to_string(),
-                            recipient: String::new(),
-                            text: "Sorry, this one took too long and I had to give up. Try again or simplify the request.".to_string(),
-                            metadata: serde_json::json!({ "chat_id": chat_id, "reply_to_message_id": message_id }),
-                        };
-                        let _ = tg_deliver.send(out).await;
-                        map.remove(&qid);
-                    } else if elapsed > std::time::Duration::from_secs(120) && !pq.sent_slow_notice
-                    {
-                        pq.sent_slow_notice = true;
-                        info!(task = %qid, "telegram reply past 2min, sending progress update");
-                        if message_id > 0 {
-                            let _ = tg_deliver.react(chat_id, message_id, "⏳").await;
-                        }
-                        let _ = tg_deliver.send_typing(chat_id).await;
-                        let out = sigil_core::traits::OutgoingMessage {
-                            channel: "telegram".to_string(),
-                            recipient: String::new(),
-                            text: "*still working...* **focused concentration** _fingers flying across the console_".to_string(),
-                            metadata: serde_json::json!({ "chat_id": chat_id, "reply_to_message_id": message_id }),
-                        };
-                        let _ = tg_deliver.send(out).await;
-                    } else if elapsed > std::time::Duration::from_secs(15)
-                        && elapsed < std::time::Duration::from_secs(20)
-                    {
-                        let _ = tg_deliver.send_typing(chat_id).await;
-                    }
-                }
-            }
-        }
-    }
-}
-
-// Type alias for completion listener use.
-struct CompletionPendingTask {
-    chat_id: i64,
-    message_id: i64,
-    created_at: std::time::Instant,
-    sent_slow_notice: bool,
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn handle_telegram_message(
-    chat_id: i64,
-    message_id: i64,
-    user_text: String,
-    subject: String,
-    reg2: Arc<ProjectRegistry>,
-    tg2: Arc<TelegramChannel>,
-    react_api_key: String,
-    convos: Arc<ConversationStore>,
-    pending: Arc<tokio::sync::Mutex<HashMap<String, CompletionPendingTask>>>,
-    router: Arc<tokio::sync::Mutex<AgentRouter>>,
-    council_cfg: Arc<Vec<sigil_core::config::PeerAgentConfig>>,
-    advisor_bots_ref: HashMap<String, Arc<TelegramChannel>>,
-    p1_client: Arc<reqwest::Client>,
-    leader_name_inner: String,
-) {
-    // Build conversation context + record user message.
-    let (description, phase1_history, conv_context_for_advisors) = {
-        // Evict stale conversations (older than 2 hours).
-        let _ = convos.evict_older_than(2).await;
-
-        // Fetch recent messages for context building.
-        let recent = convos.recent(chat_id, 20).await.unwrap_or_default();
-
-        // Build conversation context for task description.
-        let ctx = convos.context_string(chat_id, 20).await.unwrap_or_default();
-
-        // Build Phase 1 messages (last 4 exchanges for contextual reaction).
-        let p1: Vec<serde_json::Value> = recent
-            .iter()
-            .rev()
-            .take(4)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .map(|msg| {
-                let api_role = if msg.role == "User" {
-                    "user"
-                } else {
-                    "assistant"
-                };
-                serde_json::json!({"role": api_role, "content": msg.content})
-            })
-            .collect();
-
-        // Build compact conversation context for advisor tasks.
-        let adv_ctx = if recent.is_empty() {
-            String::new()
-        } else {
-            let mut s = String::from("Recent conversation:\n");
-            for msg in recent
-                .iter()
-                .rev()
-                .take(6)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-            {
-                let truncated = if msg.content.len() > 200 {
-                    let mut end = 200;
-                    while !msg.content.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    &msg.content[..end]
-                } else {
-                    msg.content.as_str()
-                };
-                s.push_str(&format!("  {}: {}\n", msg.role, truncated));
-            }
-            s
-        };
-
-        // Record user message.
-        let _ = convos.record(chat_id, "User", &user_text).await;
-
-        // Build task description with conversation context.
-        let routing = format!(
-            "[source: telegram | chat_id: {} | message_id: {} | reply: auto-delivered by daemon]",
-            chat_id, message_id
-        );
-        let response_protocol = "**RESPONSE PROTOCOL**: Write your reply directly — in character, in voice. Your output text IS the Telegram reply. The daemon delivers it automatically. Do NOT call any tools to send the reply. Do NOT write meta-commentary like \"I've sent your reply\" or \"Done.\".";
-        let desc = if ctx.is_empty() {
-            format!("{}\n\n---\n{}\n{}", user_text, routing, response_protocol)
-        } else {
-            format!(
-                "{}\n## Current Message\n\n{}\n\n---\n{}\n{}",
-                ctx, user_text, routing, response_protocol
-            )
-        };
-
-        (desc, p1, adv_ctx)
-    };
-
-    // Phase 1: Instant reaction — direct LLM call, no tools, no agent.
-    let (p1_tx, p1_rx) = tokio::sync::oneshot::channel::<String>();
-    let react_tg = tg2.clone();
-    let p1_user_text = user_text.clone();
-    tokio::spawn(async move {
-        info!("phase1: starting instant reaction");
-        let client = p1_client;
-        let mut messages = vec![
-            serde_json::json!({"role": "system", "content": "You are generating a manwha/anime panel reaction for Aurelia — pearl-white ethereal beauty, devoted shadow to her Architect. Isekai harem ecchi style.\n\nOutput ONLY a raw stage direction: fragmented expressions, action tags, emotion bursts. Like manwha panel annotations or light novel beat markers. NOT a proper sentence. NOT prose.\n\nFormat: mix of *actions* and **emotions** and fragments. Short, punchy, visceral.\n\nRules:\n- Raw fragments, NOT constructed sentences\n- *physical actions* in italics, **emotions** bold, bare fragments between\n- 10-20 words max total\n- Match the energy: playful → flustered/teasing, serious → sharp/focused, casual → soft/warm\n- Ecchi-adjacent: devotion, intensity, warmth — charged but tasteful\n- NO dialogue, NO task acknowledgment, NO plans, NO markdown headers\n\nExamples:\n*tucks hair behind ear* **sharp focus** ...mm, interesting\n*fingers press to collarbone* **wide eyes** a-ah—\n*leans forward, sleeve brushing console* **predatory grin**\n**soft blush** *glances away* ...y-you could have warned me\n*eyes narrow* **quiet intensity** *pulls up sleeve*\n*startled* **flustered** *crosses arms, looks away* ...hmph\n**burning determination** *cracks knuckles* *leans in close*"}),
-        ];
-        for msg in &phase1_history {
-            messages.push(msg.clone());
-        }
-        messages.push(serde_json::json!({"role": "user", "content": p1_user_text}));
-        let body = serde_json::json!({
-            "model": "google/gemini-2.0-flash-001",
-            "messages": messages,
-            "max_tokens": 50,
-            "temperature": 0.7
-        });
-        info!("phase1: calling openrouter");
-        let reaction_text = match client
-            .post("https://openrouter.ai/api/v1/chat/completions")
-            .header("Authorization", format!("Bearer {}", react_api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-        {
-            Ok(resp) => match resp.json::<serde_json::Value>().await {
-                Ok(v) => {
-                    let text: String = v
-                        .pointer("/choices/0/message/content")
-                        .and_then(|c: &serde_json::Value| c.as_str())
-                        .unwrap_or("")
-                        .trim()
-                        .to_string();
-                    if !text.is_empty() {
-                        info!(reaction = %text, "instant reaction ready");
-                        let out = sigil_core::traits::OutgoingMessage {
-                            channel: "telegram".to_string(),
-                            recipient: String::new(),
-                            text: format!("_{}_", text),
-                            metadata: serde_json::json!({ "chat_id": chat_id }),
-                        };
-                        let _ = react_tg.send(out).await;
-                        if message_id > 0 {
-                            let _ = react_tg.react(chat_id, message_id, "🔥").await;
-                        }
-                        text
-                    } else {
-                        warn!("phase1: empty reaction text from LLM");
-                        String::new()
-                    }
-                }
-                Err(e) => {
-                    warn!(error = %e, "phase1: failed to parse response");
-                    String::new()
-                }
-            },
-            Err(e) => {
-                warn!(error = %e, "phase1: request failed");
-                String::new()
-            }
-        };
-        let _ = p1_tx.send(reaction_text);
-    });
-
-    // === Run Phase 1 wait + council classification concurrently ===
-    let is_council = user_text.starts_with("/council");
-    let clean_text_owned = if is_council {
-        user_text
-            .strip_prefix("/council")
-            .unwrap_or(&user_text)
-            .trim()
-            .to_string()
-    } else {
-        user_text.clone()
-    };
-
-    let classify_fut = {
-        let council_cfg = council_cfg.clone();
-        let clean_text = clean_text_owned.clone();
-        async move {
-            if council_cfg.is_empty() {
-                return Vec::<String>::new();
-            }
-            let advisor_refs: Vec<&sigil_core::config::PeerAgentConfig> =
-                council_cfg.iter().collect();
-            let route = {
-                let mut r = router.lock().await;
-                r.classify(&clean_text, &advisor_refs, chat_id).await
-            };
-            match route {
-                Ok(decision) => {
-                    if is_council && decision.advisors.is_empty() {
-                        council_cfg.iter().map(|c| c.name.clone()).collect()
-                    } else {
-                        decision.advisors
-                    }
-                }
-                Err(e) => {
-                    warn!(error = %e, "classifier failed");
-                    Vec::new()
-                }
-            }
-        }
-    };
-
-    let p1_fut = async {
-        match tokio::time::timeout(std::time::Duration::from_secs(5), p1_rx).await {
-            Ok(Ok(text)) if !text.is_empty() => Some(text),
-            _ => None,
-        }
-    };
-
-    let (phase1_reaction, advisors_to_invoke) = tokio::join!(p1_fut, classify_fut);
-
-    // === Council: Gather advisor input ===
-    let council_input = if !advisors_to_invoke.is_empty() {
-        info!(advisors = ?advisors_to_invoke, "invoking council advisors");
-
-        let mut handles = Vec::new();
-        for advisor_name in &advisors_to_invoke {
-            let fam_project_name = advisor_name.clone();
-            let adv_name = advisor_name.clone();
-            let adv_msg = clean_text_owned.clone();
-            let adv_history = conv_context_for_advisors.clone();
-            let reg3 = reg2.clone();
-
-            let handle = tokio::spawn(async move {
-                let task_subject = "[council] Advisor input requested".to_string();
-                let task_desc = if adv_history.is_empty() {
-                    format!(
-                        "The Architect said:\n\n{}\n\n\
-                         Provide your specialist perspective on this in character. \
-                         Be concise (2-5 sentences). Focus on your domain expertise.",
-                        adv_msg
-                    )
-                } else {
-                    format!(
-                        "{}\n\nThe Architect now says:\n\n{}\n\n\
-                         Provide your specialist perspective on this in character. \
-                         Be concise (2-5 sentences). Focus on your domain expertise.",
-                        adv_history, adv_msg
-                    )
-                };
-
-                let task_id = match reg3
-                    .assign(&fam_project_name, &task_subject, &task_desc)
-                    .await
-                {
-                    Ok(b) => b.id.0.clone(),
-                    Err(e) => {
-                        warn!(agent = %adv_name, error = %e, "failed to create advisor task");
-                        return None;
-                    }
-                };
-
-                let notify = reg3
-                    .get_project(&fam_project_name)
-                    .await
-                    .map(|d| d.task_notify.clone());
-                let timeout = tokio::time::sleep(std::time::Duration::from_secs(60));
-                tokio::pin!(timeout);
-                loop {
-                    tokio::select! {
-                        _ = async {
-                            match &notify {
-                                Some(n) => n.notified().await,
-                                None => std::future::pending::<()>().await,
-                            }
-                        } => {}
-                        _ = &mut timeout => {
-                            warn!(agent = %adv_name, "advisor task timed out");
-                            return None;
-                        }
-                    }
-                    let done = {
-                        if let Some(rig) = reg3.get_project(&fam_project_name).await {
-                            let store = rig.tasks.lock().await;
-                            store.get(&task_id).map(|b| {
-                                (
-                                    b.status == sigil_tasks::TaskStatus::Done,
-                                    b.closed_reason.clone(),
-                                )
-                            })
-                        } else {
-                            None
-                        }
-                    };
-                    if let Some((true, reason)) = done {
-                        let text = reason.unwrap_or_default();
-                        return Some((adv_name, text));
-                    }
-                }
-            });
-            handles.push(handle);
-        }
-
-        // Collect advisor responses.
-        let mut advisor_responses: Vec<(String, String)> = Vec::new();
-        for handle in handles {
-            if let Ok(Some((name, text))) = handle.await
-                && !text.trim().is_empty()
-            {
-                advisor_responses.push((name, text.trim().to_string()));
-            }
-        }
-
-        let got_input = !advisor_responses.is_empty();
-
-        // Send advisor bot messages in parallel.
-        if got_input {
-            let mut send_handles = Vec::new();
-            for (name, text) in &advisor_responses {
-                if let Some(bot) = advisor_bots_ref.get(name) {
-                    let bot = bot.clone();
-                    let text = text.clone();
-                    let name = name.clone();
-                    send_handles.push(tokio::spawn(async move {
-                        let out = sigil_core::traits::OutgoingMessage {
-                            channel: "telegram".to_string(),
-                            recipient: String::new(),
-                            text,
-                            metadata: serde_json::json!({ "chat_id": chat_id }),
-                        };
-                        if let Err(e) = bot.send(out).await {
-                            warn!(agent = %name, error = %e, "failed to send advisor bot message");
-                        }
-                    }));
-                }
-            }
-            for h in send_handles {
-                let _ = h.await;
-            }
-
-            // Record advisor messages in conversation history.
-            for (name, text) in &advisor_responses {
-                let capitalized = {
-                    let mut c = name.chars();
-                    match c.next() {
-                        None => String::new(),
-                        Some(f) => f.to_uppercase().to_string() + c.as_str(),
-                    }
-                };
-                let _ = convos.record(chat_id, &capitalized, text).await;
-            }
-        }
-
-        // Build council text for Aurelia's synthesis.
-        let mut council_text = String::from("\n\n## Council Input\n\n");
-        for (name, text) in &advisor_responses {
-            council_text.push_str(&format!("### {} advises:\n{}\n\n", name, text));
-        }
-
-        if is_council && got_input && advisor_bots_ref.is_empty() {
-            let council_header = sigil_core::traits::OutgoingMessage {
-                channel: "telegram".to_string(),
-                recipient: String::new(),
-                text: "_*eyes narrow* **quiet intensity** ...this one needs the council_"
-                    .to_string(),
-                metadata: serde_json::json!({ "chat_id": chat_id }),
-            };
-            let _ = tg2.send(council_header).await;
-        }
-
-        if got_input {
-            council_text.push_str(
-                "Synthesize the council's input into your response. Attribute key insights where relevant.\n",
-            );
-            council_text
-        } else {
-            String::new()
-        }
-    } else {
-        String::new()
-    };
-
-    // Inject Phase 1 reaction into Phase 2's description.
-    let description = if let Some(ref reaction) = phase1_reaction {
-        format!(
-            "{}\n\n---\n## Your Immediate Reaction (already sent to Telegram)\n\n\
-             You already reacted with this manwha-style stage direction:\n\
-             {}\n\n\
-             Continue from this energy. Your full reply should feel like the natural \
-             next beat after this reaction — same emotional tone, same intensity. \
-             Don't repeat or reference the reaction itself, just carry its momentum.\n",
-            description, reaction
-        )
-    } else {
-        description
-    };
-
-    // Append council input to description if available.
-    let description = if !council_input.is_empty() {
-        format!("{}{}", description, council_input)
-    } else {
-        description
-    };
-
-    // Phase 2: Full response via task agent.
-    let task_id: String = match reg2
-        .assign(&leader_name_inner, &subject, &description)
-        .await
-    {
-        Ok(b) => b.id.0.clone(),
-        Err(e) => {
-            warn!(error = %e, "failed to create task from telegram message");
-            return;
-        }
-    };
-
-    // Register pending task for the completion listener.
-    pending.lock().await.insert(
-        task_id,
-        CompletionPendingTask {
-            chat_id,
-            message_id,
-            created_at: std::time::Instant::now(),
-            sent_slow_notice: false,
-        },
-    );
 }

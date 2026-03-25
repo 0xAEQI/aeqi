@@ -20,6 +20,7 @@ pub struct Project {
     pub project_identity: Identity,
     pub tasks: Arc<Mutex<TaskBoard>>,
     pub task_notify: Arc<Notify>,
+    pub departments: Vec<sigil_core::config::DepartmentConfig>,
 }
 
 impl Project {
@@ -56,6 +57,7 @@ impl Project {
             project_identity,
             tasks: Arc::new(Mutex::new(task_board)),
             task_notify: Arc::new(Notify::new()),
+            departments: config.departments.clone(),
         })
     }
 

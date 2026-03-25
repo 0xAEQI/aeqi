@@ -318,7 +318,9 @@ pub(crate) fn open_memory(
         .as_ref()
         .and_then(|or| or.embedding_model.clone());
 
+    let has_key = api_key.is_some();
     if let (Some(key), Some(model)) = (api_key, embedding_model) {
+        tracing::info!(model = %model, "memory embedder initialized");
         let embedder = Arc::new(OpenRouterEmbedder::new(
             key,
             model,
@@ -332,6 +334,11 @@ pub(crate) fn open_memory(
             config.memory.mmr_lambda,
         )
     } else {
+        if !has_key {
+            tracing::warn!("memory initialized WITHOUT embeddings (no API key)");
+        } else {
+            tracing::warn!("memory initialized WITHOUT embeddings (no embedding model configured)");
+        }
         Ok(mem)
     }
 }

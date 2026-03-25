@@ -1,11 +1,13 @@
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{Timelike, Utc};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
+use crate::chat_engine::{ChatEngine, ChatMessage, ChatSource};
+use crate::conversation_store::web_chat_id;
 use crate::heartbeat::Heartbeat;
 use crate::lifecycle::LifecycleEngine;
 use crate::message::{Dispatch, DispatchBus, DispatchHealth};
@@ -36,6 +38,7 @@ pub struct Daemon {
     pub lifecycle: Option<LifecycleEngine>,
     pub cron_store: Option<Arc<Mutex<ScheduleStore>>>,
     pub watchdog: Option<WatchdogEngine>,
+    pub chat_engine: Option<Arc<ChatEngine>>,
     pub pid_file: Option<PathBuf>,
     pub socket_path: Option<PathBuf>,
     session_tracker_shutdown: Option<Arc<tokio::sync::Notify>>,
@@ -56,6 +59,7 @@ impl Daemon {
             lifecycle: None,
             cron_store: None,
             watchdog: None,
+            chat_engine: None,
             pid_file: None,
             socket_path: None,
             session_tracker_shutdown: None,
@@ -228,6 +232,7 @@ impl Daemon {
                     let dispatch_bus = self.dispatch_bus.clone();
                     let pulse_count = self.pulses.len();
                     let cron_store = self.cron_store.clone();
+                    let chat_engine = self.chat_engine.clone();
                     let running = self.running.clone();
                     let readiness = self.readiness.clone();
                     info!(path = %sock_path.display(), "IPC socket listening");
@@ -238,6 +243,7 @@ impl Daemon {
                             dispatch_bus,
                             pulse_count,
                             cron_store,
+                            chat_engine,
                             running,
                             readiness,
                         )
@@ -636,12 +642,14 @@ impl Daemon {
 
     /// Accept loop for Unix socket IPC connections.
     #[cfg(unix)]
+    #[allow(clippy::too_many_arguments)]
     async fn socket_accept_loop(
         listener: tokio::net::UnixListener,
         registry: Arc<ProjectRegistry>,
         dispatch_bus: Arc<DispatchBus>,
         pulse_count: usize,
         cron_store: Option<Arc<Mutex<ScheduleStore>>>,
+        chat_engine: Option<Arc<ChatEngine>>,
         running: Arc<std::sync::atomic::AtomicBool>,
         readiness: ReadinessContext,
     ) {
@@ -654,6 +662,7 @@ impl Daemon {
                     let registry = registry.clone();
                     let dispatch_bus = dispatch_bus.clone();
                     let cron_store = cron_store.clone();
+                    let chat_engine = chat_engine.clone();
                     let readiness = readiness.clone();
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_socket_connection(
@@ -662,6 +671,7 @@ impl Daemon {
                             dispatch_bus,
                             pulse_count,
                             cron_store,
+                            chat_engine,
                             readiness,
                         )
                         .await
@@ -686,6 +696,7 @@ impl Daemon {
         dispatch_bus: Arc<DispatchBus>,
         pulse_count: usize,
         cron_store: Option<Arc<Mutex<ScheduleStore>>>,
+        chat_engine: Option<Arc<ChatEngine>>,
         readiness: ReadinessContext,
     ) -> Result<()> {
         let (reader, mut writer) = stream.into_split();
@@ -768,7 +779,34 @@ impl Daemon {
                 }
 
                 "projects" => {
-                    let projects = registry.projects_info().await;
+                    let summaries = registry.list_project_summaries().await;
+                    let projects: Vec<serde_json::Value> = summaries
+                        .iter()
+                        .map(|s| {
+                            serde_json::json!({
+                                "name": s.name,
+                                "prefix": s.prefix,
+                                "team": s.team.as_ref().map(|t| serde_json::json!({
+                                    "leader": t.leader,
+                                    "agents": t.agents,
+                                })),
+                                "open_tasks": s.open_tasks,
+                                "total_tasks": s.total_tasks,
+                                "pending_tasks": s.pending_tasks,
+                                "in_progress_tasks": s.in_progress_tasks,
+                                "done_tasks": s.done_tasks,
+                                "cancelled_tasks": s.cancelled_tasks,
+                                "active_missions": s.active_missions,
+                                "total_missions": s.total_missions,
+                                "departments": s.departments.iter().map(|d| serde_json::json!({
+                                    "name": d.name,
+                                    "lead": d.lead,
+                                    "agents": d.agents,
+                                    "description": d.description,
+                                })).collect::<Vec<_>>(),
+                            })
+                        })
+                        .collect();
                     serde_json::json!({"ok": true, "projects": projects})
                 }
 
@@ -944,6 +982,776 @@ impl Daemon {
                         None => {
                             serde_json::json!({"ok": false, "error": "expertise ledger not initialized"})
                         }
+                    }
+                }
+
+                "tasks" => {
+                    let project_filter = request.get("project").and_then(|v| v.as_str());
+                    let status_filter = request.get("status").and_then(|v| v.as_str());
+
+                    let project_names: Vec<String> = if let Some(name) = project_filter {
+                        vec![name.to_string()]
+                    } else {
+                        registry.project_names().await
+                    };
+
+                    let mut all_tasks = Vec::new();
+                    for name in &project_names {
+                        if let Some(board) = registry.get_task_board(name).await {
+                            let Ok(board) = board.try_lock() else { continue };
+                            for task in board.all() {
+                                if let Some(status) = status_filter
+                                    && task.status.to_string() != status
+                                {
+                                    continue;
+                                }
+                                all_tasks.push(serde_json::json!({
+                                    "id": task.id.0,
+                                    "subject": task.subject,
+                                    "description": task.description,
+                                    "status": task.status.to_string(),
+                                    "priority": task.priority.to_string(),
+                                    "assignee": task.assignee,
+                                    "mission_id": task.mission_id,
+                                    "skill": task.skill,
+                                    "labels": task.labels,
+                                    "retry_count": task.retry_count,
+                                    "project": name,
+                                    "created_at": task.created_at.to_rfc3339(),
+                                    "updated_at": task.updated_at.map(|t| t.to_rfc3339()),
+                                    "closed_at": task.closed_at.map(|t| t.to_rfc3339()),
+                                }));
+                            }
+                        }
+                    }
+                    serde_json::json!({"ok": true, "tasks": all_tasks})
+                }
+
+                "missions" => {
+                    let project_filter = request.get("project").and_then(|v| v.as_str());
+
+                    let project_names: Vec<String> = if let Some(name) = project_filter {
+                        vec![name.to_string()]
+                    } else {
+                        registry.project_names().await
+                    };
+
+                    let mut all_missions = Vec::new();
+                    for name in &project_names {
+                        if let Some(board) = registry.get_task_board(name).await {
+                            let Ok(board) = board.try_lock() else { continue };
+                            let prefix = name.clone(); // prefix lookup from project
+                            for mission in board.missions(None) {
+                                let (done, total) = sigil_tasks::Mission::check_progress(
+                                    &mission.id,
+                                    &board.all(),
+                                );
+                                all_missions.push(serde_json::json!({
+                                    "id": mission.id,
+                                    "name": mission.name,
+                                    "description": mission.description,
+                                    "status": mission.status.to_string(),
+                                    "project": prefix,
+                                    "labels": mission.labels,
+                                    "task_count": total,
+                                    "done_count": done,
+                                    "created_at": mission.created_at.to_rfc3339(),
+                                    "updated_at": mission.updated_at.map(|t| t.to_rfc3339()),
+                                    "closed_at": mission.closed_at.map(|t| t.to_rfc3339()),
+                                }));
+                            }
+                        }
+                    }
+                    serde_json::json!({"ok": true, "missions": all_missions})
+                }
+
+                "create_task" => {
+                    let project = request.get("project").and_then(|v| v.as_str()).unwrap_or("");
+                    let subject = request.get("subject").and_then(|v| v.as_str()).unwrap_or("");
+                    let description = request.get("description").and_then(|v| v.as_str()).unwrap_or("");
+
+                    if project.is_empty() || subject.is_empty() {
+                        serde_json::json!({"ok": false, "error": "project and subject are required"})
+                    } else {
+                        match registry.assign(project, subject, description).await {
+                            Ok(task) => serde_json::json!({
+                                "ok": true,
+                                "task": {
+                                    "id": task.id.0,
+                                    "subject": task.subject,
+                                    "status": task.status.to_string(),
+                                    "project": project,
+                                }
+                            }),
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                        }
+                    }
+                }
+
+                "close_task" => {
+                    let task_id = request.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+                    let reason = request.get("reason").and_then(|v| v.as_str()).unwrap_or("closed via web");
+                    let project = request.get("project").and_then(|v| v.as_str());
+
+                    if task_id.is_empty() {
+                        serde_json::json!({"ok": false, "error": "task_id is required"})
+                    } else {
+                        // Find project by explicit param or by task ID prefix.
+                        let project_name = if let Some(p) = project {
+                            Some(p.to_string())
+                        } else {
+                            let _prefix = task_id.split('-').next().unwrap_or("");
+                            let mut found = None;
+                            for name in registry.project_names().await {
+                                if let Some(board) = registry.get_task_board(&name).await {
+                                    let board = board.lock().await;
+                                    if board.get(task_id).is_some() {
+                                        found = Some(name);
+                                        break;
+                                    }
+                                }
+                            }
+                            found
+                        };
+
+                        match project_name {
+                            Some(name) => {
+                                if let Some(board) = registry.get_task_board(&name).await {
+                                    let mut board = board.lock().await;
+                                    match board.close(task_id, reason) {
+                                        Ok(task) => serde_json::json!({
+                                            "ok": true,
+                                            "task": {
+                                                "id": task.id.0,
+                                                "status": task.status.to_string(),
+                                                "closed_reason": task.closed_reason,
+                                            }
+                                        }),
+                                        Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                                    }
+                                } else {
+                                    serde_json::json!({"ok": false, "error": "project not found"})
+                                }
+                            }
+                            None => serde_json::json!({"ok": false, "error": "could not find project for task"}),
+                        }
+                    }
+                }
+
+                "post_blackboard" => {
+                    let key = request.get("key").and_then(|v| v.as_str()).unwrap_or("");
+                    let content = request.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                    let project = request.get("project").and_then(|v| v.as_str()).unwrap_or("");
+                    let agent = request.get("agent").and_then(|v| v.as_str()).unwrap_or("web");
+                    let tags: Vec<String> = request
+                        .get("tags")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                        .unwrap_or_default();
+                    let durability = match request.get("durability").and_then(|v| v.as_str()) {
+                        Some("durable") => crate::blackboard::EntryDurability::Durable,
+                        _ => crate::blackboard::EntryDurability::Transient,
+                    };
+
+                    if key.is_empty() || content.is_empty() {
+                        serde_json::json!({"ok": false, "error": "key and content are required"})
+                    } else {
+                        match &registry.blackboard {
+                            Some(bb) => match bb.post(key, content, agent, project, &tags, durability) {
+                                Ok(entry) => serde_json::json!({
+                                    "ok": true,
+                                    "entry": {
+                                        "id": entry.id,
+                                        "key": entry.key,
+                                    }
+                                }),
+                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                            },
+                            None => serde_json::json!({"ok": false, "error": "blackboard not initialized"}),
+                        }
+                    }
+                }
+
+                "chat" => {
+                    let message = request.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                    let project_hint = request.get("project").and_then(|v| v.as_str());
+                    let session_id = request.get("session_id").and_then(|v| v.as_str()).unwrap_or("ipc");
+                    let sender = request.get("sender").and_then(|v| v.as_str()).unwrap_or("user");
+
+                    match &chat_engine {
+                        Some(engine) => {
+                            let chat_id = request.get("chat_id")
+                                .and_then(|v| v.as_i64())
+                                .unwrap_or_else(|| web_chat_id(session_id));
+
+                            let msg = ChatMessage {
+                                message: message.to_string(),
+                                chat_id,
+                                sender: sender.to_string(),
+                                source: ChatSource::Web { session_id: session_id.to_string() },
+                                project_hint: project_hint.map(|s| s.to_string()),
+                            };
+
+                            // Try quick path first (intent detection).
+                            if let Some(response) = engine.handle_message(&msg).await {
+                                response.to_json()
+                            } else {
+                                // Fall back to status response enriched with memory.
+                                engine.status_response(project_hint, Some(message)).await.to_json()
+                            }
+                        }
+                        None => serde_json::json!({"ok": false, "error": "chat engine not initialized"}),
+                    }
+                }
+
+                "chat_full" => {
+                    let message = request.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                    let project_hint = request.get("project").and_then(|v| v.as_str());
+                    let session_id = request.get("session_id").and_then(|v| v.as_str()).unwrap_or("ipc");
+                    let sender = request.get("sender").and_then(|v| v.as_str()).unwrap_or("user");
+
+                    match &chat_engine {
+                        Some(engine) => {
+                            if message.is_empty() {
+                                serde_json::json!({"ok": false, "error": "message is required"})
+                            } else {
+                                let chat_id = request.get("chat_id")
+                                    .and_then(|v| v.as_i64())
+                                    .unwrap_or_else(|| web_chat_id(session_id));
+
+                                let msg = ChatMessage {
+                                    message: message.to_string(),
+                                    chat_id,
+                                    sender: sender.to_string(),
+                                    source: ChatSource::Web { session_id: session_id.to_string() },
+                                    project_hint: project_hint.map(|s| s.to_string()),
+                                };
+
+                                // Try quick path first.
+                                if let Some(response) = engine.handle_message(&msg).await {
+                                    response.to_json()
+                                } else {
+                                    // Full LLM pipeline.
+                                    match engine.handle_message_full(&msg, None).await {
+                                        Ok(handle) => serde_json::json!({
+                                            "ok": true,
+                                            "action": "task_created",
+                                            "task_handle": handle.task_id,
+                                            "chat_id": handle.chat_id,
+                                            "context": "Processing your message...",
+                                        }),
+                                        Err(e) => serde_json::json!({
+                                            "ok": false,
+                                            "error": e.to_string(),
+                                        }),
+                                    }
+                                }
+                            }
+                        }
+                        None => serde_json::json!({"ok": false, "error": "chat engine not initialized"}),
+                    }
+                }
+
+                "chat_poll" => {
+                    let task_id = request.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+                    match &chat_engine {
+                        Some(engine) => {
+                            if task_id.is_empty() {
+                                serde_json::json!({"ok": false, "error": "task_id is required"})
+                            } else {
+                                match engine.poll_completion(task_id).await {
+                                    Some(completion) => serde_json::json!({
+                                        "ok": true,
+                                        "completed": true,
+                                        "status": format!("{:?}", completion.status),
+                                        "text": completion.text,
+                                        "chat_id": completion.chat_id,
+                                    }),
+                                    None => serde_json::json!({
+                                        "ok": true,
+                                        "completed": false,
+                                    }),
+                                }
+                            }
+                        }
+                        None => serde_json::json!({"ok": false, "error": "chat engine not initialized"}),
+                    }
+                }
+
+                "chat_history" => {
+                    let chat_id = request.get("chat_id").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let limit = request.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+                    let offset = request.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                    let session_id = request.get("session_id").and_then(|v| v.as_str());
+
+                    match &chat_engine {
+                        Some(engine) => {
+                            let resolved_chat_id = if chat_id != 0 {
+                                chat_id
+                            } else if let Some(sid) = session_id {
+                                web_chat_id(sid)
+                            } else {
+                                0
+                            };
+                            match engine.get_history(resolved_chat_id, limit, offset).await {
+                                Ok(messages) => {
+                                    let msgs: Vec<serde_json::Value> = messages.iter().map(|m| {
+                                        serde_json::json!({
+                                            "role": m.role,
+                                            "content": m.content,
+                                            "timestamp": m.timestamp.to_rfc3339(),
+                                            "source": m.source,
+                                        })
+                                    }).collect();
+                                    serde_json::json!({"ok": true, "messages": msgs, "chat_id": resolved_chat_id})
+                                }
+                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                            }
+                        }
+                        None => serde_json::json!({"ok": false, "error": "chat engine not initialized"}),
+                    }
+                }
+
+                "chat_channels" => {
+                    match &chat_engine {
+                        Some(engine) => {
+                            match engine.list_channels().await {
+                                Ok(channels) => {
+                                    let chs: Vec<serde_json::Value> = channels.iter().map(|c| {
+                                        serde_json::json!({
+                                            "chat_id": c.chat_id,
+                                            "channel_type": c.channel_type,
+                                            "name": c.name,
+                                            "created_at": c.created_at,
+                                            "last_message": c.last_message,
+                                            "last_message_at": c.last_message_at,
+                                        })
+                                    }).collect();
+                                    serde_json::json!({"ok": true, "channels": chs})
+                                }
+                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                            }
+                        }
+                        None => serde_json::json!({"ok": false, "error": "chat engine not initialized"}),
+                    }
+                }
+
+                "crons" => {
+                    match &cron_store {
+                        Some(store) => {
+                            let store = store.lock().await;
+                            let jobs: Vec<serde_json::Value> = store.jobs.iter().map(|j| {
+                                let schedule_str = match &j.schedule {
+                                    crate::schedule::CronSchedule::Cron { expr } => expr.clone(),
+                                    crate::schedule::CronSchedule::Once { at } => format!("once@{}", at.to_rfc3339()),
+                                };
+                                serde_json::json!({
+                                    "name": j.name,
+                                    "project": j.project,
+                                    "schedule": schedule_str,
+                                    "prompt": j.prompt,
+                                    "last_run": j.last_run.map(|t| t.to_rfc3339()),
+                                    "created_at": j.created_at.to_rfc3339(),
+                                })
+                            }).collect();
+                            serde_json::json!({"ok": true, "jobs": jobs})
+                        }
+                        None => serde_json::json!({"ok": true, "jobs": []}),
+                    }
+                }
+
+                "watchdogs" => {
+                    serde_json::json!({"ok": true, "rules": registry.watchdog_rules_config})
+                }
+
+                "brief" => {
+                    let summaries = registry.list_project_summaries().await;
+                    let (spent, budget, _remaining) = registry.cost_ledger.budget_status();
+                    let worker_count = registry.total_max_workers().await;
+                    let dispatch_health = dispatch_bus.health(ACK_RETRY_AGE_SECS).await;
+
+                    // Get recent audit events (last 50 for analysis).
+                    let recent = match &registry.audit_log {
+                        Some(audit) => audit.query_recent(50).unwrap_or_default(),
+                        None => Vec::new(),
+                    };
+
+                    // Compute summary stats from audit.
+                    let tasks_completed = recent.iter()
+                        .filter(|e| e.decision_type.to_string().contains("completed"))
+                        .count();
+                    let tasks_failed = recent.iter()
+                        .filter(|e| e.decision_type.to_string().contains("failed"))
+                        .count();
+                    let tasks_assigned = recent.iter()
+                        .filter(|e| e.decision_type.to_string().contains("assigned"))
+                        .count();
+
+                    // Cron status.
+                    let cron_count = if let Some(ref cs) = cron_store {
+                        cs.lock().await.jobs.len()
+                    } else { 0 };
+
+                    let mut brief = String::new();
+                    brief.push_str(&format!("Good {}. Here's your brief.\n\n",
+                        if chrono::Utc::now().hour() < 12 { "morning" }
+                        else if chrono::Utc::now().hour() < 18 { "afternoon" }
+                        else { "evening" }
+                    ));
+
+                    // Projects overview.
+                    brief.push_str("Projects:\n");
+                    for s in &summaries {
+                        brief.push_str(&format!("  {} — {} open tasks, {} done, {} missions\n",
+                            s.name, s.open_tasks, s.done_tasks, s.active_missions));
+                    }
+
+                    // Recent activity summary.
+                    brief.push_str(&format!("\nRecent activity: {} tasks completed, {} failed, {} assigned\n",
+                        tasks_completed, tasks_failed, tasks_assigned));
+
+                    // Budget.
+                    brief.push_str(&format!("Budget: ${:.3} spent of ${:.2} ({:.1}% used)\n",
+                        spent, budget, (spent / budget) * 100.0));
+
+                    // System health.
+                    brief.push_str(&format!("System: {} workers, {} cron jobs, {} pending messages\n",
+                        worker_count, cron_count, dispatch_health.unread));
+
+                    if dispatch_health.dead_letters > 0 {
+                        brief.push_str(&format!("⚠ {} dead letters in dispatch queue\n",
+                            dispatch_health.dead_letters));
+                    }
+
+                    serde_json::json!({
+                        "ok": true,
+                        "brief": brief.trim(),
+                        "stats": {
+                            "tasks_completed": tasks_completed,
+                            "tasks_failed": tasks_failed,
+                            "tasks_assigned": tasks_assigned,
+                            "budget_used_pct": (spent / budget) * 100.0,
+                            "workers": worker_count,
+                            "cron_jobs": cron_count,
+                            "dead_letters": dispatch_health.dead_letters,
+                        }
+                    })
+                }
+
+                "agent_identity" => {
+                    let agent_name = request.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    if agent_name.is_empty() {
+                        serde_json::json!({"ok": false, "error": "name is required"})
+                    } else {
+                        // Find agent directory by walking up from cwd to find agents/{name}/
+                        let agent_dir = std::env::current_dir()
+                            .unwrap_or_default()
+                            .join("agents")
+                            .join(agent_name);
+
+                        if !agent_dir.exists() {
+                            serde_json::json!({"ok": false, "error": format!("agent directory not found: {}", agent_dir.display())})
+                        } else {
+                            let mut files = serde_json::Map::new();
+                            let identity_files = ["PERSONA.md", "IDENTITY.md", "KNOWLEDGE.md", "MEMORY.md", "PREFERENCES.md", "AGENTS.md", "agent.toml"];
+                            for filename in &identity_files {
+                                let path = agent_dir.join(filename);
+                                if path.exists() && let Ok(content) = std::fs::read_to_string(&path) {
+                                    files.insert(filename.to_string(), serde_json::Value::String(content));
+                                }
+                            }
+                            serde_json::json!({
+                                "ok": true,
+                                "agent": agent_name,
+                                "files": files,
+                            })
+                        }
+                    }
+                }
+
+                "save_agent_file" => {
+                    let agent_name = request.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let filename = request.get("filename").and_then(|v| v.as_str()).unwrap_or("");
+                    let content = request.get("content").and_then(|v| v.as_str()).unwrap_or("");
+
+                    // Only allow editing known identity files.
+                    let allowed = ["PERSONA.md", "IDENTITY.md", "KNOWLEDGE.md", "MEMORY.md", "PREFERENCES.md", "AGENTS.md", "agent.toml"];
+                    if agent_name.is_empty() || filename.is_empty() {
+                        serde_json::json!({"ok": false, "error": "name and filename required"})
+                    } else if !allowed.contains(&filename) {
+                        serde_json::json!({"ok": false, "error": format!("cannot edit {filename}")})
+                    } else {
+                        let agent_dir = std::env::current_dir()
+                            .unwrap_or_default()
+                            .join("agents")
+                            .join(agent_name);
+                        let path = agent_dir.join(filename);
+                        match std::fs::write(&path, content) {
+                            Ok(_) => {
+                                info!(agent = agent_name, file = filename, "agent file updated via web");
+                                serde_json::json!({"ok": true, "saved": filename})
+                            }
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                        }
+                    }
+                }
+
+                "rate_limit" => {
+                    let rl_path = dirs::home_dir().unwrap_or_default().join(".sigil").join("rate_limit.json");
+                    match std::fs::read_to_string(&rl_path) {
+                        Ok(content) => {
+                            match serde_json::from_str::<serde_json::Value>(&content) {
+                                Ok(rl) => serde_json::json!({"ok": true, "rate_limit": rl}),
+                                Err(_) => serde_json::json!({"ok": true, "rate_limit": null}),
+                            }
+                        }
+                        Err(_) => serde_json::json!({"ok": true, "rate_limit": null}),
+                    }
+                }
+
+                "memories" => {
+                    let project = request.get("project").and_then(|v| v.as_str()).unwrap_or("");
+                    let query = request.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                    let limit = request.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+
+                    if project.is_empty() {
+                        // List all projects with memory counts.
+                        let cwd = std::env::current_dir().unwrap_or_default();
+                        let mut project_memories = Vec::new();
+                        for entry in std::fs::read_dir(cwd.join("projects")).into_iter().flatten().flatten() {
+                                let name = entry.file_name().to_string_lossy().to_string();
+                                let db_path = entry.path().join(".sigil").join("memory.db");
+                                if db_path.exists() {
+                                    let count = rusqlite::Connection::open(&db_path)
+                                        .and_then(|conn| conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get::<_, i64>(0)))
+                                        .unwrap_or(0);
+                                    if count > 0 {
+                                        project_memories.push(serde_json::json!({"project": name, "count": count}));
+                                    }
+                                }
+                        }
+                        serde_json::json!({"ok": true, "projects": project_memories})
+                    } else {
+                        // Query memories for a specific project.
+                        let cwd = std::env::current_dir().unwrap_or_default();
+                        let db_path = cwd.join("projects").join(project).join(".sigil").join("memory.db");
+                        if !db_path.exists() {
+                            serde_json::json!({"ok": true, "memories": []})
+                        } else if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+                                    let sql = if query.is_empty() {
+                                        format!("SELECT id, key, content, category, scope, entity_id, created_at FROM memories ORDER BY created_at DESC LIMIT {limit}")
+                                    } else {
+                                        format!("SELECT id, key, content, category, scope, entity_id, created_at FROM memories WHERE content LIKE '%{}%' OR key LIKE '%{}%' ORDER BY created_at DESC LIMIT {limit}", query.replace('\'', ""), query.replace('\'', ""))
+                                    };
+                                    let rows: Vec<serde_json::Value> = conn.prepare(&sql).ok()
+                                        .map(|mut stmt| {
+                                            stmt.query_map([], |row| {
+                                                Ok(serde_json::json!({
+                                                    "id": row.get::<_, String>(0)?,
+                                                    "key": row.get::<_, String>(1)?,
+                                                    "content": row.get::<_, String>(2)?,
+                                                    "category": row.get::<_, String>(3)?,
+                                                    "scope": row.get::<_, String>(4)?,
+                                                    "entity_id": row.get::<_, Option<String>>(5)?,
+                                                    "created_at": row.get::<_, String>(6)?,
+                                                }))
+                                            }).ok().map(|iter| iter.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+                                        }).unwrap_or_default();
+                                    serde_json::json!({"ok": true, "memories": rows, "count": rows.len()})
+                        } else {
+                            serde_json::json!({"ok": true, "memories": []})
+                        }
+                    }
+                }
+
+                "skills" => {
+                    let cwd = std::env::current_dir().unwrap_or_default();
+                    let mut skills = Vec::new();
+
+                    // Helper: scan a directory for .toml and .md files.
+                    let scan_skills = |dir: &std::path::Path, source: &str, out: &mut Vec<serde_json::Value>| {
+                        if !dir.exists() { return; }
+                        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                                let path = entry.path();
+                                if path.is_dir() { continue; }
+                                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                                if ext == "toml" || ext == "md" {
+                                    let name = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                                    let content = std::fs::read_to_string(&path).unwrap_or_default();
+                                    let kind = if ext == "toml" { "skill" } else { "doc" };
+                                    out.push(serde_json::json!({
+                                        "name": name,
+                                        "source": source,
+                                        "kind": kind,
+                                        "path": path.display().to_string(),
+                                        "content": content,
+                                    }));
+                                }
+                        }
+                    };
+
+                    // Shared skills.
+                    scan_skills(&cwd.join("projects").join("shared").join("skills"), "shared", &mut skills);
+
+                    // Shared subagents.
+                    scan_skills(&cwd.join("projects").join("shared").join("subagents"), "shared/subagents", &mut skills);
+
+                    // Per-project skills + subagents.
+                    for entry in std::fs::read_dir(cwd.join("projects")).into_iter().flatten().flatten() {
+                            let project = entry.file_name().to_string_lossy().to_string();
+                            if project == "shared" { continue; }
+                            scan_skills(&entry.path().join("skills"), &project, &mut skills);
+                            scan_skills(&entry.path().join("subagents"), &format!("{project}/subagents"), &mut skills);
+                    }
+
+                    serde_json::json!({"ok": true, "skills": skills})
+                }
+
+                "pipelines" => {
+                    let cwd = std::env::current_dir().unwrap_or_default();
+                    let mut pipelines = Vec::new();
+                    let shared_dir = cwd.join("projects").join("shared").join("pipelines");
+                    if shared_dir.exists() {
+                        for entry in std::fs::read_dir(&shared_dir).into_iter().flatten().flatten() {
+                                let path = entry.path();
+                                if path.extension().is_some_and(|e| e == "toml") {
+                                    let name = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                                    let content = std::fs::read_to_string(&path).unwrap_or_default();
+                                    pipelines.push(serde_json::json!({
+                                        "name": name,
+                                        "content": content,
+                                    }));
+                                }
+                        }
+                    }
+                    serde_json::json!({"ok": true, "pipelines": pipelines})
+                }
+
+                "project_knowledge" => {
+                    let project = request.get("project").and_then(|v| v.as_str()).unwrap_or("");
+                    if project.is_empty() {
+                        serde_json::json!({"ok": false, "error": "project required"})
+                    } else {
+                        let cwd = std::env::current_dir().unwrap_or_default();
+                        let project_dir = cwd.join("projects").join(project);
+                        let mut files = serde_json::Map::new();
+                        let knowledge_files = ["KNOWLEDGE.md", "AGENTS.md", "HEARTBEAT.md", "project.toml"];
+                        for filename in &knowledge_files {
+                            let path = project_dir.join(filename);
+                            if path.exists() && let Ok(content) = std::fs::read_to_string(&path) {
+                                files.insert(filename.to_string(), serde_json::Value::String(content));
+                            }
+                        }
+                        serde_json::json!({"ok": true, "project": project, "files": files})
+                    }
+                }
+
+                "channel_knowledge" => {
+                    let project = request.get("project").and_then(|v| v.as_str()).unwrap_or("");
+                    let query = request.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                    let limit = request.get("limit").and_then(|v| v.as_u64()).unwrap_or(15) as usize;
+
+                    if project.is_empty() {
+                        serde_json::json!({"ok": false, "error": "project required"})
+                    } else {
+                        let mut items: Vec<serde_json::Value> = Vec::new();
+
+                        // 1. Search project memories.
+                        if let Some(ref engine) = chat_engine
+                            && let Some(mem) = engine.memory_stores.get(project) {
+                                let q = if query.is_empty() { project } else { query };
+                                let mq = sigil_core::traits::MemoryQuery::new(q, limit)
+                                    .with_scope(sigil_core::traits::MemoryScope::Domain);
+                                if let Ok(results) = mem.search(&mq).await {
+                                    for entry in results {
+                                        items.push(serde_json::json!({
+                                            "id": entry.id,
+                                            "key": entry.key,
+                                            "content": entry.content,
+                                            "category": format!("{:?}", entry.category).to_lowercase(),
+                                            "scope": format!("{:?}", entry.scope).to_lowercase(),
+                                            "source": "memory",
+                                            "created_at": entry.created_at.to_rfc3339(),
+                                            "project": project,
+                                        }));
+                                    }
+                                }
+                        }
+
+                        // 2. Fetch blackboard entries for this project.
+                        if let Some(ref bb) = registry.blackboard
+                            && let Ok(entries) = bb.list_project(project, limit as u32) {
+                                for entry in entries {
+                                    items.push(serde_json::json!({
+                                        "id": entry.id,
+                                        "key": entry.key,
+                                        "content": entry.content,
+                                        "source": "blackboard",
+                                        "agent": entry.agent,
+                                        "tags": entry.tags,
+                                        "created_at": entry.created_at.to_rfc3339(),
+                                        "expires_at": entry.expires_at.to_rfc3339(),
+                                        "project": project,
+                                    }));
+                                }
+                        }
+
+                        serde_json::json!({"ok": true, "items": items, "count": items.len()})
+                    }
+                }
+
+                "knowledge_store" => {
+                    let project = request.get("project").and_then(|v| v.as_str()).unwrap_or("");
+                    let key = request.get("key").and_then(|v| v.as_str()).unwrap_or("");
+                    let content = request.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                    let category = request.get("category").and_then(|v| v.as_str()).unwrap_or("fact");
+                    let scope = request.get("scope").and_then(|v| v.as_str()).unwrap_or("domain");
+
+                    if project.is_empty() || key.is_empty() || content.is_empty() {
+                        serde_json::json!({"ok": false, "error": "project, key, and content required"})
+                    } else if let Some(ref engine) = chat_engine {
+                        if let Some(mem) = engine.memory_stores.get(project) {
+                            let cat = match category {
+                                "procedure" => sigil_core::traits::MemoryCategory::Procedure,
+                                "preference" => sigil_core::traits::MemoryCategory::Preference,
+                                "context" => sigil_core::traits::MemoryCategory::Context,
+                                "evergreen" => sigil_core::traits::MemoryCategory::Evergreen,
+                                _ => sigil_core::traits::MemoryCategory::Fact,
+                            };
+                            let sc = match scope {
+                                "system" => sigil_core::traits::MemoryScope::System,
+                                "entity" => sigil_core::traits::MemoryScope::Entity,
+                                _ => sigil_core::traits::MemoryScope::Domain,
+                            };
+                            match mem.store(key, content, cat, sc, None).await {
+                                Ok(id) => serde_json::json!({"ok": true, "id": id}),
+                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                            }
+                        } else {
+                            serde_json::json!({"ok": false, "error": format!("no memory store for project: {project}")})
+                        }
+                    } else {
+                        serde_json::json!({"ok": false, "error": "chat engine not initialized"})
+                    }
+                }
+
+                "knowledge_delete" => {
+                    let project = request.get("project").and_then(|v| v.as_str()).unwrap_or("");
+                    let id = request.get("id").and_then(|v| v.as_str()).unwrap_or("");
+
+                    if project.is_empty() || id.is_empty() {
+                        serde_json::json!({"ok": false, "error": "project and id required"})
+                    } else if let Some(ref engine) = chat_engine {
+                        if let Some(mem) = engine.memory_stores.get(project) {
+                            match mem.delete(id).await {
+                                Ok(_) => serde_json::json!({"ok": true}),
+                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                            }
+                        } else {
+                            serde_json::json!({"ok": false, "error": "no memory store for project"})
+                        }
+                    } else {
+                        serde_json::json!({"ok": false, "error": "chat engine not initialized"})
                     }
                 }
 

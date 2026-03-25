@@ -835,6 +835,20 @@ impl AgentWorker {
             "claude code execution completed"
         );
 
+        // Persist latest rate limit info for dashboard visibility.
+        if let Some(ref rl) = result.rate_limit {
+            let rl_json = serde_json::json!({
+                "status": rl.status,
+                "resets_at": rl.resets_at,
+                "rate_limit_type": rl.rate_limit_type,
+                "overage_status": rl.overage_status,
+                "updated_at": chrono::Utc::now().to_rfc3339(),
+            });
+            if let Ok(data_dir) = std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".sigil")) {
+                let _ = std::fs::write(data_dir.join("rate_limit.json"), serde_json::to_string_pretty(&rl_json).unwrap_or_default());
+            }
+        }
+
         // Fire-and-forget reflection — don't block the worker slot.
         if let (Some(mem), Some(provider)) = (self.memory.clone(), self.reflect_provider.clone()) {
             let task_ctx = task_context.to_string();
@@ -859,7 +873,7 @@ impl AgentWorker {
         provider: Arc<dyn Provider>,
     ) {
         let transcript = format!("User: {}\n\nAssistant: {}", task_context, result_text);
-        if transcript.len() < 100 {
+        if transcript.len() < 30 {
             return;
         }
 

@@ -49,6 +49,9 @@ pub struct SigilConfig {
     /// Watchdog rules — event-driven automation (Phase 8).
     #[serde(default)]
     pub watchdogs: Vec<toml::Value>,
+    /// Web API server settings.
+    #[serde(default)]
+    pub web: WebConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -890,6 +893,41 @@ impl Default for OrchestratorConfig {
     }
 }
 
+/// Web API server configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_web_bind")]
+    pub bind: String,
+    #[serde(default)]
+    pub cors_origins: Vec<String>,
+    #[serde(default)]
+    pub auth_secret: Option<String>,
+    #[serde(default = "default_ws_poll_interval")]
+    pub ws_poll_interval_secs: u64,
+}
+
+impl Default for WebConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bind: default_web_bind(),
+            cors_origins: Vec::new(),
+            auth_secret: None,
+            ws_poll_interval_secs: default_ws_poll_interval(),
+        }
+    }
+}
+
+fn default_web_bind() -> String {
+    "0.0.0.0:8400".to_string()
+}
+
+fn default_ws_poll_interval() -> u64 {
+    5
+}
+
 fn default_max_resolution_attempts() -> u32 {
     1
 }
@@ -966,6 +1004,21 @@ pub struct ProjectConfig {
     /// Missions defined in project.toml via `[[missions]]`.
     #[serde(default)]
     pub missions: Vec<MissionDef>,
+    /// Departments within this project (org chart hierarchy).
+    #[serde(default)]
+    pub departments: Vec<DepartmentConfig>,
+}
+
+/// A department within a project — defines a team channel with its own agents.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DepartmentConfig {
+    pub name: String,
+    #[serde(default)]
+    pub lead: Option<String>,
+    #[serde(default)]
+    pub agents: Vec<String>,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 /// A mission definition from project.toml `[[missions]]`.
@@ -1152,6 +1205,11 @@ impl SigilConfig {
             if let Some(ref mut wt) = project.worktree_root {
                 *wt = expand_tilde(wt);
             }
+        }
+
+        // Resolve environment variables in web auth secret.
+        if let Some(ref secret) = config.web.auth_secret {
+            config.web.auth_secret = Some(resolve_env(secret));
         }
 
         // Validate and warn (non-fatal — partial configs allowed during dev).

@@ -127,3 +127,10 @@ worker_timeout_secs = 1800
 # team.unit = "control-plane"
 # team.leader = "leader"
 # team.agents = ["leader"]
+
+# [web]
+# enabled = true
+# bind = "0.0.0.0:8400"
+# cors_origins = ["https://entity.business", "http://localhost:5173"]
+# auth_secret = "${SIGIL_WEB_SECRET}"
+# ws_poll_interval_secs = 5

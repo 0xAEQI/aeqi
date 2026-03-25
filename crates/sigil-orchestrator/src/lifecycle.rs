@@ -903,6 +903,8 @@ impl LifecycleEngine {
                             cost_usd: cost,
                             turns: 1,
                             timestamp: Utc::now(),
+                            source: "openrouter".to_string(),
+                            tokens: 0,
                         };
                         let _ = ledger.record(entry);
                     }

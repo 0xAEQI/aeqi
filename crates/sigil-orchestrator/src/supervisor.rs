@@ -201,18 +201,15 @@ impl Supervisor {
     fn load_skill_prompt(&self, skill_name: &str) -> Option<String> {
         for dir in &self.skills_dirs {
             let path = dir.join(format!("{skill_name}.toml"));
-            if path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    if let Ok(value) = content.parse::<toml::Value>() {
-                        if let Some(system) = value
-                            .get("prompt")
-                            .and_then(|p| p.get("system"))
-                            .and_then(|s| s.as_str())
-                        {
-                            return Some(system.to_string());
-                        }
-                    }
-                }
+            if path.exists()
+                && let Ok(content) = std::fs::read_to_string(&path)
+                && let Ok(value) = content.parse::<toml::Value>()
+                && let Some(system) = value
+                    .get("prompt")
+                    .and_then(|p| p.get("system"))
+                    .and_then(|s| s.as_str())
+            {
+                return Some(system.to_string());
             }
         }
         None
@@ -786,9 +783,11 @@ impl Supervisor {
                                 project: project_name_task.clone(),
                                 task_id: task_id_clone.clone(),
                                 worker: "worker".to_string(),
-                                cost_usd,
+                                cost_usd: 0.0, // Claude Code Max subscription = no cost
                                 turns,
                                 timestamp: chrono::Utc::now(),
+                                source: "claude_code".to_string(),
+                                tokens: 0, // TODO: extract from Claude Code result
                             });
                         }
 
