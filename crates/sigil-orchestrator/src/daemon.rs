@@ -11,6 +11,7 @@ use crate::conversation_store::web_chat_id;
 use crate::heartbeat::Heartbeat;
 use crate::lifecycle::LifecycleEngine;
 use crate::message::{Dispatch, DispatchBus, DispatchHealth};
+use crate::notes::{DirectiveDetector, DirectiveStatus, NoteStore};
 use crate::reflection::Reflection;
 use crate::registry::ProjectRegistry;
 use crate::schedule::ScheduleStore;
@@ -39,6 +40,7 @@ pub struct Daemon {
     pub cron_store: Option<Arc<Mutex<ScheduleStore>>>,
     pub watchdog: Option<WatchdogEngine>,
     pub chat_engine: Option<Arc<ChatEngine>>,
+    pub note_store: Option<Arc<NoteStore>>,
     pub pid_file: Option<PathBuf>,
     pub socket_path: Option<PathBuf>,
     session_tracker_shutdown: Option<Arc<tokio::sync::Notify>>,
@@ -60,6 +62,7 @@ impl Daemon {
             cron_store: None,
             watchdog: None,
             chat_engine: None,
+            note_store: None,
             pid_file: None,
             socket_path: None,
             session_tracker_shutdown: None,
@@ -233,6 +236,7 @@ impl Daemon {
                     let pulse_count = self.pulses.len();
                     let cron_store = self.cron_store.clone();
                     let chat_engine = self.chat_engine.clone();
+                    let note_store = self.note_store.clone();
                     let running = self.running.clone();
                     let readiness = self.readiness.clone();
                     info!(path = %sock_path.display(), "IPC socket listening");
@@ -244,6 +248,7 @@ impl Daemon {
                             pulse_count,
                             cron_store,
                             chat_engine,
+                            note_store,
                             running,
                             readiness,
                         )
@@ -650,6 +655,7 @@ impl Daemon {
         pulse_count: usize,
         cron_store: Option<Arc<Mutex<ScheduleStore>>>,
         chat_engine: Option<Arc<ChatEngine>>,
+        note_store: Option<Arc<NoteStore>>,
         running: Arc<std::sync::atomic::AtomicBool>,
         readiness: ReadinessContext,
     ) {
@@ -663,6 +669,7 @@ impl Daemon {
                     let dispatch_bus = dispatch_bus.clone();
                     let cron_store = cron_store.clone();
                     let chat_engine = chat_engine.clone();
+                    let note_store = note_store.clone();
                     let readiness = readiness.clone();
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_socket_connection(
@@ -672,6 +679,7 @@ impl Daemon {
                             pulse_count,
                             cron_store,
                             chat_engine,
+                            note_store,
                             readiness,
                         )
                         .await
@@ -690,6 +698,7 @@ impl Daemon {
 
     /// Handle a single IPC connection. Protocol: one JSON line in, one JSON line out.
     #[cfg(unix)]
+    #[allow(clippy::too_many_arguments)]
     async fn handle_socket_connection(
         stream: tokio::net::UnixStream,
         registry: Arc<ProjectRegistry>,
@@ -697,6 +706,7 @@ impl Daemon {
         pulse_count: usize,
         cron_store: Option<Arc<Mutex<ScheduleStore>>>,
         chat_engine: Option<Arc<ChatEngine>>,
+        note_store: Option<Arc<NoteStore>>,
         readiness: ReadinessContext,
     ) -> Result<()> {
         let (reader, mut writer) = stream.into_split();
@@ -1992,6 +2002,166 @@ impl Daemon {
                         }
                     } else {
                         serde_json::json!({"ok": false, "error": "chat engine not initialized"})
+                    }
+                }
+
+                // --- Notes & Directives ---
+
+                "note_save" => {
+                    let channel = request.get("channel").and_then(|v| v.as_str()).unwrap_or("");
+                    let content = request.get("content").and_then(|v| v.as_str()).unwrap_or("");
+
+                    if channel.is_empty() || content.is_empty() {
+                        serde_json::json!({"ok": false, "error": "channel and content required"})
+                    } else if let Some(ref ns) = note_store {
+                        match ns.save_note(channel, content) {
+                            Ok(note) => {
+                                let detected = DirectiveDetector::detect(content);
+                                match ns.save_directives(&note.id, detected) {
+                                    Ok(directives) => {
+                                        let dir_json: Vec<serde_json::Value> = directives
+                                            .iter()
+                                            .map(|d| serde_json::json!({
+                                                "id": d.id,
+                                                "note_id": d.note_id,
+                                                "line_number": d.line_number,
+                                                "content": d.content,
+                                                "status": d.status.to_string(),
+                                                "task_id": d.task_id,
+                                                "matched_task_id": d.matched_task_id,
+                                                "confidence": d.confidence,
+                                                "created_at": d.created_at.to_rfc3339(),
+                                                "updated_at": d.updated_at.to_rfc3339(),
+                                            }))
+                                            .collect();
+                                        serde_json::json!({
+                                            "ok": true,
+                                            "note": {
+                                                "id": note.id,
+                                                "channel": note.channel,
+                                                "content": note.content,
+                                                "version": note.version,
+                                                "created_at": note.created_at.to_rfc3339(),
+                                                "updated_at": note.updated_at.to_rfc3339(),
+                                            },
+                                            "directives": dir_json,
+                                        })
+                                    }
+                                    Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                                }
+                            }
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                        }
+                    } else {
+                        serde_json::json!({"ok": false, "error": "note store not initialized"})
+                    }
+                }
+
+                "note_get" => {
+                    let channel = request.get("channel").and_then(|v| v.as_str()).unwrap_or("");
+
+                    if channel.is_empty() {
+                        serde_json::json!({"ok": false, "error": "channel required"})
+                    } else if let Some(ref ns) = note_store {
+                        match ns.get_note(channel) {
+                            Ok(Some(note)) => {
+                                let directives = ns.get_directives(&note.id).unwrap_or_default();
+                                let dir_json: Vec<serde_json::Value> = directives
+                                    .iter()
+                                    .map(|d| serde_json::json!({
+                                        "id": d.id,
+                                        "note_id": d.note_id,
+                                        "line_number": d.line_number,
+                                        "content": d.content,
+                                        "status": d.status.to_string(),
+                                        "task_id": d.task_id,
+                                        "matched_task_id": d.matched_task_id,
+                                        "confidence": d.confidence,
+                                        "created_at": d.created_at.to_rfc3339(),
+                                        "updated_at": d.updated_at.to_rfc3339(),
+                                    }))
+                                    .collect();
+                                serde_json::json!({
+                                    "ok": true,
+                                    "note": {
+                                        "id": note.id,
+                                        "channel": note.channel,
+                                        "content": note.content,
+                                        "version": note.version,
+                                        "created_at": note.created_at.to_rfc3339(),
+                                        "updated_at": note.updated_at.to_rfc3339(),
+                                    },
+                                    "directives": dir_json,
+                                })
+                            }
+                            Ok(None) => serde_json::json!({"ok": true, "note": null, "directives": []}),
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                        }
+                    } else {
+                        serde_json::json!({"ok": false, "error": "note store not initialized"})
+                    }
+                }
+
+                "note_list" => {
+                    if let Some(ref ns) = note_store {
+                        match ns.list_notes() {
+                            Ok(notes) => {
+                                let items: Vec<serde_json::Value> = notes
+                                    .iter()
+                                    .map(|n| serde_json::json!({
+                                        "id": n.id,
+                                        "channel": n.channel,
+                                        "content": n.content,
+                                        "version": n.version,
+                                        "created_at": n.created_at.to_rfc3339(),
+                                        "updated_at": n.updated_at.to_rfc3339(),
+                                    }))
+                                    .collect();
+                                serde_json::json!({"ok": true, "notes": items})
+                            }
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                        }
+                    } else {
+                        serde_json::json!({"ok": false, "error": "note store not initialized"})
+                    }
+                }
+
+                "note_delete" => {
+                    let id = request.get("id").and_then(|v| v.as_str()).unwrap_or("");
+
+                    if id.is_empty() {
+                        serde_json::json!({"ok": false, "error": "id required"})
+                    } else if let Some(ref ns) = note_store {
+                        match ns.delete_note(id) {
+                            Ok(deleted) => serde_json::json!({"ok": true, "deleted": deleted}),
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                        }
+                    } else {
+                        serde_json::json!({"ok": false, "error": "note store not initialized"})
+                    }
+                }
+
+                "directive_update" => {
+                    let directive_id = request
+                        .get("directive_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let status_str = request
+                        .get("status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("pending");
+                    let task_id = request.get("task_id").and_then(|v| v.as_str());
+
+                    if directive_id.is_empty() {
+                        serde_json::json!({"ok": false, "error": "directive_id required"})
+                    } else if let Some(ref ns) = note_store {
+                        let status = DirectiveStatus::from_str_lossy(status_str);
+                        match ns.update_directive_status(directive_id, status, task_id) {
+                            Ok(_) => serde_json::json!({"ok": true}),
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                        }
+                    } else {
+                        serde_json::json!({"ok": false, "error": "note store not initialized"})
                     }
                 }
 

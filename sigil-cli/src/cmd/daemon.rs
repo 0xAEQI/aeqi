@@ -595,6 +595,13 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
 
             let mut daemon = Daemon::new(registry, dispatch_bus);
             daemon.chat_engine = chat_engine;
+            match sigil_orchestrator::NoteStore::new(&data_dir.join("notes.db")) {
+                Ok(ns) => {
+                    daemon.note_store = Some(Arc::new(ns));
+                    info!("note store initialized");
+                }
+                Err(e) => warn!(error = %e, "failed to initialize note store"),
+            }
             daemon.set_readiness_context(
                 config.projects.len(),
                 advisor_agents.len(),

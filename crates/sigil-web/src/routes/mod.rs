@@ -3,7 +3,7 @@ use axum::{
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use serde::Deserialize;
 
@@ -41,6 +41,10 @@ pub fn api_routes() -> Router<AppState> {
         .route("/rate-limit", get(rate_limit))
         .route("/agents/{name}/identity", get(agent_identity))
         .route("/agents/{name}/files", post(save_agent_file))
+        .route("/notes", get(note_list).post(note_save))
+        .route("/notes/{channel}", get(note_get))
+        .route("/notes/{id}/delete", delete(note_delete))
+        .route("/directives/{id}/status", post(directive_update))
 }
 
 // --- Status ---
@@ -422,6 +426,45 @@ async fn post_blackboard_entry(
     Json(body): Json<serde_json::Value>,
 ) -> Response {
     ipc_proxy(state, "post_blackboard", body).await
+}
+
+// --- Notes ---
+
+async fn note_list(State(state): State<AppState>) -> Response {
+    ipc_proxy(state, "note_list", serde_json::Value::Null).await
+}
+
+async fn note_get(
+    State(state): State<AppState>,
+    axum::extract::Path(channel): axum::extract::Path<String>,
+) -> Response {
+    ipc_proxy(state, "note_get", serde_json::json!({"channel": channel})).await
+}
+
+async fn note_save(
+    State(state): State<AppState>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    ipc_proxy(state, "note_save", body).await
+}
+
+async fn note_delete(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    ipc_proxy(state, "note_delete", serde_json::json!({"id": id})).await
+}
+
+// --- Directives ---
+
+async fn directive_update(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    let mut params = body;
+    params["directive_id"] = serde_json::Value::String(id);
+    ipc_proxy(state, "directive_update", params).await
 }
 
 // --- Helper ---
