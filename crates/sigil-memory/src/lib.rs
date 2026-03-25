@@ -7,8 +7,10 @@
 //! Used by agent workers for long-term memory recall during task execution.
 
 pub mod chunker;
+pub mod debounce;
 pub mod dedup;
 pub mod graph;
+pub mod lifecycle;
 pub mod hierarchy;
 pub mod hybrid;
 pub mod query_planner;

@@ -41,6 +41,7 @@ pub mod reflection;
 pub mod registry;
 pub mod schedule;
 pub mod session_tracker;
+pub mod skill_promotion;
 pub mod supervisor;
 pub mod template;
 pub mod tools;
