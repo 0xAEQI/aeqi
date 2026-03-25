@@ -7,11 +7,33 @@
 //!
 //! This prevents workers from hitting context limits on long-running tasks while
 //! retaining the most relevant context (initial instructions and recent activity).
+//!
+//! ## Context Tier Stepping
+//!
+//! When an error containing context-length indicators is received via `on_error`,
+//! the middleware reduces `max_context_lines` by 40% (e.g., 500 -> 300 -> 180 -> 108).
+//! After 3 step-downs, execution is halted to prevent infinite shrinking.
 
 use async_trait::async_trait;
-use tracing::{debug, info};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use tracing::{debug, info, warn};
 
 use super::{Middleware, MiddlewareAction, WorkerContext};
+
+/// Maximum number of context tier step-downs before halting.
+const MAX_TIER_STEPDOWNS: u32 = 3;
+
+/// Factor by which `max_context_lines` is reduced on each step-down (40% reduction).
+const STEPDOWN_FACTOR: f32 = 0.60;
+
+/// Error message substrings that indicate a context-length problem.
+const CONTEXT_LENGTH_INDICATORS: &[&str] = &[
+    "context length",
+    "token limit",
+    "exceeds",
+    "too long",
+    "maximum context",
+];
 
 /// Context compression middleware configuration.
 pub struct ContextCompressionMiddleware {
@@ -19,14 +41,16 @@ pub struct ContextCompressionMiddleware {
     /// Default: 0.50 (50% of budget).
     threshold_percent: f32,
     /// Maximum context lines used as the budget reference.
-    /// Default: 500.
-    max_context_lines: usize,
+    /// Default: 500. Reduced by 40% on each tier step-down.
+    max_context_lines: AtomicUsize,
     /// Number of initial messages to always preserve.
     /// Default: 3.
     protect_first_n: usize,
     /// Number of trailing messages to always preserve.
     /// Default: 5.
     protect_last_n: usize,
+    /// How many tier step-downs have occurred (max 3, then halt).
+    stepdown_count: AtomicU32,
 }
 
 impl ContextCompressionMiddleware {
@@ -34,9 +58,10 @@ impl ContextCompressionMiddleware {
     pub fn new() -> Self {
         Self {
             threshold_percent: 0.50,
-            max_context_lines: 500,
+            max_context_lines: AtomicUsize::new(500),
             protect_first_n: 3,
             protect_last_n: 5,
+            stepdown_count: AtomicU32::new(0),
         }
     }
 
@@ -49,15 +74,53 @@ impl ContextCompressionMiddleware {
     ) -> Self {
         Self {
             threshold_percent,
-            max_context_lines,
+            max_context_lines: AtomicUsize::new(max_context_lines),
             protect_first_n,
             protect_last_n,
+            stepdown_count: AtomicU32::new(0),
         }
+    }
+
+    /// Current max context lines (may have been reduced by tier stepping).
+    pub fn current_max_context_lines(&self) -> usize {
+        self.max_context_lines.load(Ordering::Relaxed)
+    }
+
+    /// How many tier step-downs have occurred.
+    pub fn stepdown_count(&self) -> u32 {
+        self.stepdown_count.load(Ordering::Relaxed)
     }
 
     /// Compute the message count threshold that triggers compression.
     fn threshold(&self) -> usize {
-        (self.max_context_lines as f32 * self.threshold_percent) as usize
+        let max_lines = self.max_context_lines.load(Ordering::Relaxed);
+        (max_lines as f32 * self.threshold_percent) as usize
+    }
+
+    /// Check whether an error message indicates a context-length problem.
+    fn is_context_length_error(error: &str) -> bool {
+        let lower = error.to_lowercase();
+        CONTEXT_LENGTH_INDICATORS
+            .iter()
+            .any(|indicator| lower.contains(indicator))
+    }
+
+    /// Step down the context tier: reduce max_context_lines by 40%.
+    /// Returns the new value, or None if max step-downs exceeded.
+    fn step_down_tier(&self) -> Option<usize> {
+        let count = self.stepdown_count.fetch_add(1, Ordering::Relaxed);
+        if count >= MAX_TIER_STEPDOWNS {
+            // Undo the increment — we're not actually stepping down.
+            self.stepdown_count.fetch_sub(1, Ordering::Relaxed);
+            return None;
+        }
+
+        let old = self.max_context_lines.load(Ordering::Relaxed);
+        let new = ((old as f32) * STEPDOWN_FACTOR) as usize;
+        // Ensure we don't go below a minimum useful size.
+        let new = new.max(10);
+        self.max_context_lines.store(new, Ordering::Relaxed);
+        Some(new)
     }
 
     /// Build a compressed summary from a slice of messages.
@@ -145,12 +208,14 @@ impl Middleware for ContextCompressionMiddleware {
         );
 
         let compressed_count = original_count - ctx.messages.len();
+        let max_lines = self.max_context_lines.load(Ordering::Relaxed);
         info!(
             task_id = %ctx.task_id,
             original_messages = original_count,
             compressed_messages = compressed_count,
             remaining_messages = ctx.messages.len(),
             threshold,
+            max_context_lines = max_lines,
             "context compressed — middle messages summarized"
         );
         debug!(
@@ -160,6 +225,42 @@ impl Middleware for ContextCompressionMiddleware {
         );
 
         MiddlewareAction::Continue
+    }
+
+    async fn on_error(&self, ctx: &mut WorkerContext, error: &str) -> MiddlewareAction {
+        if !Self::is_context_length_error(error) {
+            return MiddlewareAction::Continue;
+        }
+
+        let old_max = self.current_max_context_lines();
+
+        match self.step_down_tier() {
+            Some(new_max) => {
+                let stepdowns = self.stepdown_count();
+                warn!(
+                    task_id = %ctx.task_id,
+                    old_max_context_lines = old_max,
+                    new_max_context_lines = new_max,
+                    stepdown = stepdowns,
+                    max_stepdowns = MAX_TIER_STEPDOWNS,
+                    "context tier step-down — reducing max_context_lines by 40% after context-length error"
+                );
+                MiddlewareAction::Continue
+            }
+            None => {
+                let stepdowns = self.stepdown_count();
+                warn!(
+                    task_id = %ctx.task_id,
+                    max_context_lines = old_max,
+                    stepdowns,
+                    "context tier step-down limit reached — halting execution"
+                );
+                MiddlewareAction::Halt(format!(
+                    "context tier exhausted after {} step-downs (max_context_lines={}): {}",
+                    stepdowns, old_max, error
+                ))
+            }
+        }
     }
 }
 
@@ -324,5 +425,126 @@ mod tests {
         assert!(summary.starts_with("[Context compressed: 2 messages summarized"));
         assert!(summary.contains("First middle message"));
         assert!(summary.contains("Second middle message"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Context tier stepping tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn is_context_length_error_detects_indicators() {
+        assert!(ContextCompressionMiddleware::is_context_length_error(
+            "Request exceeds maximum context length"
+        ));
+        assert!(ContextCompressionMiddleware::is_context_length_error(
+            "token limit reached for model"
+        ));
+        assert!(ContextCompressionMiddleware::is_context_length_error(
+            "Input too long for this model"
+        ));
+        assert!(ContextCompressionMiddleware::is_context_length_error(
+            "Exceeds the maximum allowed tokens"
+        ));
+        assert!(ContextCompressionMiddleware::is_context_length_error(
+            "Maximum context window exceeded"
+        ));
+    }
+
+    #[test]
+    fn is_context_length_error_ignores_unrelated() {
+        assert!(!ContextCompressionMiddleware::is_context_length_error(
+            "network timeout"
+        ));
+        assert!(!ContextCompressionMiddleware::is_context_length_error(
+            "authentication failed"
+        ));
+        assert!(!ContextCompressionMiddleware::is_context_length_error(
+            "rate limited"
+        ));
+    }
+
+    #[tokio::test]
+    async fn on_error_steps_down_on_context_length_error() {
+        let mw = ContextCompressionMiddleware::with_config(0.50, 500, 2, 2);
+        let mut ctx = test_ctx();
+
+        // First step-down: 500 * 0.60 = 300
+        let action = mw.on_error(&mut ctx, "request exceeds maximum context length").await;
+        assert!(matches!(action, MiddlewareAction::Continue));
+        assert_eq!(mw.current_max_context_lines(), 300);
+        assert_eq!(mw.stepdown_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn on_error_progressive_stepdown() {
+        let mw = ContextCompressionMiddleware::with_config(0.50, 500, 2, 2);
+        let mut ctx = test_ctx();
+
+        // Step 1: 500 -> 300
+        mw.on_error(&mut ctx, "token limit exceeded").await;
+        assert_eq!(mw.current_max_context_lines(), 300);
+
+        // Step 2: 300 -> 180
+        mw.on_error(&mut ctx, "token limit exceeded").await;
+        assert_eq!(mw.current_max_context_lines(), 180);
+
+        // Step 3: 180 -> 108
+        mw.on_error(&mut ctx, "token limit exceeded").await;
+        assert_eq!(mw.current_max_context_lines(), 108);
+        assert_eq!(mw.stepdown_count(), 3);
+    }
+
+    #[tokio::test]
+    async fn on_error_halts_after_max_stepdowns() {
+        let mw = ContextCompressionMiddleware::with_config(0.50, 500, 2, 2);
+        let mut ctx = test_ctx();
+
+        // Exhaust all 3 step-downs.
+        mw.on_error(&mut ctx, "context length exceeded").await;
+        mw.on_error(&mut ctx, "context length exceeded").await;
+        mw.on_error(&mut ctx, "context length exceeded").await;
+
+        // 4th attempt should halt.
+        let action = mw.on_error(&mut ctx, "context length exceeded").await;
+        assert!(matches!(action, MiddlewareAction::Halt(_)));
+        if let MiddlewareAction::Halt(msg) = action {
+            assert!(msg.contains("context tier exhausted"));
+            assert!(msg.contains("3 step-downs"));
+        }
+    }
+
+    #[tokio::test]
+    async fn on_error_ignores_non_context_errors() {
+        let mw = ContextCompressionMiddleware::with_config(0.50, 500, 2, 2);
+        let mut ctx = test_ctx();
+
+        let action = mw.on_error(&mut ctx, "network timeout").await;
+        assert!(matches!(action, MiddlewareAction::Continue));
+        // No step-down should have occurred.
+        assert_eq!(mw.current_max_context_lines(), 500);
+        assert_eq!(mw.stepdown_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn stepdown_affects_threshold() {
+        let mw = ContextCompressionMiddleware::with_config(0.50, 20, 2, 2);
+        let mut ctx = test_ctx();
+
+        // Original threshold: 0.50 * 20 = 10
+        ctx.messages = make_messages(8); // 8 < 10, no compression
+        let action = mw.before_model(&mut ctx).await;
+        assert!(matches!(action, MiddlewareAction::Continue));
+        assert_eq!(ctx.messages.len(), 8);
+
+        // Step down: 20 -> 12, new threshold: 0.50 * 12 = 6
+        mw.on_error(&mut ctx, "context length exceeded").await;
+        assert_eq!(mw.current_max_context_lines(), 12);
+
+        // Now 8 > 6, should trigger compression
+        ctx.messages = make_messages(8);
+        let action = mw.before_model(&mut ctx).await;
+        assert!(matches!(action, MiddlewareAction::Continue));
+        // 2 head + 1 summary + 2 tail = 5
+        assert_eq!(ctx.messages.len(), 5);
     }
 }

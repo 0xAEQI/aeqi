@@ -18,7 +18,7 @@ pub use file::{FileReadTool, FileWriteTool, ListDirTool};
 pub use git::GitWorktreeTool;
 pub use porkbun::PorkbunTool;
 pub use shell::ShellTool;
-pub use skill::Skill;
+pub use skill::{MagicTools, Skill, SkillVerification};
 pub use tasks::{
     TaskCloseTool, TaskCreateTool, TaskDepTool, TaskReadyTool, TaskShowTool, TaskUpdateTool,
 };

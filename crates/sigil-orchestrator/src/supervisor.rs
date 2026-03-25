@@ -293,6 +293,7 @@ impl Supervisor {
     }
 
     /// Look up a skill's system prompt by name from skills directories.
+    /// Also extracts tool allow/deny lists and appends advisory restrictions to the prompt.
     fn load_skill_prompt(&self, skill_name: &str) -> Option<String> {
         for dir in &self.skills_dirs {
             let path = dir.join(format!("{skill_name}.toml"));
@@ -304,7 +305,63 @@ impl Supervisor {
                     .and_then(|p| p.get("system"))
                     .and_then(|s| s.as_str())
             {
-                return Some(system.to_string());
+                let mut prompt = system.to_string();
+
+                // Extract tool restrictions for advisory prompt injection (ClaudeCode mode).
+                let allow: Vec<String> = value
+                    .get("tools")
+                    .and_then(|t| t.get("allow"))
+                    .and_then(|a| a.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let deny: Vec<String> = value
+                    .get("tools")
+                    .and_then(|t| t.get("deny"))
+                    .and_then(|a| a.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                if !allow.is_empty() || !deny.is_empty() {
+                    prompt.push_str("\n\n## Tool Restrictions");
+                    if !allow.is_empty() {
+                        prompt.push_str(&format!(
+                            "\nYou may ONLY use these tools: {}",
+                            allow.join(", ")
+                        ));
+                    }
+                    if !deny.is_empty() {
+                        prompt.push_str(&format!(
+                            "\nYou must NOT use: {}",
+                            deny.join(", ")
+                        ));
+                    }
+                }
+
+                return Some(prompt);
+            }
+        }
+        None
+    }
+
+    /// Load a full Skill struct from the skills directories by name.
+    fn load_skill(&self, skill_name: &str) -> Option<sigil_tools::Skill> {
+        for dir in &self.skills_dirs {
+            let path = dir.join(format!("{skill_name}.toml"));
+            if path.exists() {
+                match sigil_tools::Skill::load(&path) {
+                    Ok(skill) => return Some(skill),
+                    Err(e) => {
+                        warn!(skill = %skill_name, error = %e, "failed to load skill TOML");
+                    }
+                }
             }
         }
         None
@@ -409,7 +466,7 @@ impl Supervisor {
             }
         }
 
-        // Inject skill system prompt if task specifies a skill.
+        // Inject skill system prompt and apply tool restrictions if task specifies a skill.
         if let Some(ref skill_name) = task.skill {
             if let Some(prompt) = self.load_skill_prompt(skill_name) {
                 info!(
@@ -423,6 +480,24 @@ impl Supervisor {
                     project = %self.project_name,
                     skill = %skill_name,
                     "skill not found in skills directories"
+                );
+            }
+
+            // For Agent mode: filter tools by skill allow/deny policy.
+            if matches!(self.execution_mode, ExecutionMode::Agent)
+                && let Some(skill) = self.load_skill(skill_name)
+                && (!skill.tools.allow.is_empty() || !skill.tools.deny.is_empty())
+                && let crate::agent_worker::WorkerExecution::Agent { ref mut tools, .. } =
+                    worker.execution
+            {
+                let before = tools.len();
+                tools.retain(|t| skill.is_tool_allowed(t.name()));
+                info!(
+                    project = %self.project_name,
+                    skill = %skill_name,
+                    before = before,
+                    after = tools.len(),
+                    "filtered tools by skill policy"
                 );
             }
         }

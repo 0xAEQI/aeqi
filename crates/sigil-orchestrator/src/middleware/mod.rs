@@ -71,6 +71,9 @@ pub struct ToolResult {
 pub enum OutcomeStatus {
     Done,
     DoneWithConcerns,
+    /// Worker produced artifacts but did not fully complete the task.
+    /// Distinct from `Failed` — partial work is preservable and resumable.
+    PartiallyDone,
     Blocked,
     NeedsContext,
     Handoff,

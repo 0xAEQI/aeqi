@@ -12,6 +12,7 @@
 //!   - quality approved:       +0.1
 //!   - worker self-confidence: +0.1
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
@@ -46,6 +47,80 @@ pub enum VerificationSignal {
     QualityConcern,
     /// No artifacts were found (suspicious for a DONE outcome).
     NoArtifacts,
+}
+
+// ---------------------------------------------------------------------------
+// VerificationEvidence
+// ---------------------------------------------------------------------------
+
+/// Structured evidence collected during verification for audit trails.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationEvidence {
+    /// Raw test output (truncated to 2000 chars).
+    pub test_output: Option<String>,
+    /// Exit code from the test runner process.
+    pub test_exit_code: Option<i32>,
+    /// Files changed (from `git diff --name-only`).
+    pub files_changed: Vec<String>,
+    /// Lines added in the diff.
+    pub lines_added: u32,
+    /// Lines removed in the diff.
+    pub lines_removed: u32,
+    /// Timestamp when evidence was collected.
+    pub timestamp: DateTime<Utc>,
+}
+
+impl VerificationEvidence {
+    /// Create empty evidence with the current timestamp.
+    fn new() -> Self {
+        Self {
+            test_output: None,
+            test_exit_code: None,
+            files_changed: Vec::new(),
+            lines_added: 0,
+            lines_removed: 0,
+            timestamp: Utc::now(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RedFlagDetector
+// ---------------------------------------------------------------------------
+
+/// Detects rationalization patterns in worker output that indicate
+/// shortcuts or insufficient verification.
+pub struct RedFlagDetector {
+    patterns: Vec<String>,
+}
+
+impl RedFlagDetector {
+    /// Create a detector with the default set of red flag patterns.
+    pub fn with_defaults() -> Self {
+        Self {
+            patterns: vec![
+                "skip test".into(),
+                "force push".into(),
+                "just deploy".into(),
+                "works on my machine".into(),
+                "no need to test".into(),
+                "too simple to test".into(),
+                "probably fine".into(),
+                "should be safe".into(),
+                "trust me".into(),
+            ],
+        }
+    }
+
+    /// Scan text for red flag patterns and return all matches.
+    pub fn scan(&self, text: &str) -> Vec<String> {
+        let lower = text.to_lowercase();
+        self.patterns
+            .iter()
+            .filter(|p| lower.contains(&p.to_lowercase()))
+            .cloned()
+            .collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +161,8 @@ pub struct VerificationResult {
     pub reason: String,
     /// Actionable suggestions (e.g. "add tests", "check spec compliance").
     pub suggestions: Vec<String>,
+    /// Structured evidence collected during verification (test output, diffs, etc.).
+    pub evidence: Option<VerificationEvidence>,
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +223,7 @@ impl VerificationPipeline {
     pub async fn verify(&self, outcome: &Outcome, task: &TaskContext) -> VerificationResult {
         let mut signals = Vec::new();
         let mut suggestions = Vec::new();
+        let mut evidence = VerificationEvidence::new();
 
         // Stage 1: Artifact check.
         if self.config.require_artifacts {
@@ -155,7 +233,7 @@ impl VerificationPipeline {
 
         // Stage 2: Automated testing.
         if self.config.run_tests {
-            let test_signals = self.check_tests(task).await;
+            let test_signals = self.check_tests(task, &mut evidence).await;
             signals.extend(test_signals);
         }
 
@@ -169,6 +247,11 @@ impl VerificationPipeline {
         if self.config.check_quality {
             let quality_signals = self.check_quality(outcome, task);
             signals.extend(quality_signals);
+        }
+
+        // Collect git diff stats if project_dir is available.
+        if let Some(ref project_dir) = task.project_dir {
+            Self::collect_git_evidence(project_dir, &mut evidence).await;
         }
 
         // Stage 5: Confidence scoring.
@@ -225,6 +308,7 @@ impl VerificationPipeline {
             approved,
             reason,
             suggestions,
+            evidence: Some(evidence),
         }
     }
 
@@ -250,27 +334,139 @@ impl VerificationPipeline {
         }
     }
 
-    /// Stage 2: Check for test-related artifacts (heuristic — not actual test execution).
+    /// Stage 2: Run automated tests if a recognized test framework is detected.
     ///
-    /// In a full implementation this would shell out to `cargo test` or equivalent
-    /// and parse exit codes. For now we only check whether the worker's artifacts
-    /// mention test-related keywords, which is a weak proxy for "tests passed".
-    async fn check_tests(&self, task: &TaskContext) -> Vec<VerificationSignal> {
-        // Look for test-related artifacts in the task context.
+    /// Detection order:
+    /// 1. `Cargo.toml` in project_dir -> `cargo test --workspace -q`
+    /// 2. `package.json` with a `test` script -> `npm test`
+    /// 3. Fall back to heuristic artifact scanning.
+    ///
+    /// Test output is captured in `evidence` for audit logging.
+    async fn check_tests(
+        &self,
+        task: &TaskContext,
+        evidence: &mut VerificationEvidence,
+    ) -> Vec<VerificationSignal> {
+        // Try real test execution if project_dir is available.
+        if let Some(ref project_dir) = task.project_dir {
+            // Detect Cargo.toml -> Rust project.
+            let cargo_toml = project_dir.join("Cargo.toml");
+            if cargo_toml.exists() {
+                debug!(task_id = %task.task_id, dir = %project_dir.display(), "detected Cargo.toml — running cargo test");
+                return self
+                    .run_test_command(
+                        task,
+                        evidence,
+                        project_dir,
+                        "cargo",
+                        &["test", "--workspace", "-q"],
+                    )
+                    .await;
+            }
+
+            // Detect package.json with test script -> Node project.
+            let package_json = project_dir.join("package.json");
+            if package_json.exists()
+                && let Ok(contents) = tokio::fs::read_to_string(&package_json).await
+                && contents.contains("\"test\"")
+            {
+                debug!(task_id = %task.task_id, dir = %project_dir.display(), "detected package.json with test script — running npm test");
+                return self
+                    .run_test_command(
+                        task,
+                        evidence,
+                        project_dir,
+                        "npm",
+                        &["test"],
+                    )
+                    .await;
+            }
+        }
+
+        // Fallback: heuristic artifact scanning (original behavior).
         let has_test_artifacts = task.artifacts.iter().any(|a| {
             let lower = a.to_lowercase();
             lower.contains("test") || lower.contains("cargo test") || lower.contains("npm test")
         });
 
         if !has_test_artifacts {
-            debug!(task_id = %task.task_id, "no test artifacts found — skipping test check");
+            debug!(task_id = %task.task_id, "no test framework detected, no test artifacts — skipping test check");
             return Vec::new();
         }
 
-        // Test artifacts are present — treat as a positive signal. This is heuristic:
-        // we cannot confirm tests actually passed without running them.
-        debug!(task_id = %task.task_id, "test artifacts found — marking as present (heuristic)");
+        debug!(task_id = %task.task_id, "test artifacts found — marking as present (heuristic fallback)");
         vec![VerificationSignal::TestArtifactsPresent]
+    }
+
+    /// Shell out to a test runner command, parse exit code and output.
+    async fn run_test_command(
+        &self,
+        task: &TaskContext,
+        evidence: &mut VerificationEvidence,
+        project_dir: &PathBuf,
+        program: &str,
+        args: &[&str],
+    ) -> Vec<VerificationSignal> {
+        use std::time::Duration;
+        use tokio::process::Command;
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(60),
+            Command::new(program)
+                .args(args)
+                .current_dir(project_dir)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output(),
+        )
+        .await;
+
+        match result {
+            Ok(Ok(output)) => {
+                let exit_code = output.status.code().unwrap_or(-1);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let combined = format!("{stdout}{stderr}");
+
+                // Truncate to 2000 chars for evidence storage.
+                let truncated = if combined.len() > 2000 {
+                    format!("{}...[truncated]", &combined[..2000])
+                } else {
+                    combined.to_string()
+                };
+
+                debug!(
+                    task_id = %task.task_id,
+                    exit_code = exit_code,
+                    output_len = combined.len(),
+                    "test execution completed"
+                );
+                debug!(task_id = %task.task_id, output = %truncated, "test output");
+
+                evidence.test_output = Some(truncated);
+                evidence.test_exit_code = Some(exit_code);
+
+                if exit_code == 0 {
+                    info!(task_id = %task.task_id, "tests passed (exit code 0)");
+                    vec![VerificationSignal::TestArtifactsPresent]
+                } else {
+                    warn!(task_id = %task.task_id, exit_code = exit_code, "tests failed");
+                    vec![VerificationSignal::TestArtifactsFailed]
+                }
+            }
+            Ok(Err(e)) => {
+                warn!(task_id = %task.task_id, error = %e, "failed to spawn test process");
+                evidence.test_output = Some(format!("spawn error: {e}"));
+                evidence.test_exit_code = Some(-1);
+                Vec::new()
+            }
+            Err(_) => {
+                warn!(task_id = %task.task_id, "test execution timed out after 60s");
+                evidence.test_output = Some("timed out after 60s".into());
+                evidence.test_exit_code = Some(-1);
+                Vec::new()
+            }
+        }
     }
 
     /// Stage 3: Check spec / done-condition compliance.
@@ -313,6 +509,62 @@ impl VerificationPipeline {
         } else {
             Vec::new()
         }
+    }
+
+    /// Collect git diff statistics into evidence.
+    async fn collect_git_evidence(project_dir: &PathBuf, evidence: &mut VerificationEvidence) {
+        use tokio::process::Command;
+
+        // git diff --name-only
+        if let Ok(output) = Command::new("git")
+            .args(["diff", "--name-only", "HEAD"])
+            .current_dir(project_dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+            && output.status.success()
+        {
+            let names = String::from_utf8_lossy(&output.stdout);
+            evidence.files_changed = names
+                .lines()
+                .filter(|l| !l.is_empty())
+                .map(|l| l.to_string())
+                .collect();
+        }
+
+        // git diff --shortstat (parse +/- lines)
+        if let Ok(output) = Command::new("git")
+            .args(["diff", "--shortstat", "HEAD"])
+            .current_dir(project_dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+            && output.status.success()
+        {
+            let stat = String::from_utf8_lossy(&output.stdout);
+            // Format: " 3 files changed, 50 insertions(+), 10 deletions(-)"
+            for part in stat.split(',') {
+                let trimmed = part.trim();
+                if trimmed.contains("insertion")
+                    && let Some(num) = trimmed.split_whitespace().next()
+                {
+                    evidence.lines_added = num.parse().unwrap_or(0);
+                } else if trimmed.contains("deletion")
+                    && let Some(num) = trimmed.split_whitespace().next()
+                {
+                    evidence.lines_removed = num.parse().unwrap_or(0);
+                }
+            }
+        }
+
+        debug!(
+            files_changed = evidence.files_changed.len(),
+            lines_added = evidence.lines_added,
+            lines_removed = evidence.lines_removed,
+            "git evidence collected"
+        );
     }
 
     /// Stage 5: Compute weighted confidence from signals.
@@ -618,5 +870,83 @@ mod tests {
         // Only worker self-confidence: 0.1 * 0.5 = 0.05
         assert!(result.signals.is_empty(), "expected no signals when all stages disabled");
         assert!(result.approved, "should be approved with threshold 0.0");
+    }
+
+    // -- evidence populated --
+
+    #[tokio::test]
+    async fn verify_populates_evidence() {
+        let config = VerificationConfig {
+            require_artifacts: true,
+            run_tests: false,
+            check_spec: false,
+            check_quality: false,
+            auto_approve_threshold: 0.0,
+            reject_threshold: 0.0,
+        };
+        let pipeline = VerificationPipeline::new(config);
+        let outcome = make_outcome(OutcomeStatus::Done, 1.0, vec!["file.rs".into()]);
+        let task = make_task(None, vec![]);
+        let result = pipeline.verify(&outcome, &task).await;
+        assert!(result.evidence.is_some(), "evidence should be populated");
+        let ev = result.evidence.unwrap();
+        // No project_dir, so git stats should be empty.
+        assert!(ev.files_changed.is_empty());
+        assert_eq!(ev.lines_added, 0);
+        assert_eq!(ev.lines_removed, 0);
+        // No test run, so test fields should be None.
+        assert!(ev.test_output.is_none());
+        assert!(ev.test_exit_code.is_none());
+    }
+
+    // -- red flag detector --
+
+    #[test]
+    fn red_flag_detects_known_patterns() {
+        let detector = RedFlagDetector::with_defaults();
+        let flags = detector.scan("Let's skip test and just deploy this, it should be safe");
+        assert!(flags.contains(&"skip test".to_string()));
+        assert!(flags.contains(&"just deploy".to_string()));
+        assert!(flags.contains(&"should be safe".to_string()));
+        assert_eq!(flags.len(), 3);
+    }
+
+    #[test]
+    fn red_flag_case_insensitive() {
+        let detector = RedFlagDetector::with_defaults();
+        let flags = detector.scan("TRUST ME, it's PROBABLY FINE");
+        assert!(flags.contains(&"trust me".to_string()));
+        assert!(flags.contains(&"probably fine".to_string()));
+    }
+
+    #[test]
+    fn red_flag_no_matches() {
+        let detector = RedFlagDetector::with_defaults();
+        let flags = detector.scan("All tests pass, CI green, ready for review");
+        assert!(flags.is_empty());
+    }
+
+    #[test]
+    fn red_flag_empty_input() {
+        let detector = RedFlagDetector::with_defaults();
+        let flags = detector.scan("");
+        assert!(flags.is_empty());
+    }
+
+    #[test]
+    fn red_flag_all_patterns_detected() {
+        let detector = RedFlagDetector::with_defaults();
+        let text = "skip test, force push, just deploy, works on my machine, \
+                    no need to test, too simple to test, probably fine, should be safe, trust me";
+        let flags = detector.scan(text);
+        assert_eq!(flags.len(), 9, "all 9 default patterns should match");
+    }
+
+    #[test]
+    fn red_flag_partial_word_match() {
+        let detector = RedFlagDetector::with_defaults();
+        // "skip testing" should still match "skip test"
+        let flags = detector.scan("We can skip testing on this one");
+        assert!(flags.contains(&"skip test".to_string()));
     }
 }

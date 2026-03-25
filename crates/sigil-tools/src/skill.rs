@@ -9,6 +9,8 @@ pub struct Skill {
     #[serde(default)]
     pub tools: MagicTools,
     pub prompt: SkillPrompt,
+    /// Optional verification commands and expected output patterns.
+    pub verification: Option<SkillVerification>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +34,17 @@ pub struct SkillPrompt {
     pub system: String,
     #[serde(default)]
     pub user_prefix: String,
+}
+
+/// Verification commands and expected output patterns for a skill.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillVerification {
+    /// Commands to run for verification (e.g., `["cargo test"]`).
+    #[serde(default)]
+    pub commands: Vec<String>,
+    /// Patterns expected in the command output (e.g., `["0 failed"]`).
+    #[serde(default)]
+    pub expected_patterns: Vec<String>,
 }
 
 impl Skill {
