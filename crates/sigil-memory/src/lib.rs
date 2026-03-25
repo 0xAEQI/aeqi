@@ -11,6 +11,8 @@ pub mod dedup;
 pub mod graph;
 pub mod hierarchy;
 pub mod hybrid;
+pub mod query_planner;
+pub mod retrieval;
 pub mod sqlite;
 pub mod vector;
 
