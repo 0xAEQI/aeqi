@@ -221,7 +221,10 @@ mod tests {
 
         // 2nd failure: RetryDifferentAgent.
         tracker.record_failure("task-1", "engineer");
-        assert_eq!(tracker.decide("task-1"), EscalationAction::RetryDifferentAgent);
+        assert_eq!(
+            tracker.decide("task-1"),
+            EscalationAction::RetryDifferentAgent
+        );
 
         // 3rd failure: EscalateModel (because escalate_model is configured).
         tracker.record_failure("task-1", "researcher");

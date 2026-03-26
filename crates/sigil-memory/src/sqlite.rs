@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 use sigil_core::traits::{Embedder, Memory, MemoryCategory, MemoryEntry, MemoryQuery, MemoryScope};
+use crate::graph::{MemoryEdge, MemoryRelation};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -109,6 +110,22 @@ impl SqliteMemory {
                 INSERT INTO memories_fts(memories_fts) VALUES('rebuild');",
             )?;
         }
+
+        // Memory graph edges table.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS memory_edges (
+                source_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                relation TEXT NOT NULL,
+                strength REAL NOT NULL DEFAULT 0.5,
+                agent TEXT,
+                task_id TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (source_id, target_id, relation)
+            );
+            CREATE INDEX IF NOT EXISTS idx_edges_source ON memory_edges(source_id);
+            CREATE INDEX IF NOT EXISTS idx_edges_target ON memory_edges(target_id);",
+        )?;
 
         // Always ensure embeddings table exists for future use.
         VectorStore::open(&conn, 1536)?;
@@ -544,6 +561,137 @@ impl SqliteMemory {
             score: score * decay,
         })
     }
+
+    // ── Memory graph edge operations ──
+
+    /// Store a memory edge (upsert on conflict).
+    pub fn store_edge(&self, edge: &MemoryEdge) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let relation_str = serde_json::to_value(&edge.relation)?
+            .as_str()
+            .unwrap_or("related_to")
+            .to_string();
+        conn.execute(
+            "INSERT INTO memory_edges (source_id, target_id, relation, strength, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(source_id, target_id, relation) DO UPDATE SET
+                strength = MAX(excluded.strength, memory_edges.strength)",
+            rusqlite::params![
+                edge.source_id,
+                edge.target_id,
+                relation_str,
+                edge.strength,
+                edge.created_at.to_rfc3339(),
+            ],
+        )?;
+        debug!(
+            source = %edge.source_id,
+            target = %edge.target_id,
+            relation = %relation_str,
+            strength = edge.strength,
+            "stored memory edge"
+        );
+        Ok(())
+    }
+
+    /// Fetch all edges where this memory is source or target.
+    pub fn fetch_edges(&self, memory_id: &str) -> Result<Vec<MemoryEdge>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT source_id, target_id, relation, strength, created_at
+             FROM memory_edges
+             WHERE source_id = ?1 OR target_id = ?1",
+        )?;
+        let edges = stmt
+            .query_map(rusqlite::params![memory_id], |row| {
+                let source_id: String = row.get(0)?;
+                let target_id: String = row.get(1)?;
+                let relation_str: String = row.get(2)?;
+                let strength: f32 = row.get(3)?;
+                let created_str: String = row.get(4)?;
+                Ok((source_id, target_id, relation_str, strength, created_str))
+            })?
+            .filter_map(|r| r.ok())
+            .filter_map(|(source_id, target_id, relation_str, strength, created_str)| {
+                let relation: MemoryRelation =
+                    serde_json::from_value(serde_json::Value::String(relation_str)).ok()?;
+                let created_at = DateTime::parse_from_rfc3339(&created_str)
+                    .ok()?
+                    .with_timezone(&Utc);
+                Some(MemoryEdge {
+                    source_id,
+                    target_id,
+                    relation,
+                    strength,
+                    created_at,
+                })
+            })
+            .collect();
+        Ok(edges)
+    }
+
+    /// Fetch all edges where any of the given IDs is involved.
+    pub fn fetch_edges_for_set(&self, ids: &[String]) -> Result<Vec<MemoryEdge>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut all_edges = Vec::new();
+        for id in ids {
+            all_edges.extend(self.fetch_edges(id)?);
+        }
+        // Deduplicate by (source, target, relation).
+        all_edges.sort_by(|a, b| {
+            (&a.source_id, &a.target_id)
+                .cmp(&(&b.source_id, &b.target_id))
+        });
+        all_edges.dedup_by(|a, b| {
+            a.source_id == b.source_id
+                && a.target_id == b.target_id
+                && a.relation == b.relation
+        });
+        Ok(all_edges)
+    }
+
+    /// Compute graph boost for a memory based on supporting edges in a result set.
+    pub fn compute_graph_boost(&self, memory_id: &str, result_ids: &[String]) -> f32 {
+        let edges = match self.fetch_edges(memory_id) {
+            Ok(e) => e,
+            Err(_) => return 0.0,
+        };
+
+        let result_set: std::collections::HashSet<&str> =
+            result_ids.iter().map(|s| s.as_str()).collect();
+
+        let mut boost: f32 = 0.0;
+        for edge in &edges {
+            let other = if edge.source_id == memory_id {
+                &edge.target_id
+            } else {
+                &edge.source_id
+            };
+            if !result_set.contains(other.as_str()) {
+                continue;
+            }
+            match edge.relation {
+                MemoryRelation::Supports | MemoryRelation::RelatedTo => {
+                    boost += edge.strength * 0.5;
+                }
+                MemoryRelation::DerivedFrom | MemoryRelation::CausedBy => {
+                    boost += edge.strength * 0.3;
+                }
+                MemoryRelation::Contradicts => {
+                    boost -= edge.strength * 0.3;
+                }
+                MemoryRelation::Supersedes => {
+                    // Source supersedes target — boost the source.
+                    if edge.source_id == memory_id {
+                        boost += edge.strength * 0.4;
+                    }
+                }
+            }
+        }
+        boost.clamp(0.0, 1.0)
+    }
 }
 
 #[async_trait]
@@ -672,7 +820,7 @@ impl Memory for SqliteMemory {
             (bm25, vec_scores)
         };
 
-        // Phase 3: if no vector results, use BM25 path (existing behavior).
+        // Phase 3: if no vector results, use BM25 path with graph boost.
         if vector_scores.is_empty() {
             let mut entries: Vec<MemoryEntry> = bm25_rows
                 .into_iter()
@@ -681,6 +829,14 @@ impl Memory for SqliteMemory {
                     self.row_to_entry(row, raw, query)
                 })
                 .collect();
+            // Apply graph boost.
+            let ids: Vec<String> = entries.iter().map(|e| e.id.clone()).collect();
+            for entry in &mut entries {
+                let boost = self.compute_graph_boost(&entry.id, &ids);
+                if boost > 0.0 {
+                    entry.score = entry.score * 0.9 + (boost as f64) * 0.1;
+                }
+            }
             entries.sort_by(|a, b| {
                 b.score
                     .partial_cmp(&a.score)
@@ -790,18 +946,35 @@ impl Memory for SqliteMemory {
             },
         );
 
-        // Phase 8: build final result in MMR order.
+        // Phase 8: apply graph boost from memory edges.
         let entry_map: HashMap<String, MemoryEntry> =
             scored.into_iter().map(|(_, e)| (e.id.clone(), e)).collect();
 
-        let result = reranked
+        let result_ids: Vec<String> = reranked.iter().map(|r| r.memory_id.clone()).collect();
+
+        let mut result: Vec<MemoryEntry> = reranked
             .into_iter()
             .filter_map(|r| {
                 let mut entry = entry_map.get(&r.memory_id)?.clone();
-                entry.score = r.combined_score;
+                // Compute graph boost from memory edges.
+                let graph_boost = self.compute_graph_boost(&entry.id, &result_ids);
+                if graph_boost > 0.0 {
+                    // Apply 10% graph weight to the score.
+                    entry.score = entry.score * 0.9 + (graph_boost as f64) * 0.1;
+                    debug!(id = %entry.id, key = %entry.key, graph_boost, "graph boost applied");
+                } else {
+                    entry.score = r.combined_score;
+                }
                 Some(entry)
             })
             .collect();
+
+        // Re-sort after graph boost adjustment.
+        result.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(result)
     }
@@ -818,6 +991,20 @@ impl Memory for SqliteMemory {
 
     fn name(&self) -> &str {
         "sqlite"
+    }
+
+    async fn store_memory_edge(
+        &self,
+        source_id: &str,
+        target_id: &str,
+        relation: &str,
+        strength: f32,
+    ) -> Result<()> {
+        let relation_enum: MemoryRelation =
+            serde_json::from_value(serde_json::Value::String(relation.to_string()))
+                .unwrap_or(MemoryRelation::RelatedTo);
+        let edge = MemoryEdge::new(source_id, target_id, relation_enum, strength);
+        self.store_edge(&edge)
     }
 }
 

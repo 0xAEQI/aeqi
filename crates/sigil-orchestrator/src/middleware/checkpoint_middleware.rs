@@ -80,8 +80,7 @@ impl Middleware for CheckpointMiddleware {
             "checkpoint recorded"
         );
 
-        ctx.metadata
-            .insert("last_checkpoint".into(), timestamp);
+        ctx.metadata.insert("last_checkpoint".into(), timestamp);
 
         MiddlewareAction::Continue
     }

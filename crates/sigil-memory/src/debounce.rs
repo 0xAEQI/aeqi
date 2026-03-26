@@ -129,7 +129,12 @@ mod tests {
     use super::*;
     use chrono::Duration;
 
-    fn make_write(project: &str, key: &str, content: &str, queued_at: DateTime<Utc>) -> DebouncedWrite {
+    fn make_write(
+        project: &str,
+        key: &str,
+        content: &str,
+        queued_at: DateTime<Utc>,
+    ) -> DebouncedWrite {
         DebouncedWrite {
             key: key.to_string(),
             content: content.to_string(),
@@ -170,7 +175,12 @@ mod tests {
 
         queue.push(make_write("sigil", "auth/jwt", "jwt rotation", now));
         queue.push(make_write("sigil", "deploy/docker", "docker config", now));
-        queue.push(make_write("algostaking", "auth/jwt", "different project jwt", now));
+        queue.push(make_write(
+            "algostaking",
+            "auth/jwt",
+            "different project jwt",
+            now,
+        ));
 
         assert_eq!(queue.pending_count(), 3);
     }

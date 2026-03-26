@@ -123,21 +123,60 @@ pub struct PlannerScoredResult {
 
 /// Words that signal decision-related intent.
 const DECISION_WORDS: &[&str] = &[
-    "decide", "choose", "should", "whether", "option", "tradeoff", "trade-off",
-    "decision", "chose", "decided", "choice", "alternative", "prefer",
+    "decide",
+    "choose",
+    "should",
+    "whether",
+    "option",
+    "tradeoff",
+    "trade-off",
+    "decision",
+    "chose",
+    "decided",
+    "choice",
+    "alternative",
+    "prefer",
 ];
 
 /// Words that signal system/infrastructure intent.
 const SYSTEM_WORDS: &[&str] = &[
-    "deploy", "config", "setup", "server", "database", "migration", "infra",
-    "infrastructure", "service", "port", "domain", "ssl", "nginx", "docker",
-    "systemd", "configuration", "cluster", "kubernetes",
+    "deploy",
+    "config",
+    "setup",
+    "server",
+    "database",
+    "migration",
+    "infra",
+    "infrastructure",
+    "service",
+    "port",
+    "domain",
+    "ssl",
+    "nginx",
+    "docker",
+    "systemd",
+    "configuration",
+    "cluster",
+    "kubernetes",
 ];
 
 /// Words that signal task/action intent.
 const ACTION_WORDS: &[&str] = &[
-    "fix", "build", "implement", "create", "refactor", "update", "add", "remove",
-    "change", "modify", "write", "debug", "optimize", "migrate", "rewrite",
+    "fix",
+    "build",
+    "implement",
+    "create",
+    "refactor",
+    "update",
+    "add",
+    "remove",
+    "change",
+    "modify",
+    "write",
+    "debug",
+    "optimize",
+    "migrate",
+    "rewrite",
 ];
 
 /// Check if any keyword from the set appears in the lowercased input.
@@ -346,17 +385,18 @@ mod tests {
     fn plan_simple_input_only_domain_and_general() {
         let plan = QueryPlanner::plan("what is the current status?", None);
         let types: Vec<QueryType> = plan.queries.iter().map(|q| q.query_type).collect();
-        assert_eq!(types.len(), 2, "simple input should produce exactly 2 queries");
+        assert_eq!(
+            types.len(),
+            2,
+            "simple input should produce exactly 2 queries"
+        );
         assert!(types.contains(&QueryType::DomainKnowledge));
         assert!(types.contains(&QueryType::GeneralContext));
     }
 
     #[test]
     fn plan_sorted_by_priority_descending() {
-        let plan = QueryPlanner::plan(
-            "should we fix the deploy config?",
-            Some("sigil"),
-        );
+        let plan = QueryPlanner::plan("should we fix the deploy config?", Some("sigil"));
         for window in plan.queries.windows(2) {
             assert!(
                 window[0].priority >= window[1].priority,
@@ -416,11 +456,21 @@ mod tests {
         let results = vec![
             (
                 TypedQuery::new("q1", QueryType::DomainKnowledge),
-                vec![make_result("mem-1", "content A", 0.9, QueryType::DomainKnowledge)],
+                vec![make_result(
+                    "mem-1",
+                    "content A",
+                    0.9,
+                    QueryType::DomainKnowledge,
+                )],
             ),
             (
                 TypedQuery::new("q2", QueryType::GeneralContext),
-                vec![make_result("mem-1", "content A", 0.8, QueryType::GeneralContext)],
+                vec![make_result(
+                    "mem-1",
+                    "content A",
+                    0.8,
+                    QueryType::GeneralContext,
+                )],
             ),
         ];
 
@@ -434,11 +484,21 @@ mod tests {
         let results = vec![
             (
                 TypedQuery::new("q1", QueryType::DomainKnowledge), // weight = 1.0
-                vec![make_result("mem-1", "content", 0.5, QueryType::DomainKnowledge)],
+                vec![make_result(
+                    "mem-1",
+                    "content",
+                    0.5,
+                    QueryType::DomainKnowledge,
+                )],
             ),
             (
                 TypedQuery::new("q2", QueryType::GeneralContext), // weight = 0.2
-                vec![make_result("mem-1", "content", 0.9, QueryType::GeneralContext)],
+                vec![make_result(
+                    "mem-1",
+                    "content",
+                    0.9,
+                    QueryType::GeneralContext,
+                )],
             ),
         ];
 
@@ -460,11 +520,21 @@ mod tests {
         let results = vec![
             (
                 TypedQuery::new("q1", QueryType::DomainKnowledge), // weight 1.0
-                vec![make_result("mem-1", "domain fact", 0.6, QueryType::DomainKnowledge)],
+                vec![make_result(
+                    "mem-1",
+                    "domain fact",
+                    0.6,
+                    QueryType::DomainKnowledge,
+                )],
             ),
             (
                 TypedQuery::new("q2", QueryType::SimilarPastTasks), // weight 0.4
-                vec![make_result("mem-2", "past task", 0.9, QueryType::SimilarPastTasks)],
+                vec![make_result(
+                    "mem-2",
+                    "past task",
+                    0.9,
+                    QueryType::SimilarPastTasks,
+                )],
             ),
         ];
 
@@ -487,7 +557,14 @@ mod tests {
     #[test]
     fn merge_truncates_to_max_total() {
         let many_results: Vec<PlannerScoredResult> = (0..20)
-            .map(|i| make_result(&format!("mem-{i}"), &format!("content {i}"), 0.5, QueryType::DomainKnowledge))
+            .map(|i| {
+                make_result(
+                    &format!("mem-{i}"),
+                    &format!("content {i}"),
+                    0.5,
+                    QueryType::DomainKnowledge,
+                )
+            })
             .collect();
 
         let results = vec![(
@@ -507,16 +584,14 @@ mod tests {
 
     #[test]
     fn merge_sorted_by_score_descending() {
-        let results = vec![
-            (
-                TypedQuery::new("q1", QueryType::DomainKnowledge),
-                vec![
-                    make_result("mem-1", "a", 0.3, QueryType::DomainKnowledge),
-                    make_result("mem-2", "b", 0.9, QueryType::DomainKnowledge),
-                    make_result("mem-3", "c", 0.6, QueryType::DomainKnowledge),
-                ],
-            ),
-        ];
+        let results = vec![(
+            TypedQuery::new("q1", QueryType::DomainKnowledge),
+            vec![
+                make_result("mem-1", "a", 0.3, QueryType::DomainKnowledge),
+                make_result("mem-2", "b", 0.9, QueryType::DomainKnowledge),
+                make_result("mem-3", "c", 0.6, QueryType::DomainKnowledge),
+            ],
+        )];
 
         let merged = QueryPlanner::merge_results(results, 10);
         for window in merged.windows(2) {

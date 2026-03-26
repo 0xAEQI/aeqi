@@ -368,12 +368,7 @@ impl AnomalyDetector {
 
     /// Check if the failure rate for a project is anomalous.
     /// Returns `ErrorSurge` warning if the current rate > 2x the baseline average.
-    pub fn check_failure_rate(
-        &self,
-        project: &str,
-        failures: u32,
-        total: u32,
-    ) -> Option<Anomaly> {
+    pub fn check_failure_rate(&self, project: &str, failures: u32, total: u32) -> Option<Anomaly> {
         if total == 0 {
             return None;
         }
@@ -401,11 +396,7 @@ impl AnomalyDetector {
     }
 
     /// Check for stale tasks — tasks with no progress beyond `threshold_hours`.
-    pub fn check_stale_tasks(
-        &self,
-        tasks: &[TaskSummary],
-        threshold_hours: u64,
-    ) -> Vec<Anomaly> {
+    pub fn check_stale_tasks(&self, tasks: &[TaskSummary], threshold_hours: u64) -> Vec<Anomaly> {
         // In a real system we'd compare against last-updated timestamps.
         // Here we flag every task provided (the caller pre-filters to stale ones).
         tasks
@@ -854,12 +845,16 @@ mod tests {
 
         let anomalies = detector.check_stale_tasks(&tasks, 2);
         assert_eq!(anomalies.len(), 2);
-        assert!(anomalies
-            .iter()
-            .all(|a| a.anomaly_type == AnomalyType::StaleTask));
-        assert!(anomalies
-            .iter()
-            .all(|a| a.severity == AnomalySeverity::Info));
+        assert!(
+            anomalies
+                .iter()
+                .all(|a| a.anomaly_type == AnomalyType::StaleTask)
+        );
+        assert!(
+            anomalies
+                .iter()
+                .all(|a| a.severity == AnomalySeverity::Info)
+        );
         assert!(anomalies[0].message.contains(">2h"));
     }
 
@@ -915,14 +910,14 @@ mod tests {
 
         let suggestions = SuggestionEngine::suggest_from_notes(&directives);
         assert_eq!(suggestions.len(), 2);
-        assert_eq!(suggestions[0].suggestion_type, SuggestionType::ActivateDirective);
+        assert_eq!(
+            suggestions[0].suggestion_type,
+            SuggestionType::ActivateDirective
+        );
         assert!(suggestions[0].message.contains("build pricing page"));
         assert!(suggestions[0].message.contains("want me to start"));
         assert_eq!(suggestions[0].action_label, "Start");
-        assert_eq!(
-            suggestions[0].context.as_deref(),
-            Some("sigil/engineering")
-        );
+        assert_eq!(suggestions[0].context.as_deref(), Some("sigil/engineering"));
     }
 
     #[test]
@@ -948,7 +943,10 @@ mod tests {
     #[test]
     fn test_notification_push_and_drain() {
         let mut queue = NotificationQueue::new();
-        queue.push(sample_notification(NotificationType::Brief, "Morning brief"));
+        queue.push(sample_notification(
+            NotificationType::Brief,
+            "Morning brief",
+        ));
         queue.push(sample_notification(
             NotificationType::TaskCompleted,
             "Task done",
@@ -984,7 +982,10 @@ mod tests {
         let drained = queue.drain_pending();
         assert_eq!(drained.len(), 1);
         // The notification IN the queue should be marked delivered.
-        assert!(queue.queue[0].delivered, "queue entry should be marked delivered");
+        assert!(
+            queue.queue[0].delivered,
+            "queue entry should be marked delivered"
+        );
         // Subsequent drain returns nothing.
         assert_eq!(queue.pending_count(), 0);
     }
@@ -993,10 +994,7 @@ mod tests {
     fn test_notification_double_drain_returns_empty() {
         let mut queue = NotificationQueue::new();
         queue.push(sample_notification(NotificationType::Brief, "Brief"));
-        queue.push(sample_notification(
-            NotificationType::TaskFailed,
-            "Failed",
-        ));
+        queue.push(sample_notification(NotificationType::TaskFailed, "Failed"));
 
         let first = queue.drain_pending();
         assert_eq!(first.len(), 2);

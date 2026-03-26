@@ -172,7 +172,10 @@ impl SkillPromoter {
             md.push_str(&format!("{}. {step}\n", i + 1));
         }
 
-        md.push_str(&format!("\n## Verification\n\n{}\n", candidate.verification));
+        md.push_str(&format!(
+            "\n## Verification\n\n{}\n",
+            candidate.verification
+        ));
 
         md
     }
@@ -194,8 +197,7 @@ impl SkillPromoter {
         patterns: &[PatternMemory],
         indices: &[usize],
     ) -> SkillCandidate {
-        let cluster_patterns: Vec<&PatternMemory> =
-            indices.iter().map(|&i| &patterns[i]).collect();
+        let cluster_patterns: Vec<&PatternMemory> = indices.iter().map(|&i| &patterns[i]).collect();
 
         // Derive name from the most common key prefix.
         let name = derive_skill_name(&cluster_patterns);
@@ -221,8 +223,7 @@ impl SkillPromoter {
             cluster_patterns.iter().map(|p| p.id.clone()).collect();
 
         // Confidence based on cluster size relative to threshold.
-        let confidence =
-            (indices.len() as f32 / (self.pattern_threshold as f32 * 2.0)).min(1.0);
+        let confidence = (indices.len() as f32 / (self.pattern_threshold as f32 * 2.0)).min(1.0);
 
         SkillCandidate {
             name,
@@ -271,12 +272,7 @@ fn word_overlap_ratio(
 fn derive_skill_name(patterns: &[&PatternMemory]) -> String {
     let mut prefix_counts: HashMap<String, usize> = HashMap::new();
     for p in patterns {
-        let prefix = p
-            .key
-            .split('/')
-            .next()
-            .unwrap_or(&p.key)
-            .to_string();
+        let prefix = p.key.split('/').next().unwrap_or(&p.key).to_string();
         *prefix_counts.entry(prefix).or_insert(0) += 1;
     }
 
@@ -371,11 +367,7 @@ mod tests {
         let patterns = vec![
             make_pattern("p1", "deploy/rollback", "Stop the service and restore"),
             make_pattern("p2", "auth/jwt", "Rotate JWT tokens with refresh mechanism"),
-            make_pattern(
-                "p3",
-                "pricing/tiers",
-                "Three pricing tiers for enterprise",
-            ),
+            make_pattern("p3", "pricing/tiers", "Three pricing tiers for enterprise"),
         ];
 
         let candidates = promoter.detect_candidates(&patterns);

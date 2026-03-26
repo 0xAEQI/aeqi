@@ -410,7 +410,11 @@ mod tests {
         )];
 
         ContradictionFilter::filter(&mut results, &edges);
-        assert_eq!(results.len(), 2, "non-supersedes edges should not remove anything");
+        assert_eq!(
+            results.len(),
+            2,
+            "non-supersedes edges should not remove anything"
+        );
     }
 
     #[test]
@@ -484,7 +488,10 @@ mod tests {
         assert_eq!(results.len(), 2, "result after cutoff should be removed");
         let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
         assert!(ids.contains(&"old"));
-        assert!(ids.contains(&"edge"), "result exactly at cutoff should be kept");
+        assert!(
+            ids.contains(&"edge"),
+            "result exactly at cutoff should be kept"
+        );
     }
 
     #[test]
@@ -496,7 +503,11 @@ mod tests {
         ];
 
         TemporalFilter::apply(&mut results, cutoff);
-        assert_eq!(results.len(), 2, "all results before future cutoff should be kept");
+        assert_eq!(
+            results.len(),
+            2,
+            "all results before future cutoff should be kept"
+        );
     }
 
     #[test]
@@ -535,6 +546,9 @@ mod tests {
         ];
 
         TemporalFilter::apply(&mut results, cutoff);
-        assert!(results.is_empty(), "all results after cutoff should be removed");
+        assert!(
+            results.is_empty(),
+            "all results after cutoff should be removed"
+        );
     }
 }

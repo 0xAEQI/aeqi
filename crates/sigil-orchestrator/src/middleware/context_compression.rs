@@ -201,11 +201,8 @@ impl Middleware for ContextCompressionMiddleware {
         }
 
         let original_count = msg_count;
-        ctx.messages = Self::compress_messages(
-            &ctx.messages,
-            self.protect_first_n,
-            self.protect_last_n,
-        );
+        ctx.messages =
+            Self::compress_messages(&ctx.messages, self.protect_first_n, self.protect_last_n);
 
         let compressed_count = original_count - ctx.messages.len();
         let max_lines = self.max_context_lines.load(Ordering::Relaxed);
@@ -399,12 +396,7 @@ mod tests {
         let mut ctx = test_ctx();
 
         let long_msg = "x".repeat(300);
-        ctx.messages = vec![
-            "head".into(),
-            long_msg.clone(),
-            long_msg,
-            "tail".into(),
-        ];
+        ctx.messages = vec!["head".into(), long_msg.clone(), long_msg, "tail".into()];
         // 4 messages, threshold=2, protect 1+1=2, middle=2
 
         mw.before_model(&mut ctx).await;
@@ -412,7 +404,10 @@ mod tests {
         // 1 head + 1 summary + 1 tail = 3
         assert_eq!(ctx.messages.len(), 3);
         let summary = &ctx.messages[1];
-        assert!(summary.contains("..."), "long messages should be truncated with ...");
+        assert!(
+            summary.contains("..."),
+            "long messages should be truncated with ..."
+        );
     }
 
     #[test]
@@ -469,7 +464,9 @@ mod tests {
         let mut ctx = test_ctx();
 
         // First step-down: 500 * 0.60 = 300
-        let action = mw.on_error(&mut ctx, "request exceeds maximum context length").await;
+        let action = mw
+            .on_error(&mut ctx, "request exceeds maximum context length")
+            .await;
         assert!(matches!(action, MiddlewareAction::Continue));
         assert_eq!(mw.current_max_context_lines(), 300);
         assert_eq!(mw.stepdown_count(), 1);

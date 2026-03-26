@@ -88,6 +88,17 @@ max_background_cost_usd = 0.50
 # token_secret = "TELEGRAM_BOT_TOKEN"
 # allowed_chats = []
 # debounce_window_ms = 3000
+# main_chat_id = -1001234567890
+#
+# [[channels.telegram.routes]]
+# chat_id = -1001234567890
+# name = "Sigil HQ"
+#
+# [[channels.telegram.routes]]
+# chat_id = -1009876543210
+# project = "my-project"
+# department = "backend"
+# name = "my-project/backend"
 
 # Orchestration tuning parameters (all have sensible defaults)
 # [orchestrator]

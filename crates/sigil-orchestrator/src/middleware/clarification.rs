@@ -106,11 +106,7 @@ impl Middleware for ClarificationMiddleware {
         99
     }
 
-    async fn before_tool(
-        &self,
-        ctx: &mut WorkerContext,
-        call: &ToolCall,
-    ) -> MiddlewareAction {
+    async fn before_tool(&self, ctx: &mut WorkerContext, call: &ToolCall) -> MiddlewareAction {
         if call.name != self.trigger_tool_name {
             return MiddlewareAction::Continue;
         }
@@ -121,8 +117,7 @@ impl Middleware for ClarificationMiddleware {
         // Serialize the structured request into metadata for the supervisor.
         match serde_json::to_string(&request) {
             Ok(json) => {
-                ctx.metadata
-                    .insert("clarification_request".into(), json);
+                ctx.metadata.insert("clarification_request".into(), json);
             }
             Err(e) => {
                 warn!(
@@ -219,10 +214,12 @@ mod tests {
         let _ = mw.before_tool(&mut ctx, &call).await;
 
         let stored = ctx.metadata.get("clarification_request");
-        assert!(stored.is_some(), "clarification_request should be in metadata");
+        assert!(
+            stored.is_some(),
+            "clarification_request should be in metadata"
+        );
 
-        let parsed: ClarificationRequest =
-            serde_json::from_str(stored.unwrap()).unwrap();
+        let parsed: ClarificationRequest = serde_json::from_str(stored.unwrap()).unwrap();
         assert_eq!(parsed.clarification_type, ClarificationType::Choice);
         assert_eq!(parsed.question, "Which layout?");
         assert_eq!(parsed.options, vec!["Grid", "List"]);
@@ -247,8 +244,7 @@ mod tests {
             assert!(matches!(action, MiddlewareAction::Halt(_)));
 
             let parsed: ClarificationRequest =
-                serde_json::from_str(ctx.metadata.get("clarification_request").unwrap())
-                    .unwrap();
+                serde_json::from_str(ctx.metadata.get("clarification_request").unwrap()).unwrap();
             assert_eq!(parsed.clarification_type, ClarificationType::MissingInfo);
         }
 
@@ -267,8 +263,7 @@ mod tests {
             assert!(matches!(action, MiddlewareAction::Halt(_)));
 
             let parsed: ClarificationRequest =
-                serde_json::from_str(ctx.metadata.get("clarification_request").unwrap())
-                    .unwrap();
+                serde_json::from_str(ctx.metadata.get("clarification_request").unwrap()).unwrap();
             assert_eq!(parsed.clarification_type, ClarificationType::Choice);
         }
 
@@ -287,8 +282,7 @@ mod tests {
             assert!(matches!(action, MiddlewareAction::Halt(_)));
 
             let parsed: ClarificationRequest =
-                serde_json::from_str(ctx.metadata.get("clarification_request").unwrap())
-                    .unwrap();
+                serde_json::from_str(ctx.metadata.get("clarification_request").unwrap()).unwrap();
             assert_eq!(parsed.clarification_type, ClarificationType::Confirmation);
             assert_eq!(
                 parsed.context.as_deref(),
@@ -314,8 +308,7 @@ mod tests {
         assert!(matches!(action, MiddlewareAction::Halt(_)));
 
         let parsed: ClarificationRequest =
-            serde_json::from_str(ctx.metadata.get("clarification_request").unwrap())
-                .unwrap();
+            serde_json::from_str(ctx.metadata.get("clarification_request").unwrap()).unwrap();
         assert!(parsed.options.is_empty());
     }
 
@@ -336,8 +329,7 @@ mod tests {
         );
 
         let parsed: ClarificationRequest =
-            serde_json::from_str(ctx.metadata.get("clarification_request").unwrap())
-                .unwrap();
+            serde_json::from_str(ctx.metadata.get("clarification_request").unwrap()).unwrap();
         assert_eq!(parsed.clarification_type, ClarificationType::MissingInfo);
         assert_eq!(parsed.question, "What should I do next?");
     }

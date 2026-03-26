@@ -71,11 +71,7 @@ impl Middleware for ContextBudgetMiddleware {
     }
 
     async fn on_start(&self, ctx: &mut WorkerContext) -> MiddlewareAction {
-        let total_lines: usize = ctx
-            .messages
-            .iter()
-            .map(|m| m.lines().count().max(1))
-            .sum();
+        let total_lines: usize = ctx.messages.iter().map(|m| m.lines().count().max(1)).sum();
 
         if total_lines > self.max_lines {
             debug!(
@@ -163,7 +159,7 @@ mod tests {
         let mut ctx = test_ctx();
         ctx.messages = vec![
             "task: build the thing\nstep 1\nstep 2\nstep 3".into(), // 4 lines
-            "memory: old context".into(),                            // would be dropped
+            "memory: old context".into(),                           // would be dropped
         ];
 
         mw.on_start(&mut ctx).await;

@@ -86,11 +86,7 @@ impl Middleware for SafetyNetMiddleware {
         900 // Run late — after most other middleware.
     }
 
-    async fn on_complete(
-        &self,
-        ctx: &mut WorkerContext,
-        outcome: &Outcome,
-    ) -> MiddlewareAction {
+    async fn on_complete(&self, ctx: &mut WorkerContext, outcome: &Outcome) -> MiddlewareAction {
         // Only intervene on failure outcomes.
         if outcome.status != OutcomeStatus::Failed {
             return MiddlewareAction::Continue;
@@ -112,19 +108,14 @@ impl Middleware for SafetyNetMiddleware {
         }
 
         // Store the annotated reason in metadata so the supervisor can pick it up.
-        ctx.metadata
-            .insert("safety_net_reason".into(), annotated);
+        ctx.metadata.insert("safety_net_reason".into(), annotated);
         ctx.metadata
             .insert("safety_net_artifacts".into(), artifacts.join("\n"));
 
         MiddlewareAction::Continue
     }
 
-    async fn on_error(
-        &self,
-        ctx: &mut WorkerContext,
-        error: &str,
-    ) -> MiddlewareAction {
+    async fn on_error(&self, ctx: &mut WorkerContext, error: &str) -> MiddlewareAction {
         let artifacts = Self::detect_artifacts(ctx);
         if artifacts.is_empty() {
             return MiddlewareAction::Continue;
@@ -140,8 +131,7 @@ impl Middleware for SafetyNetMiddleware {
             info!(task_id = %ctx.task_id, artifact = %artifact, "preserved artifact");
         }
 
-        ctx.metadata
-            .insert("safety_net_reason".into(), annotated);
+        ctx.metadata.insert("safety_net_reason".into(), annotated);
         ctx.metadata
             .insert("safety_net_artifacts".into(), artifacts.join("\n"));
 

@@ -8,9 +8,7 @@
 use async_trait::async_trait;
 use tracing::{info, warn};
 
-use super::{
-    Middleware, MiddlewareAction, Outcome, ToolCall, ToolResult, WorkerContext,
-};
+use super::{Middleware, MiddlewareAction, Outcome, ToolCall, ToolResult, WorkerContext};
 
 /// Cost tracking middleware with a configurable budget ceiling.
 pub struct CostTrackingMiddleware {
@@ -65,11 +63,7 @@ impl Middleware for CostTrackingMiddleware {
         self.check_budget(ctx)
     }
 
-    async fn on_complete(
-        &self,
-        ctx: &mut WorkerContext,
-        outcome: &Outcome,
-    ) -> MiddlewareAction {
+    async fn on_complete(&self, ctx: &mut WorkerContext, outcome: &Outcome) -> MiddlewareAction {
         info!(
             task_id = %ctx.task_id,
             cost_usd = outcome.cost_usd,
@@ -112,9 +106,7 @@ mod tests {
         let action = mw.before_model(&mut ctx).await;
         assert!(matches!(action, MiddlewareAction::Continue));
 
-        let action = mw
-            .after_tool(&mut ctx, &make_call(), &make_result())
-            .await;
+        let action = mw.after_tool(&mut ctx, &make_call(), &make_result()).await;
         assert!(matches!(action, MiddlewareAction::Continue));
     }
 
@@ -135,9 +127,7 @@ mod tests {
         let mw = CostTrackingMiddleware::new(0.50);
         let mut ctx = test_ctx_with_cost(0.75);
 
-        let action = mw
-            .after_tool(&mut ctx, &make_call(), &make_result())
-            .await;
+        let action = mw.after_tool(&mut ctx, &make_call(), &make_result()).await;
         assert!(
             matches!(action, MiddlewareAction::Halt(ref s) if s.contains("Budget exceeded")),
             "expected Halt, got {action:?}"

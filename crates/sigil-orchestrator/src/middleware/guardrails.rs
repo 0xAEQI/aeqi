@@ -51,10 +51,7 @@ impl GuardrailsMiddleware {
                 "rm -rf ~",
                 "Recursive deletion of home directory is prohibited",
             ),
-            DenyPattern::new(
-                "rm -rf *",
-                "Wildcard recursive deletion is prohibited",
-            ),
+            DenyPattern::new("rm -rf *", "Wildcard recursive deletion is prohibited"),
             DenyPattern::new(
                 "git push --force",
                 "Force push is prohibited — use --force-with-lease if necessary",
@@ -66,22 +63,10 @@ impl GuardrailsMiddleware {
             DenyPattern::new("DROP TABLE", "SQL DROP TABLE is prohibited"),
             DenyPattern::new("DROP DATABASE", "SQL DROP DATABASE is prohibited"),
             DenyPattern::new("TRUNCATE TABLE", "SQL TRUNCATE TABLE is prohibited"),
-            DenyPattern::new(
-                ":(){ :|:& };:",
-                "Fork bomb is prohibited",
-            ),
-            DenyPattern::new(
-                "mkfs.",
-                "Filesystem formatting is prohibited",
-            ),
-            DenyPattern::new(
-                "dd if=/dev/zero",
-                "Disk overwrite with dd is prohibited",
-            ),
-            DenyPattern::new(
-                "> /dev/sda",
-                "Direct disk device write is prohibited",
-            ),
+            DenyPattern::new(":(){ :|:& };:", "Fork bomb is prohibited"),
+            DenyPattern::new("mkfs.", "Filesystem formatting is prohibited"),
+            DenyPattern::new("dd if=/dev/zero", "Disk overwrite with dd is prohibited"),
+            DenyPattern::new("> /dev/sda", "Direct disk device write is prohibited"),
             DenyPattern::new(
                 "chmod -R 777",
                 "Recursive world-writable permissions are prohibited",
@@ -111,11 +96,7 @@ impl Middleware for GuardrailsMiddleware {
         200
     }
 
-    async fn before_tool(
-        &self,
-        _ctx: &mut WorkerContext,
-        call: &ToolCall,
-    ) -> MiddlewareAction {
+    async fn before_tool(&self, _ctx: &mut WorkerContext, call: &ToolCall) -> MiddlewareAction {
         if let Some(denied) = self.check_call(call) {
             warn!(
                 tool = %call.name,

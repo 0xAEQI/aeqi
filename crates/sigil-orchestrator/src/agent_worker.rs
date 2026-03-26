@@ -19,9 +19,7 @@ use crate::executor::{ClaudeCodeExecutor, TaskOutcome};
 use crate::failure_analysis::{FailureAnalysis, FailureMode};
 use crate::hook::Hook;
 use crate::message::{Dispatch, DispatchBus, DispatchKind};
-use crate::middleware::{
-    MiddlewareAction, MiddlewareChain, Outcome, OutcomeStatus, WorkerContext,
-};
+use crate::middleware::{MiddlewareAction, MiddlewareChain, Outcome, OutcomeStatus, WorkerContext};
 
 /// Worker states.
 #[derive(Debug, Clone, PartialEq)]
@@ -1226,7 +1224,7 @@ impl AgentWorker {
             }
 
             // ── Dedup check: search for similar existing memories ──
-            let should_store = match async {
+            let should_store_action = async {
                 let query = sigil_core::traits::MemoryQuery::new(key, 5);
                 let existing = mem.search(&query).await.unwrap_or_default();
                 let similar: Vec<SimilarMemory> = existing
@@ -1245,8 +1243,9 @@ impl AgentWorker {
                 };
                 Ok::<DedupAction, anyhow::Error>(dedup.decide(&candidate, &similar))
             }
-            .await
-            {
+            .await;
+
+            let should_store = match &should_store_action {
                 Ok(DedupAction::Skip) => {
                     debug!(worker = %worker_name, key = %key, "dedup: skipping duplicate memory");
                     false
@@ -1276,9 +1275,37 @@ impl AgentWorker {
                 None
             };
 
+            // Capture dedup relation targets for edge creation.
+            let supersede_target = match &should_store_action {
+                Ok(DedupAction::Supersede(id)) => Some(("supersedes", id.clone())),
+                Ok(DedupAction::Merge(id)) => Some(("derived_from", id.clone())),
+                _ => None,
+            };
+
             match mem.store(key, content, category, scope, entity_id).await {
-                Ok(id) => {
-                    debug!(worker = %worker_name, id = %id, key = %key, scope = %scope, "insight stored")
+                Ok(id) if !id.is_empty() => {
+                    debug!(worker = %worker_name, id = %id, key = %key, scope = %scope, "insight stored");
+
+                    // Create memory graph edge if dedup detected a relationship.
+                    if let Some((relation, target_id)) = supersede_target {
+                        if let Err(e) = mem
+                            .store_memory_edge(&id, &target_id, relation, 0.8)
+                            .await
+                        {
+                            debug!(worker = %worker_name, "failed to store edge: {e}");
+                        } else {
+                            debug!(
+                                worker = %worker_name,
+                                source = %id,
+                                target = %target_id,
+                                relation = %relation,
+                                "memory edge created"
+                            );
+                        }
+                    }
+                }
+                Ok(_) => {
+                    debug!(worker = %worker_name, key = %key, "store returned empty id (likely dedup)")
                 }
                 Err(e) => {
                     warn!(worker = %worker_name, key = %key, "failed to store insight: {e}")

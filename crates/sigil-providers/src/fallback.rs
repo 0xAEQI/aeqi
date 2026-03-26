@@ -75,12 +75,7 @@ impl FallbackChain {
                 "OPENROUTER_API_KEY",
                 2,
             ),
-            ProviderConfig::new(
-                "ollama",
-                "http://localhost:11434",
-                "OLLAMA_API_KEY",
-                1,
-            ),
+            ProviderConfig::new("ollama", "http://localhost:11434", "OLLAMA_API_KEY", 1),
         ])
     }
 

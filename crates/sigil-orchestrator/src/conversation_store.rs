@@ -19,6 +19,19 @@ pub struct ConversationMessage {
     pub source: Option<String>,
 }
 
+/// A single typed thread event in a chat timeline.
+#[derive(Debug, Clone)]
+pub struct ThreadEvent {
+    pub id: i64,
+    pub chat_id: i64,
+    pub event_type: String,
+    pub role: String,
+    pub content: String,
+    pub timestamp: DateTime<Utc>,
+    pub source: Option<String>,
+    pub metadata: Option<serde_json::Value>,
+}
+
 /// Persistent conversation store backed by SQLite.
 pub struct ConversationStore {
     db: Arc<Mutex<rusqlite::Connection>>,
@@ -47,7 +60,10 @@ impl ConversationStore {
                  role TEXT NOT NULL,
                  content TEXT NOT NULL,
                  timestamp TEXT NOT NULL,
-                 summarized INTEGER DEFAULT 0
+                 summarized INTEGER DEFAULT 0,
+                 source TEXT DEFAULT NULL,
+                 event_type TEXT NOT NULL DEFAULT 'message',
+                 metadata TEXT DEFAULT NULL
              );
 
              CREATE INDEX IF NOT EXISTS idx_conv_chat ON conversations(chat_id);
@@ -71,9 +87,14 @@ impl ConversationStore {
         )
         .context("failed to initialize conversation schema")?;
 
-        // Migration: add source column (idempotent).
+        // Migrations (idempotent).
         let _ =
             conn.execute_batch("ALTER TABLE conversations ADD COLUMN source TEXT DEFAULT NULL;");
+        let _ = conn.execute_batch(
+            "ALTER TABLE conversations ADD COLUMN event_type TEXT DEFAULT 'message';",
+        );
+        let _ =
+            conn.execute_batch("ALTER TABLE conversations ADD COLUMN metadata TEXT DEFAULT NULL;");
 
         debug!(path = %path.display(), "conversation store opened");
 
@@ -96,11 +117,27 @@ impl ConversationStore {
         content: &str,
         source: Option<&str>,
     ) -> Result<()> {
+        self.record_event(chat_id, "message", role, content, source, None)
+            .await
+    }
+
+    /// Record a typed event in a conversation timeline.
+    pub async fn record_event(
+        &self,
+        chat_id: i64,
+        event_type: &str,
+        role: &str,
+        content: &str,
+        source: Option<&str>,
+        metadata: Option<&serde_json::Value>,
+    ) -> Result<()> {
         let db = self.db.lock().await;
         let now = Utc::now().to_rfc3339();
+        let metadata_text = metadata.map(serde_json::Value::to_string);
         db.execute(
-            "INSERT INTO conversations (chat_id, role, content, timestamp, source) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![chat_id, role, content, now, source],
+            "INSERT INTO conversations (chat_id, role, content, timestamp, source, event_type, metadata) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![chat_id, role, content, now, source, event_type, metadata_text],
         )
         .context("failed to insert conversation message")?;
         Ok(())
@@ -122,7 +159,7 @@ impl ConversationStore {
         let db = self.db.lock().await;
         let mut stmt = db.prepare(
             "SELECT chat_id, role, content, timestamp, source FROM conversations \
-             WHERE chat_id = ?1 AND summarized = 0 \
+             WHERE chat_id = ?1 AND summarized = 0 AND event_type = 'message' \
              ORDER BY id DESC LIMIT ?2 OFFSET ?3",
         )?;
 
@@ -183,7 +220,7 @@ impl ConversationStore {
     pub async fn message_count(&self, chat_id: i64) -> Result<usize> {
         let db = self.db.lock().await;
         let count: i64 = db.query_row(
-            "SELECT COUNT(*) FROM conversations WHERE chat_id = ?1 AND summarized = 0",
+            "SELECT COUNT(*) FROM conversations WHERE chat_id = ?1 AND summarized = 0 AND event_type = 'message'",
             params![chat_id],
             |row| row.get(0),
         )?;
@@ -207,8 +244,8 @@ impl ConversationStore {
 
         // Mark all but the most recent `keep_recent` as summarized.
         db.execute(
-            "UPDATE conversations SET summarized = 1 WHERE chat_id = ?1 AND summarized = 0 \
-             AND id NOT IN (SELECT id FROM conversations WHERE chat_id = ?1 AND summarized = 0 ORDER BY id DESC LIMIT ?2)",
+            "UPDATE conversations SET summarized = 1 WHERE chat_id = ?1 AND summarized = 0 AND event_type = 'message' \
+             AND id NOT IN (SELECT id FROM conversations WHERE chat_id = ?1 AND summarized = 0 AND event_type = 'message' ORDER BY id DESC LIMIT ?2)",
             params![chat_id, keep_recent as i64],
         )?;
 
@@ -233,6 +270,52 @@ impl ConversationStore {
         Ok(deleted)
     }
 
+    /// Get typed timeline events for a chat.
+    pub async fn timeline(&self, chat_id: i64, limit: usize) -> Result<Vec<ThreadEvent>> {
+        self.timeline_with_offset(chat_id, limit, 0).await
+    }
+
+    /// Get timeline events for a chat with offset-based pagination.
+    pub async fn timeline_with_offset(
+        &self,
+        chat_id: i64,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ThreadEvent>> {
+        let db = self.db.lock().await;
+        let mut stmt = db.prepare(
+            "SELECT id, chat_id, event_type, role, content, timestamp, source, metadata \
+             FROM conversations \
+             WHERE chat_id = ?1 AND summarized = 0 \
+             ORDER BY id DESC LIMIT ?2 OFFSET ?3",
+        )?;
+
+        let rows = stmt
+            .query_map(params![chat_id, limit as i64, offset as i64], |row| {
+                let metadata_text: Option<String> = row.get(7)?;
+                Ok(ThreadEvent {
+                    id: row.get(0)?,
+                    chat_id: row.get(1)?,
+                    event_type: row.get(2)?,
+                    role: row.get(3)?,
+                    content: row.get(4)?,
+                    timestamp: row.get::<_, String>(5).map(|s| {
+                        DateTime::parse_from_rfc3339(&s)
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .unwrap_or_else(|_| Utc::now())
+                    })?,
+                    source: row.get(6)?,
+                    metadata: metadata_text
+                        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok()),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut events = rows;
+        events.reverse();
+        Ok(events)
+    }
+
     // ── Channel methods ──
 
     /// Ensure a channel exists, creating it if needed.
@@ -253,8 +336,8 @@ impl ConversationStore {
         let db = self.db.lock().await;
         let mut stmt = db.prepare(
             "SELECT ch.chat_id, ch.channel_type, ch.name, ch.created_at,
-                    (SELECT content FROM conversations WHERE chat_id = ch.chat_id ORDER BY id DESC LIMIT 1),
-                    (SELECT timestamp FROM conversations WHERE chat_id = ch.chat_id ORDER BY id DESC LIMIT 1)
+                    (SELECT content FROM conversations WHERE chat_id = ch.chat_id AND event_type = 'message' ORDER BY id DESC LIMIT 1),
+                    (SELECT timestamp FROM conversations WHERE chat_id = ch.chat_id AND event_type = 'message' ORDER BY id DESC LIMIT 1)
              FROM channels ch
              ORDER BY ch.created_at",
         )?;
@@ -278,34 +361,33 @@ impl ConversationStore {
 /// Bottom 4 bits reserved for channel-type tag.
 const JS_SAFE_MASK: u64 = 0x1F_FFFF_FFFF_FFF0;
 
-/// Deterministic chat ID for a department channel within a company.
-pub fn department_chat_id(project_name: &str, department: &str) -> i64 {
+fn hashed_chat_id(key: &str, tag: u64) -> i64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in format!("dept:{project_name}:{department}").bytes() {
+    for byte in key.bytes() {
         hash ^= byte as u64;
         hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
-    (hash & JS_SAFE_MASK | 4) as i64
+    (hash & JS_SAFE_MASK | tag) as i64
 }
 
-/// Deterministic chat ID for a web session.
-pub fn web_chat_id(session_id: &str) -> i64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in format!("web:{session_id}").bytes() {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    (hash & JS_SAFE_MASK | 5) as i64
+/// Deterministic chat ID for a project-wide channel.
+pub fn project_chat_id(project_name: &str) -> i64 {
+    hashed_chat_id(&format!("project:{project_name}"), 1)
+}
+
+/// Deterministic chat ID for a named shared channel.
+pub fn named_channel_chat_id(channel_name: &str) -> i64 {
+    hashed_chat_id(&format!("channel:{channel_name}"), 2)
+}
+
+/// Deterministic chat ID for a department channel within a company.
+pub fn department_chat_id(project_name: &str, department: &str) -> i64 {
+    hashed_chat_id(&format!("dept:{project_name}:{department}"), 4)
 }
 
 /// Deterministic chat ID for the agency-wide group chat.
 pub fn agency_chat_id() -> i64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in b"agency:global".iter() {
-        hash ^= *byte as u64;
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    (hash & JS_SAFE_MASK | 3) as i64
+    hashed_chat_id("agency:global", 3)
 }
 
 /// Channel metadata returned by `list_channels`.
@@ -432,6 +514,42 @@ mod tests {
         assert_eq!(msgs2[0].content, "chat2");
     }
 
+    #[tokio::test]
+    async fn test_timeline_records_typed_events() {
+        let dir = TempDir::new().unwrap();
+        let store = ConversationStore::open(&dir.path().join("conv.db")).unwrap();
+
+        store.record(7, "User", "hello").await.unwrap();
+        store
+            .record_event(
+                7,
+                "task_created",
+                "system",
+                "Task sg-001 created.",
+                Some("web"),
+                Some(&serde_json::json!({"task_id": "sg-001"})),
+            )
+            .await
+            .unwrap();
+
+        let events = store.timeline(7, 10).await.unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event_type, "message");
+        assert_eq!(events[1].event_type, "task_created");
+        assert_eq!(
+            events[1]
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get("task_id"))
+                .and_then(|v| v.as_str()),
+            Some("sg-001")
+        );
+
+        let messages = store.recent(7, 10).await.unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "hello");
+    }
+
     // ── Channel tests ──
 
     #[tokio::test]
@@ -480,5 +598,20 @@ mod tests {
 
         let msgs = store.recent(100, 10).await.unwrap();
         assert_eq!(msgs.len(), 2);
+    }
+
+    #[test]
+    fn test_deterministic_chat_ids_use_distinct_tags() {
+        let project = project_chat_id("alpha");
+        let department = department_chat_id("alpha", "backend");
+        let named = named_channel_chat_id("ops");
+        let agency = agency_chat_id();
+
+        assert_ne!(project, department);
+        assert_ne!(project, named);
+        assert_ne!(project, agency);
+        assert_ne!(department, named);
+        assert_ne!(department, agency);
+        assert_ne!(named, agency);
     }
 }

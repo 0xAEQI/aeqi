@@ -7,7 +7,9 @@ use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
 use crate::chat_engine::{ChatEngine, ChatMessage, ChatSource};
-use crate::conversation_store::web_chat_id;
+use crate::conversation_store::{
+    agency_chat_id, department_chat_id, named_channel_chat_id, project_chat_id,
+};
 use crate::execution_events::{EventBroadcaster, ExecutionEvent};
 use crate::heartbeat::Heartbeat;
 use crate::lifecycle::LifecycleEngine;
@@ -21,6 +23,7 @@ use crate::session_tracker::SessionTracker;
 use crate::watchdog::WatchdogEngine;
 
 const ACK_RETRY_AGE_SECS: u64 = 60;
+const MAX_EVENT_BUFFER_LEN: usize = 512;
 
 #[derive(Debug, Clone, Default)]
 struct ReadinessContext {
@@ -28,6 +31,111 @@ struct ReadinessContext {
     configured_advisors: usize,
     skipped_projects: Vec<String>,
     skipped_advisors: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BufferedExecutionEvent {
+    cursor: u64,
+    event: ExecutionEvent,
+}
+
+#[derive(Debug, Clone)]
+struct EventReadResult {
+    events: Vec<ExecutionEvent>,
+    next_cursor: u64,
+    oldest_cursor: u64,
+    reset: bool,
+}
+
+#[derive(Debug, Default)]
+struct EventBuffer {
+    next_cursor: u64,
+    events: Vec<BufferedExecutionEvent>,
+}
+
+impl EventBuffer {
+    fn push(&mut self, event: ExecutionEvent) {
+        let cursor = self.next_cursor;
+        self.next_cursor = self.next_cursor.saturating_add(1);
+        self.events.push(BufferedExecutionEvent { cursor, event });
+
+        let overflow = self.events.len().saturating_sub(MAX_EVENT_BUFFER_LEN);
+        if overflow > 0 {
+            self.events.drain(..overflow);
+        }
+    }
+
+    fn read_since(&self, cursor: Option<u64>) -> EventReadResult {
+        let oldest_cursor = self
+            .events
+            .first()
+            .map(|event| event.cursor)
+            .unwrap_or(self.next_cursor);
+        let requested_cursor = cursor.unwrap_or(oldest_cursor);
+        let reset = requested_cursor < oldest_cursor;
+        let effective_cursor = if reset {
+            oldest_cursor
+        } else {
+            requested_cursor.min(self.next_cursor)
+        };
+
+        let events = self
+            .events
+            .iter()
+            .filter(|event| event.cursor >= effective_cursor)
+            .map(|event| event.event.clone())
+            .collect();
+
+        EventReadResult {
+            events,
+            next_cursor: self.next_cursor,
+            oldest_cursor,
+            reset,
+        }
+    }
+}
+
+fn request_field<'a>(request: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    request
+        .get(key)
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+}
+
+fn resolve_web_chat_id(
+    explicit_chat_id: Option<i64>,
+    project_hint: Option<&str>,
+    department_hint: Option<&str>,
+    channel_name: Option<&str>,
+) -> i64 {
+    if let Some(chat_id) = explicit_chat_id {
+        return chat_id;
+    }
+
+    if let Some(project) = project_hint {
+        if let Some(department) = department_hint {
+            return department_chat_id(project, department);
+        }
+        return project_chat_id(project);
+    }
+
+    if department_hint.is_some() {
+        warn!("web chat scope included a department without a project; dropping department scope");
+    }
+
+    if let Some(name) = channel_name {
+        if name.eq_ignore_ascii_case("sigil") {
+            return agency_chat_id();
+        }
+        return named_channel_chat_id(name);
+    }
+
+    agency_chat_id()
+}
+
+fn attach_chat_id(mut payload: serde_json::Value, chat_id: i64) -> serde_json::Value {
+    payload["chat_id"] = serde_json::json!(chat_id);
+    payload
 }
 
 /// The Daemon: background process that runs the ProjectRegistry patrol loop,
@@ -46,7 +154,7 @@ pub struct Daemon {
     pub anomaly_detector: proactive::AnomalyDetector,
     pub write_queue: Arc<std::sync::Mutex<sigil_memory::debounce::WriteQueue>>,
     pub event_broadcaster: Arc<EventBroadcaster>,
-    pub event_collector: Arc<Mutex<Vec<ExecutionEvent>>>,
+    event_buffer: Arc<Mutex<EventBuffer>>,
     pub pid_file: Option<PathBuf>,
     pub socket_path: Option<PathBuf>,
     /// Date of the last morning brief sent via Telegram.
@@ -80,7 +188,7 @@ impl Daemon {
                 sigil_memory::debounce::WriteQueue::default(),
             )),
             event_broadcaster: Arc::new(EventBroadcaster::new()),
-            event_collector: Arc::new(Mutex::new(Vec::new())),
+            event_buffer: Arc::new(Mutex::new(EventBuffer::default())),
             pid_file: None,
             socket_path: None,
             last_brief_date: None,
@@ -215,15 +323,14 @@ impl Daemon {
         {
             let config_reloaded = self.config_reloaded.clone();
             tokio::spawn(async move {
-                let mut signal = match tokio::signal::unix::signal(
-                    tokio::signal::unix::SignalKind::hangup(),
-                ) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        tracing::error!("failed to register SIGHUP handler: {e}");
-                        return;
-                    }
-                };
+                let mut signal =
+                    match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            tracing::error!("failed to register SIGHUP handler: {e}");
+                            return;
+                        }
+                    };
                 loop {
                     signal.recv().await;
                     info!("received SIGHUP, flagging config reload");
@@ -238,15 +345,15 @@ impl Daemon {
             let running = self.running.clone();
             let shutdown_notify = self.shutdown_notify.clone();
             tokio::spawn(async move {
-                let mut signal = match tokio::signal::unix::signal(
-                    tokio::signal::unix::SignalKind::terminate(),
-                ) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        tracing::error!("failed to register SIGTERM handler: {e}");
-                        return;
-                    }
-                };
+                let mut signal =
+                    match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    {
+                        Ok(s) => s,
+                        Err(e) => {
+                            tracing::error!("failed to register SIGTERM handler: {e}");
+                            return;
+                        }
+                    };
                 signal.recv().await;
                 info!("received SIGTERM, shutting down...");
                 running.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -256,17 +363,12 @@ impl Daemon {
 
         // Spawn background task to collect execution events from the broadcaster.
         {
-            let collector = self.event_collector.clone();
+            let event_buffer = self.event_buffer.clone();
             let mut rx = self.event_broadcaster.subscribe();
             tokio::spawn(async move {
                 while let Ok(event) = rx.recv().await {
-                    let mut events = collector.lock().await;
-                    events.push(event);
-                    // Keep only last 100 events.
-                    let len = events.len();
-                    if len > 100 {
-                        events.drain(..len - 100);
-                    }
+                    let mut buffer = event_buffer.lock().await;
+                    buffer.push(event);
                 }
             });
         }
@@ -287,7 +389,7 @@ impl Daemon {
                     let cron_store = self.cron_store.clone();
                     let chat_engine = self.chat_engine.clone();
                     let note_store = self.note_store.clone();
-                    let event_collector = self.event_collector.clone();
+                    let event_buffer = self.event_buffer.clone();
                     let running = self.running.clone();
                     let readiness = self.readiness.clone();
                     info!(path = %sock_path.display(), "IPC socket listening");
@@ -300,7 +402,7 @@ impl Daemon {
                             cron_store,
                             chat_engine,
                             note_store,
-                            event_collector,
+                            event_buffer,
                             running,
                             readiness,
                         )
@@ -696,11 +798,8 @@ impl Daemon {
                 && let Ok(pending) = ns.get_pending_directives()
             {
                 for directive in pending.iter().take(5) {
-                    let _ = ns.update_directive_status(
-                        &directive.id,
-                        DirectiveStatus::Active,
-                        None,
-                    );
+                    let _ =
+                        ns.update_directive_status(&directive.id, DirectiveStatus::Active, None);
                     info!(
                         directive = %directive.id,
                         content = %directive.content,
@@ -722,10 +821,7 @@ impl Daemon {
             if let Ok(mut wq) = self.write_queue.lock() {
                 let ready = wq.drain_ready(chrono::Utc::now());
                 if !ready.is_empty() {
-                    info!(
-                        count = ready.len(),
-                        "flushing debounced memory writes"
-                    );
+                    info!(count = ready.len(), "flushing debounced memory writes");
                     // TODO: actual memory store integration requires per-project
                     // memory handles — for now we log the drained writes so the
                     // queue doesn't grow unbounded.
@@ -774,7 +870,7 @@ impl Daemon {
         cron_store: Option<Arc<Mutex<ScheduleStore>>>,
         chat_engine: Option<Arc<ChatEngine>>,
         note_store: Option<Arc<NoteStore>>,
-        event_collector: Arc<Mutex<Vec<ExecutionEvent>>>,
+        event_buffer: Arc<Mutex<EventBuffer>>,
         running: Arc<std::sync::atomic::AtomicBool>,
         readiness: ReadinessContext,
     ) {
@@ -789,7 +885,7 @@ impl Daemon {
                     let cron_store = cron_store.clone();
                     let chat_engine = chat_engine.clone();
                     let note_store = note_store.clone();
-                    let event_collector = event_collector.clone();
+                    let event_buffer = event_buffer.clone();
                     let readiness = readiness.clone();
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_socket_connection(
@@ -800,7 +896,7 @@ impl Daemon {
                             cron_store,
                             chat_engine,
                             note_store,
-                            event_collector,
+                            event_buffer,
                             readiness,
                         )
                         .await
@@ -828,7 +924,7 @@ impl Daemon {
         cron_store: Option<Arc<Mutex<ScheduleStore>>>,
         chat_engine: Option<Arc<ChatEngine>>,
         note_store: Option<Arc<NoteStore>>,
-        event_collector: Arc<Mutex<Vec<ExecutionEvent>>>,
+        event_buffer: Arc<Mutex<EventBuffer>>,
         readiness: ReadinessContext,
     ) -> Result<()> {
         let (reader, mut writer) = stream.into_split();
@@ -916,9 +1012,18 @@ impl Daemon {
                 }
 
                 "worker_events" => {
-                    let mut events = event_collector.lock().await;
-                    let drained: Vec<_> = events.drain(..).collect();
-                    serde_json::json!({"ok": true, "events": drained})
+                    let cursor = request.get("cursor").and_then(|v| v.as_u64());
+                    let snapshot = {
+                        let buffer = event_buffer.lock().await;
+                        buffer.read_since(cursor)
+                    };
+                    serde_json::json!({
+                        "ok": true,
+                        "events": snapshot.events,
+                        "next_cursor": snapshot.next_cursor,
+                        "oldest_cursor": snapshot.oldest_cursor,
+                        "reset": snapshot.reset,
+                    })
                 }
 
                 "projects" => {
@@ -1358,11 +1463,9 @@ impl Daemon {
                         .get("message")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
-                    let project_hint = request.get("project").and_then(|v| v.as_str());
-                    let session_id = request
-                        .get("session_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("ipc");
+                    let project_hint = request_field(&request, "project");
+                    let department_hint = request_field(&request, "department");
+                    let channel_name = request_field(&request, "channel_name");
                     let sender = request
                         .get("sender")
                         .and_then(|v| v.as_str())
@@ -1370,30 +1473,32 @@ impl Daemon {
 
                     match &chat_engine {
                         Some(engine) => {
-                            let chat_id = request
-                                .get("chat_id")
-                                .and_then(|v| v.as_i64())
-                                .unwrap_or_else(|| web_chat_id(session_id));
+                            let chat_id = resolve_web_chat_id(
+                                request.get("chat_id").and_then(|v| v.as_i64()),
+                                project_hint,
+                                department_hint,
+                                channel_name,
+                            );
 
                             let msg = ChatMessage {
                                 message: message.to_string(),
                                 chat_id,
                                 sender: sender.to_string(),
-                                source: ChatSource::Web {
-                                    session_id: session_id.to_string(),
-                                },
+                                source: ChatSource::Web,
                                 project_hint: project_hint.map(|s| s.to_string()),
+                                department_hint: department_hint.map(|s| s.to_string()),
+                                channel_name: channel_name.map(|s| s.to_string()),
                             };
 
                             // Try quick path first (intent detection).
                             if let Some(response) = engine.handle_message(&msg).await {
-                                response.to_json()
+                                attach_chat_id(response.to_json(), chat_id)
                             } else {
                                 // Fall back to status response enriched with memory.
-                                engine
-                                    .status_response(project_hint, Some(message))
-                                    .await
-                                    .to_json()
+                                let response =
+                                    engine.status_response(project_hint, Some(message)).await;
+                                engine.record_exchange(&msg, &response.context).await;
+                                attach_chat_id(response.to_json(), chat_id)
                             }
                         }
                         None => {
@@ -1407,11 +1512,9 @@ impl Daemon {
                         .get("message")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
-                    let project_hint = request.get("project").and_then(|v| v.as_str());
-                    let session_id = request
-                        .get("session_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("ipc");
+                    let project_hint = request_field(&request, "project");
+                    let department_hint = request_field(&request, "department");
+                    let channel_name = request_field(&request, "channel_name");
                     let sender = request
                         .get("sender")
                         .and_then(|v| v.as_str())
@@ -1422,24 +1525,26 @@ impl Daemon {
                             if message.is_empty() {
                                 serde_json::json!({"ok": false, "error": "message is required"})
                             } else {
-                                let chat_id = request
-                                    .get("chat_id")
-                                    .and_then(|v| v.as_i64())
-                                    .unwrap_or_else(|| web_chat_id(session_id));
+                                let chat_id = resolve_web_chat_id(
+                                    request.get("chat_id").and_then(|v| v.as_i64()),
+                                    project_hint,
+                                    department_hint,
+                                    channel_name,
+                                );
 
                                 let msg = ChatMessage {
                                     message: message.to_string(),
                                     chat_id,
                                     sender: sender.to_string(),
-                                    source: ChatSource::Web {
-                                        session_id: session_id.to_string(),
-                                    },
+                                    source: ChatSource::Web,
                                     project_hint: project_hint.map(|s| s.to_string()),
+                                    department_hint: department_hint.map(|s| s.to_string()),
+                                    channel_name: channel_name.map(|s| s.to_string()),
                                 };
 
                                 // Try quick path first.
                                 if let Some(response) = engine.handle_message(&msg).await {
-                                    response.to_json()
+                                    attach_chat_id(response.to_json(), chat_id)
                                 } else {
                                     // Full LLM pipeline.
                                     match engine.handle_message_full(&msg, None).await {
@@ -1501,17 +1606,18 @@ impl Daemon {
                         request.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
                     let offset =
                         request.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                    let session_id = request.get("session_id").and_then(|v| v.as_str());
+                    let project_hint = request_field(&request, "project");
+                    let department_hint = request_field(&request, "department");
+                    let channel_name = request_field(&request, "channel_name");
 
                     match &chat_engine {
                         Some(engine) => {
-                            let resolved_chat_id = if chat_id != 0 {
-                                chat_id
-                            } else if let Some(sid) = session_id {
-                                web_chat_id(sid)
-                            } else {
-                                0
-                            };
+                            let resolved_chat_id = resolve_web_chat_id(
+                                if chat_id != 0 { Some(chat_id) } else { None },
+                                project_hint,
+                                department_hint,
+                                channel_name,
+                            );
                             match engine.get_history(resolved_chat_id, limit, offset).await {
                                 Ok(messages) => {
                                     let msgs: Vec<serde_json::Value> = messages
@@ -1526,6 +1632,52 @@ impl Daemon {
                                         })
                                         .collect();
                                     serde_json::json!({"ok": true, "messages": msgs, "chat_id": resolved_chat_id})
+                                }
+                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                            }
+                        }
+                        None => {
+                            serde_json::json!({"ok": false, "error": "chat engine not initialized"})
+                        }
+                    }
+                }
+
+                "chat_timeline" => {
+                    let chat_id = request.get("chat_id").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let limit =
+                        request.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
+                    let offset =
+                        request.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                    let project_hint = request_field(&request, "project");
+                    let department_hint = request_field(&request, "department");
+                    let channel_name = request_field(&request, "channel_name");
+
+                    match &chat_engine {
+                        Some(engine) => {
+                            let resolved_chat_id = resolve_web_chat_id(
+                                if chat_id != 0 { Some(chat_id) } else { None },
+                                project_hint,
+                                department_hint,
+                                channel_name,
+                            );
+                            match engine.get_timeline(resolved_chat_id, limit, offset).await {
+                                Ok(events) => {
+                                    let items: Vec<serde_json::Value> = events
+                                        .iter()
+                                        .map(|event| {
+                                            serde_json::json!({
+                                                "id": event.id,
+                                                "chat_id": event.chat_id,
+                                                "event_type": event.event_type,
+                                                "role": event.role,
+                                                "content": event.content,
+                                                "timestamp": event.timestamp.to_rfc3339(),
+                                                "source": event.source,
+                                                "metadata": event.metadata,
+                                            })
+                                        })
+                                        .collect();
+                                    serde_json::json!({"ok": true, "events": items, "chat_id": resolved_chat_id})
                                 }
                                 Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                             }
@@ -1966,10 +2118,8 @@ impl Daemon {
                         .get("project")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
-                    let limit = request
-                        .get("limit")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(50) as usize;
+                    let limit =
+                        request.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
 
                     if project.is_empty() {
                         serde_json::json!({"ok": false, "error": "project parameter required"})
@@ -2002,11 +2152,13 @@ impl Daemon {
 
                                         // Simple position: hash of key/content mod 1000.
                                         use std::hash::{Hash, Hasher};
-                                        let mut h = std::collections::hash_map::DefaultHasher::new();
+                                        let mut h =
+                                            std::collections::hash_map::DefaultHasher::new();
                                         key.hash(&mut h);
                                         let x = (h.finish() % 1000) as u32;
 
-                                        let mut h2 = std::collections::hash_map::DefaultHasher::new();
+                                        let mut h2 =
+                                            std::collections::hash_map::DefaultHasher::new();
                                         content.hash(&mut h2);
                                         let y = (h2.finish() % 1000) as u32;
 
@@ -2324,10 +2476,15 @@ impl Daemon {
                 }
 
                 // --- Notes & Directives ---
-
                 "note_save" => {
-                    let channel = request.get("channel").and_then(|v| v.as_str()).unwrap_or("");
-                    let content = request.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                    let channel = request
+                        .get("channel")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let content = request
+                        .get("content")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
 
                     if channel.is_empty() || content.is_empty() {
                         serde_json::json!({"ok": false, "error": "channel and content required"})
@@ -2339,18 +2496,20 @@ impl Daemon {
                                     Ok(directives) => {
                                         let dir_json: Vec<serde_json::Value> = directives
                                             .iter()
-                                            .map(|d| serde_json::json!({
-                                                "id": d.id,
-                                                "note_id": d.note_id,
-                                                "line_number": d.line_number,
-                                                "content": d.content,
-                                                "status": d.status.to_string(),
-                                                "task_id": d.task_id,
-                                                "matched_task_id": d.matched_task_id,
-                                                "confidence": d.confidence,
-                                                "created_at": d.created_at.to_rfc3339(),
-                                                "updated_at": d.updated_at.to_rfc3339(),
-                                            }))
+                                            .map(|d| {
+                                                serde_json::json!({
+                                                    "id": d.id,
+                                                    "note_id": d.note_id,
+                                                    "line_number": d.line_number,
+                                                    "content": d.content,
+                                                    "status": d.status.to_string(),
+                                                    "task_id": d.task_id,
+                                                    "matched_task_id": d.matched_task_id,
+                                                    "confidence": d.confidence,
+                                                    "created_at": d.created_at.to_rfc3339(),
+                                                    "updated_at": d.updated_at.to_rfc3339(),
+                                                })
+                                            })
                                             .collect();
                                         serde_json::json!({
                                             "ok": true,
@@ -2365,7 +2524,9 @@ impl Daemon {
                                             "directives": dir_json,
                                         })
                                     }
-                                    Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                                    Err(e) => {
+                                        serde_json::json!({"ok": false, "error": e.to_string()})
+                                    }
                                 }
                             }
                             Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
@@ -2376,7 +2537,10 @@ impl Daemon {
                 }
 
                 "note_get" => {
-                    let channel = request.get("channel").and_then(|v| v.as_str()).unwrap_or("");
+                    let channel = request
+                        .get("channel")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
 
                     if channel.is_empty() {
                         serde_json::json!({"ok": false, "error": "channel required"})
@@ -2386,18 +2550,20 @@ impl Daemon {
                                 let directives = ns.get_directives(&note.id).unwrap_or_default();
                                 let dir_json: Vec<serde_json::Value> = directives
                                     .iter()
-                                    .map(|d| serde_json::json!({
-                                        "id": d.id,
-                                        "note_id": d.note_id,
-                                        "line_number": d.line_number,
-                                        "content": d.content,
-                                        "status": d.status.to_string(),
-                                        "task_id": d.task_id,
-                                        "matched_task_id": d.matched_task_id,
-                                        "confidence": d.confidence,
-                                        "created_at": d.created_at.to_rfc3339(),
-                                        "updated_at": d.updated_at.to_rfc3339(),
-                                    }))
+                                    .map(|d| {
+                                        serde_json::json!({
+                                            "id": d.id,
+                                            "note_id": d.note_id,
+                                            "line_number": d.line_number,
+                                            "content": d.content,
+                                            "status": d.status.to_string(),
+                                            "task_id": d.task_id,
+                                            "matched_task_id": d.matched_task_id,
+                                            "confidence": d.confidence,
+                                            "created_at": d.created_at.to_rfc3339(),
+                                            "updated_at": d.updated_at.to_rfc3339(),
+                                        })
+                                    })
                                     .collect();
                                 serde_json::json!({
                                     "ok": true,
@@ -2412,7 +2578,9 @@ impl Daemon {
                                     "directives": dir_json,
                                 })
                             }
-                            Ok(None) => serde_json::json!({"ok": true, "note": null, "directives": []}),
+                            Ok(None) => {
+                                serde_json::json!({"ok": true, "note": null, "directives": []})
+                            }
                             Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                         }
                     } else {
@@ -2426,14 +2594,16 @@ impl Daemon {
                             Ok(notes) => {
                                 let items: Vec<serde_json::Value> = notes
                                     .iter()
-                                    .map(|n| serde_json::json!({
-                                        "id": n.id,
-                                        "channel": n.channel,
-                                        "content": n.content,
-                                        "version": n.version,
-                                        "created_at": n.created_at.to_rfc3339(),
-                                        "updated_at": n.updated_at.to_rfc3339(),
-                                    }))
+                                    .map(|n| {
+                                        serde_json::json!({
+                                            "id": n.id,
+                                            "channel": n.channel,
+                                            "content": n.content,
+                                            "version": n.version,
+                                            "created_at": n.created_at.to_rfc3339(),
+                                            "updated_at": n.updated_at.to_rfc3339(),
+                                        })
+                                    })
                                     .collect();
                                 serde_json::json!({"ok": true, "notes": items})
                             }
@@ -2717,7 +2887,13 @@ fn readiness_response(
 
 #[cfg(test)]
 mod tests {
-    use super::{DispatchHealth, ReadinessContext, readiness_response};
+    use super::{
+        DispatchHealth, EventBuffer, ExecutionEvent, ReadinessContext, readiness_response,
+        resolve_web_chat_id,
+    };
+    use crate::conversation_store::{
+        agency_chat_id, department_chat_id, named_channel_chat_id, project_chat_id,
+    };
 
     #[test]
     fn readiness_blocks_when_owner_registration_is_incomplete() {
@@ -2802,6 +2978,89 @@ mod tests {
                 .any(|reason| reason
                     .as_str()
                     .is_some_and(|text| text.contains("budget exhausted")))
+        );
+    }
+
+    #[test]
+    fn event_buffer_supports_independent_cursors() {
+        let mut buffer = EventBuffer::default();
+        buffer.push(ExecutionEvent::TaskStarted {
+            task_id: "t-1".into(),
+            agent: "engineer".into(),
+            project: "sigil".into(),
+        });
+        buffer.push(ExecutionEvent::TaskCompleted {
+            task_id: "t-1".into(),
+            outcome: "done".into(),
+            confidence: 1.0,
+            cost_usd: 0.1,
+            turns: 2,
+            duration_ms: 100,
+        });
+
+        let client_a = buffer.read_since(Some(0));
+        let client_b = buffer.read_since(Some(0));
+        assert_eq!(client_a.events.len(), 2);
+        assert_eq!(client_b.events.len(), 2);
+        assert_eq!(client_a.next_cursor, 2);
+        assert_eq!(client_b.next_cursor, 2);
+
+        buffer.push(ExecutionEvent::Progress {
+            task_id: "t-2".into(),
+            turns: 1,
+            cost_usd: 0.05,
+            last_tool: Some("shell".into()),
+        });
+
+        let client_a_next = buffer.read_since(Some(client_a.next_cursor));
+        let client_b_still_old = buffer.read_since(Some(0));
+        assert_eq!(client_a_next.events.len(), 1);
+        assert_eq!(client_b_still_old.events.len(), 3);
+    }
+
+    #[test]
+    fn event_buffer_flags_cursor_resets_after_truncation() {
+        let mut buffer = EventBuffer::default();
+        for i in 0..(super::MAX_EVENT_BUFFER_LEN + 5) {
+            buffer.push(ExecutionEvent::Progress {
+                task_id: format!("t-{i}"),
+                turns: i as u32,
+                cost_usd: i as f64,
+                last_tool: None,
+            });
+        }
+
+        let snapshot = buffer.read_since(Some(0));
+        assert!(snapshot.reset);
+        assert_eq!(snapshot.events.len(), super::MAX_EVENT_BUFFER_LEN);
+        assert!(snapshot.oldest_cursor > 0);
+    }
+
+    #[test]
+    fn web_chat_resolution_prefers_scoped_channels() {
+        assert_eq!(
+            resolve_web_chat_id(None, Some("alpha"), Some("backend"), Some("alpha/backend"),),
+            department_chat_id("alpha", "backend")
+        );
+        assert_eq!(
+            resolve_web_chat_id(None, Some("alpha"), None, Some("alpha"),),
+            project_chat_id("alpha")
+        );
+        assert_eq!(
+            resolve_web_chat_id(None, None, None, Some("ops")),
+            named_channel_chat_id("ops")
+        );
+    }
+
+    #[test]
+    fn web_chat_resolution_uses_global_fallback() {
+        assert_eq!(
+            resolve_web_chat_id(None, None, None, Some("sigil")),
+            agency_chat_id()
+        );
+        assert_eq!(
+            resolve_web_chat_id(None, None, None, None),
+            agency_chat_id()
         );
     }
 }

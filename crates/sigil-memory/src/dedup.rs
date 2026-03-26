@@ -222,12 +222,7 @@ mod tests {
     fn exact_duplicate_skips() {
         let p = pipeline();
         let c = candidate("auth/jwt", "JWT rotation every 24h");
-        let existing = vec![similar(
-            "mem-1",
-            "auth/jwt",
-            "JWT rotation every 24h",
-            0.97,
-        )];
+        let existing = vec![similar("mem-1", "auth/jwt", "JWT rotation every 24h", 0.97)];
         let action = p.decide(&c, &existing);
         assert_eq!(action, DedupAction::Skip);
     }
@@ -236,12 +231,7 @@ mod tests {
     fn similar_same_key_merges() {
         let p = pipeline();
         let c = candidate("auth/jwt", "JWT rotation every 12h with refresh tokens");
-        let existing = vec![similar(
-            "mem-1",
-            "auth/jwt",
-            "JWT rotation every 24h",
-            0.90,
-        )];
+        let existing = vec![similar("mem-1", "auth/jwt", "JWT rotation every 24h", 0.90)];
         let action = p.decide(&c, &existing);
         assert_eq!(action, DedupAction::Merge("mem-1".to_string()));
     }
@@ -250,12 +240,7 @@ mod tests {
     fn novel_content_creates() {
         let p = pipeline();
         let c = candidate("deploy/docker", "Use Docker compose for local dev");
-        let existing = vec![similar(
-            "mem-1",
-            "auth/jwt",
-            "JWT rotation every 24h",
-            0.88,
-        )];
+        let existing = vec![similar("mem-1", "auth/jwt", "JWT rotation every 24h", 0.88)];
         // Different key → Create even though similarity is above threshold.
         let action = p.decide(&c, &existing);
         assert_eq!(action, DedupAction::Create);
@@ -264,7 +249,10 @@ mod tests {
     #[test]
     fn contradiction_supersedes() {
         let p = pipeline();
-        let c = candidate("db/backend", "We no longer use MySQL, migrated to PostgreSQL");
+        let c = candidate(
+            "db/backend",
+            "We no longer use MySQL, migrated to PostgreSQL",
+        );
         let existing = vec![similar(
             "mem-1",
             "db/backend",
@@ -278,13 +266,11 @@ mod tests {
     #[test]
     fn below_threshold_creates() {
         let p = pipeline();
-        let c = candidate("pricing/tiers", "Three pricing tiers: free, pro, enterprise");
-        let existing = vec![similar(
-            "mem-1",
-            "auth/jwt",
-            "JWT rotation every 24h",
-            0.50,
-        )];
+        let c = candidate(
+            "pricing/tiers",
+            "Three pricing tiers: free, pro, enterprise",
+        );
+        let existing = vec![similar("mem-1", "auth/jwt", "JWT rotation every 24h", 0.50)];
         let action = p.decide(&c, &existing);
         assert_eq!(action, DedupAction::Create);
     }

@@ -114,8 +114,7 @@ impl Middleware for MemoryRefreshMiddleware {
         );
         debug!(query = %query, "memory refresh query");
 
-        ctx.metadata
-            .insert("memory_refresh_query".into(), query);
+        ctx.metadata.insert("memory_refresh_query".into(), query);
 
         MiddlewareAction::Inject(vec![inject_msg])
     }

@@ -74,7 +74,10 @@ impl LoopDetectionMiddleware {
         if state.window.len() >= self.window_size
             && let Some(old) = state.window.pop_front()
         {
-            let entry = state.counts.get_mut(&old).expect("count tracking invariant");
+            let entry = state
+                .counts
+                .get_mut(&old)
+                .expect("count tracking invariant");
             *entry -= 1;
             if *entry == 0 {
                 state.counts.remove(&old);

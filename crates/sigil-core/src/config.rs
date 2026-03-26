@@ -641,6 +641,22 @@ pub struct TelegramChannelConfig {
     pub allowed_chats: Vec<i64>,
     #[serde(default = "default_debounce_window")]
     pub debounce_window_ms: u64,
+    #[serde(default)]
+    pub main_chat_id: Option<i64>,
+    #[serde(default)]
+    pub routes: Vec<TelegramChatRouteConfig>,
+}
+
+/// Routing rule for a Telegram chat.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TelegramChatRouteConfig {
+    pub chat_id: i64,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub project: Option<String>,
+    #[serde(default)]
+    pub department: Option<String>,
 }
 
 fn default_debounce_window() -> u64 {
@@ -2419,6 +2435,36 @@ team.leader = "leader"
             team.effective_agents(),
             vec!["leader", "researcher", "reviewer"]
         );
+    }
+
+    #[test]
+    fn test_telegram_channel_routes_parse() {
+        let toml = r#"
+[sigil]
+name = "test"
+
+[channels.telegram]
+token_secret = "TELEGRAM_TOKEN"
+allowed_chats = [1001, 1002]
+main_chat_id = 1002
+
+[[channels.telegram.routes]]
+chat_id = 1001
+name = "Sigil HQ"
+
+[[channels.telegram.routes]]
+chat_id = 1002
+project = "sigil"
+department = "backend"
+"#;
+        let config = SigilConfig::parse(toml).unwrap();
+        let telegram = config.channels.telegram.expect("telegram config");
+        assert_eq!(telegram.main_chat_id, Some(1002));
+        assert_eq!(telegram.routes.len(), 2);
+        assert_eq!(telegram.routes[0].chat_id, 1001);
+        assert_eq!(telegram.routes[0].name.as_deref(), Some("Sigil HQ"));
+        assert_eq!(telegram.routes[1].project.as_deref(), Some("sigil"));
+        assert_eq!(telegram.routes[1].department.as_deref(), Some("backend"));
     }
 
     #[test]

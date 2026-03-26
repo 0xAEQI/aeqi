@@ -93,4 +93,15 @@ pub trait Memory: Send + Sync {
     async fn delete(&self, id: &str) -> anyhow::Result<()>;
 
     fn name(&self) -> &str;
+
+    /// Store a memory graph edge. Default is no-op for backends that don't support edges.
+    async fn store_memory_edge(
+        &self,
+        _source_id: &str,
+        _target_id: &str,
+        _relation: &str,
+        _strength: f32,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
 }

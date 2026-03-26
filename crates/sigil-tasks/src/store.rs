@@ -326,7 +326,7 @@ impl TaskBoard {
         let mut ready: Vec<&Task> = self
             .tasks
             .values()
-            .filter(|b| b.is_ready(&resolved))
+            .filter(|b| b.is_ready(&resolved) && !b.is_scheduler_held())
             .collect();
 
         // Sort by priority (highest first), then by creation time.
@@ -680,6 +680,29 @@ mod tests {
         let ready = store.ready();
         assert_eq!(ready.len(), 1);
         assert_eq!(ready[0].id, b2.id);
+    }
+
+    #[test]
+    fn test_scheduler_hold_excludes_task_from_ready() {
+        let (mut store, _dir) = temp_store();
+        let held = store.create("as", "Held task").unwrap();
+        let free = store.create("as", "Free task").unwrap();
+
+        store
+            .update(&held.id.0, |b| {
+                b.metadata = serde_json::json!({
+                    "sigil": {
+                        "hold": true,
+                        "hold_reason": "awaiting_council"
+                    }
+                });
+            })
+            .unwrap();
+
+        let ready = store.ready();
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].id, free.id);
+        assert!(store.get(&held.id.0).unwrap().is_scheduler_held());
     }
 
     #[test]

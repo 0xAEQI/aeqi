@@ -15,20 +15,20 @@ use crate::checkpoint::AgentCheckpoint;
 use crate::cost_ledger::{CostEntry, CostLedger};
 use crate::decomposition::DecompositionResult;
 use crate::emotional_state::EmotionalState;
+use crate::escalation::{EscalationPolicy, EscalationTracker};
 use crate::execution_events::EventBroadcaster;
 use crate::executor::{ClaudeCodeExecutor, TaskOutcome};
 use crate::expertise::{ExpertiseLedger, ExpertiseRecord, TaskOutcomeKind};
-use crate::escalation::{EscalationPolicy, EscalationTracker};
+use crate::message::{Dispatch, DispatchBus, DispatchKind};
+use crate::metrics::SigilMetrics;
 use crate::middleware::{
     ClarificationMiddleware, ContextBudgetMiddleware, ContextCompressionMiddleware,
     CostTrackingMiddleware, GuardrailsMiddleware, LoopDetectionMiddleware, MemoryRefreshMiddleware,
     MiddlewareChain, Outcome, OutcomeStatus, SafetyNetMiddleware,
 };
-use crate::verification::{TaskContext, VerificationPipeline};
-use crate::message::{Dispatch, DispatchBus, DispatchKind};
-use crate::metrics::SigilMetrics;
 use crate::preflight::{PreflightAssessment, PreflightVerdict};
 use crate::project::Project;
+use crate::verification::{TaskContext, VerificationPipeline};
 use std::collections::HashMap;
 
 /// Label prefix for tracking escalation depth on tasks.
@@ -153,11 +153,7 @@ impl Supervisor {
     ) -> (String, Option<String>, Vec<String>) {
         let candidates = self.candidate_agents();
         if candidates.is_empty() {
-            return (
-                self.escalation_target.clone(),
-                None,
-                Vec::new(),
-            );
+            return (self.escalation_target.clone(), None, Vec::new());
         }
 
         let domain = ExpertiseLedger::extract_domain(&task.labels, &task.subject);
@@ -202,7 +198,12 @@ impl Supervisor {
 
         let selected = candidates
             .iter()
-            .min_by_key(|agent| (load_by_agent.get(*agent).copied().unwrap_or(0), agent.as_str()))
+            .min_by_key(|agent| {
+                (
+                    load_by_agent.get(*agent).copied().unwrap_or(0),
+                    agent.as_str(),
+                )
+            })
             .cloned()
             .unwrap_or_else(|| self.escalation_target.clone());
         (selected, Some(domain), ranking_info)
@@ -338,10 +339,7 @@ impl Supervisor {
                         ));
                     }
                     if !deny.is_empty() {
-                        prompt.push_str(&format!(
-                            "\nYou must NOT use: {}",
-                            deny.join(", ")
-                        ));
+                        prompt.push_str(&format!("\nYou must NOT use: {}", deny.join(", ")));
                     }
                 }
 
@@ -528,7 +526,10 @@ impl Supervisor {
             worker.set_broadcaster(broadcaster.clone());
         }
 
-        (worker.with_max_task_retries(self.max_task_retries), progress_rx)
+        (
+            worker.with_max_task_retries(self.max_task_retries),
+            progress_rx,
+        )
     }
 
     /// Run one patrol cycle: reap finished tasks, detect timeouts,
@@ -823,16 +824,16 @@ impl Supervisor {
                                 "preflight rejected task"
                             );
                             if let Some(ref audit) = self.audit_log {
-                        let _ = audit.record(
-                            &AuditEvent::new(
-                                &self.project_name,
-                                DecisionType::PreflightRejected,
-                                format!("Rejected: {reason}"),
-                            )
-                            .with_task(&task.id.0)
-                            .with_agent(&agent_name),
-                        );
-                    }
+                                let _ = audit.record(
+                                    &AuditEvent::new(
+                                        &self.project_name,
+                                        DecisionType::PreflightRejected,
+                                        format!("Rejected: {reason}"),
+                                    )
+                                    .with_task(&task.id.0)
+                                    .with_agent(&agent_name),
+                                );
+                            }
                             // Store assessment in task metadata.
                             let mut store = self.tasks.lock().await;
                             let _ = store.update(&task.id.0, |b| {
@@ -851,16 +852,16 @@ impl Supervisor {
                                 "preflight rerouted task"
                             );
                             if let Some(ref audit) = self.audit_log {
-                        let _ = audit.record(
-                            &AuditEvent::new(
-                                &self.project_name,
-                                DecisionType::PreflightRejected,
-                                format!("Rerouted: {reason}"),
-                            )
-                            .with_task(&task.id.0)
-                            .with_agent(&agent_name),
-                        );
-                    }
+                                let _ = audit.record(
+                                    &AuditEvent::new(
+                                        &self.project_name,
+                                        DecisionType::PreflightRejected,
+                                        format!("Rerouted: {reason}"),
+                                    )
+                                    .with_task(&task.id.0)
+                                    .with_agent(&agent_name),
+                                );
+                            }
                             continue;
                         }
                         PreflightVerdict::Proceed => {}
@@ -891,8 +892,9 @@ impl Supervisor {
                 );
             }
 
-            let (mut worker, worker_progress_rx) =
-                self.create_worker(agent_name.clone(), worker_name.clone(), &task).await;
+            let (mut worker, worker_progress_rx) = self
+                .create_worker(agent_name.clone(), worker_name.clone(), &task)
+                .await;
 
             // If there's a previous external checkpoint for this task, inject it into the
             // task description so the new worker has context about the prior attempt's git state.
@@ -964,6 +966,10 @@ impl Supervisor {
             let task_subject = task.subject.clone();
             let agent_name_for_records = agent_name.clone();
             let verification_enabled = self.verification_enabled;
+            let verification_provider = self.reflect_provider.clone().unwrap_or_else(|| self.provider.clone());
+            let verification_model = self.preflight_model.clone();
+            let verification_repo = self.repo.clone();
+            let task_description = task.description.clone();
             let escalation_tracker = self.escalation_tracker.clone();
             let handle = tokio::spawn(async move {
                 let start = std::time::Instant::now();
@@ -1100,13 +1106,33 @@ impl Supervisor {
                                 }
 
                                 // Verification pipeline: validate the outcome.
-                                if verification_enabled {
+                                let verification_approved = if verification_enabled {
+                                    // Extract done_condition from task description.
+                                    // Convention: lines starting with "Done when:" or "Acceptance:" are conditions.
+                                    let done_condition = task_description
+                                        .lines()
+                                        .find(|l| {
+                                            let lower = l.to_lowercase();
+                                            lower.starts_with("done when:")
+                                                || lower.starts_with("acceptance:")
+                                                || lower.starts_with("done_condition:")
+                                        })
+                                        .map(|l| l.to_string())
+                                        .or_else(|| {
+                                            // Fall back to using the full description as the spec.
+                                            if !task_description.is_empty() {
+                                                Some(task_description.clone())
+                                            } else {
+                                                None
+                                            }
+                                        });
+
                                     let task_ctx = TaskContext {
                                         task_id: task_id_clone.clone(),
                                         subject: task_subject.clone(),
-                                        done_condition: None,
+                                        done_condition,
                                         project: project_name_task.clone(),
-                                        project_dir: None,
+                                        project_dir: verification_repo.clone(),
                                         artifacts: vec![],
                                     };
                                     let mw_outcome = Outcome {
@@ -1118,19 +1144,80 @@ impl Supervisor {
                                         duration_ms: (duration_secs * 1000.0) as u64,
                                         reason: Some(summary.clone()),
                                     };
-                                    let result = VerificationPipeline::with_defaults()
-                                        .verify(&mw_outcome, &task_ctx)
-                                        .await;
+
+                                    let pipeline = if !verification_model.is_empty() {
+                                        VerificationPipeline::with_defaults()
+                                            .with_provider(verification_provider.clone(), verification_model.clone())
+                                    } else {
+                                        VerificationPipeline::with_defaults()
+                                    };
+
+                                    let result = pipeline.verify(&mw_outcome, &task_ctx).await;
+
                                     info!(
                                         task = %task_id_clone,
                                         confidence = result.confidence,
                                         approved = result.approved,
+                                        reason = %result.reason,
+                                        suggestions = ?result.suggestions,
                                         "verification complete"
                                     );
-                                }
 
-                                // Clear escalation state on success.
-                                {
+                                    if !result.approved {
+                                        warn!(
+                                            task = %task_id_clone,
+                                            confidence = result.confidence,
+                                            "verification rejected — task will be retried with feedback"
+                                        );
+
+                                        // Record verification failure in audit log.
+                                        if let Some(ref audit) = audit_log_worker {
+                                            let _ = audit.record(
+                                                &AuditEvent::new(
+                                                    &project_name_task,
+                                                    DecisionType::TaskFailed,
+                                                    format!(
+                                                        "Verification rejected (confidence={:.2}): {}",
+                                                        result.confidence, result.reason
+                                                    ),
+                                                )
+                                                .with_task(&task_id_clone)
+                                                .with_agent(&agent_name_for_records),
+                                            );
+                                        }
+
+                                        // Dispatch verification feedback for retry context.
+                                        let feedback = format!(
+                                            "Verification rejected your work (confidence={:.2}).\n\
+                                             Reason: {}\n\
+                                             Suggestions:\n{}",
+                                            result.confidence,
+                                            result.reason,
+                                            result.suggestions.iter()
+                                                .map(|s| format!("- {s}"))
+                                                .collect::<Vec<_>>()
+                                                .join("\n")
+                                        );
+                                        dispatch_bus_worker
+                                            .send(Dispatch::new_typed(
+                                                &format!("verification-{project_name_task}"),
+                                                &outcome_recipient,
+                                                DispatchKind::TaskBlocked {
+                                                    task_id: task_id_clone.clone(),
+                                                    question: feedback,
+                                                    context: String::new(),
+                                                },
+                                            ))
+                                            .await;
+                                    }
+
+                                    result.approved
+                                } else {
+                                    true // No verification — implicitly approved.
+                                };
+
+                                // Clear escalation state on success (only if verification passed).
+                                if verification_approved {
                                     let mut tracker = escalation_tracker.lock().await;
                                     tracker.record_success(&task_id_clone);
                                 }
@@ -1166,10 +1253,7 @@ impl Supervisor {
                                 // Record failure and decide escalation action.
                                 {
                                     let mut tracker = escalation_tracker.lock().await;
-                                    tracker.record_failure(
-                                        &task_id_clone,
-                                        &agent_name_for_records,
-                                    );
+                                    tracker.record_failure(&task_id_clone, &agent_name_for_records);
                                     let action = tracker.decide(&task_id_clone);
                                     info!(
                                         task = %task_id_clone,
@@ -1721,25 +1805,86 @@ impl Supervisor {
 
     /// Resolve relevant domain skill file paths based on task labels and subject.
     /// Returns a markdown snippet listing relevant files the worker should read.
-    fn resolve_domain_hints(labels: &[String], subject: &str, skills_dirs: &[std::path::PathBuf]) -> String {
+    fn resolve_domain_hints(
+        labels: &[String],
+        subject: &str,
+        skills_dirs: &[std::path::PathBuf],
+    ) -> String {
         let text = format!("{} {}", subject, labels.join(" ")).to_lowercase();
 
         // Domain keyword → skill subdirectory paths to check
         let mappings: &[(&[&str], &[&str])] = &[
-            (&["trading", "pms", "oms", "ems", "risk", "rms", "mms", "market making", "quote"],
-             &["pipelines/trading.md", "services/pms.md", "services/oms.md", "services/ems.md"]),
-            (&["data", "ingestion", "aggregation", "persistence", "orderbook"],
-             &["pipelines/data.md", "services/ingestion.md", "services/aggregation.md"]),
-            (&["strategy", "feature", "prediction", "signal", "optimizer", "fno", "ltc", "pfe"],
-             &["pipelines/strategy.md", "services/feature.md", "services/prediction.md", "services/signal.md"]),
-            (&["gateway", "api", "stream", "websocket", "configuration"],
-             &["pipelines/gateway.md", "services/api.md", "services/stream.md"]),
-            (&["types", "flatbuffer", "shared crate"],
-             &["crates/types.md", "crates/keys.md"]),
-            (&["zmq", "transport", "pubsub"],
-             &["crates/zmq_transport.md", "zmq.md"]),
-            (&["deploy", "systemd", "infrastructure"],
-             &["systemd.md", "infrastructure-overview.md"]),
+            (
+                &[
+                    "trading",
+                    "pms",
+                    "oms",
+                    "ems",
+                    "risk",
+                    "rms",
+                    "mms",
+                    "market making",
+                    "quote",
+                ],
+                &[
+                    "pipelines/trading.md",
+                    "services/pms.md",
+                    "services/oms.md",
+                    "services/ems.md",
+                ],
+            ),
+            (
+                &[
+                    "data",
+                    "ingestion",
+                    "aggregation",
+                    "persistence",
+                    "orderbook",
+                ],
+                &[
+                    "pipelines/data.md",
+                    "services/ingestion.md",
+                    "services/aggregation.md",
+                ],
+            ),
+            (
+                &[
+                    "strategy",
+                    "feature",
+                    "prediction",
+                    "signal",
+                    "optimizer",
+                    "fno",
+                    "ltc",
+                    "pfe",
+                ],
+                &[
+                    "pipelines/strategy.md",
+                    "services/feature.md",
+                    "services/prediction.md",
+                    "services/signal.md",
+                ],
+            ),
+            (
+                &["gateway", "api", "stream", "websocket", "configuration"],
+                &[
+                    "pipelines/gateway.md",
+                    "services/api.md",
+                    "services/stream.md",
+                ],
+            ),
+            (
+                &["types", "flatbuffer", "shared crate"],
+                &["crates/types.md", "crates/keys.md"],
+            ),
+            (
+                &["zmq", "transport", "pubsub"],
+                &["crates/zmq_transport.md", "zmq.md"],
+            ),
+            (
+                &["deploy", "systemd", "infrastructure"],
+                &["systemd.md", "infrastructure-overview.md"],
+            ),
         ];
 
         let mut hints = Vec::new();
@@ -1761,7 +1906,10 @@ impl Supervisor {
             return String::new();
         }
         hints.dedup();
-        format!("## Relevant Skill Files\nRead these for domain context:\n{}", hints.join("\n"))
+        format!(
+            "## Relevant Skill Files\nRead these for domain context:\n{}",
+            hints.join("\n")
+        )
     }
 
     /// Cancel a task by ID. Marks it as Cancelled and aborts any running worker.

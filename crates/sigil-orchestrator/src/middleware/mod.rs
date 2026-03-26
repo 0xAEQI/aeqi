@@ -198,11 +198,7 @@ pub trait Middleware: Send + Sync + 'static {
     }
 
     /// Called before each tool execution.
-    async fn before_tool(
-        &self,
-        _ctx: &mut WorkerContext,
-        _call: &ToolCall,
-    ) -> MiddlewareAction {
+    async fn before_tool(&self, _ctx: &mut WorkerContext, _call: &ToolCall) -> MiddlewareAction {
         MiddlewareAction::Continue
     }
 
@@ -217,20 +213,12 @@ pub trait Middleware: Send + Sync + 'static {
     }
 
     /// Called when execution completes (any outcome).
-    async fn on_complete(
-        &self,
-        _ctx: &mut WorkerContext,
-        _outcome: &Outcome,
-    ) -> MiddlewareAction {
+    async fn on_complete(&self, _ctx: &mut WorkerContext, _outcome: &Outcome) -> MiddlewareAction {
         MiddlewareAction::Continue
     }
 
     /// Called when an error occurs during execution.
-    async fn on_error(
-        &self,
-        _ctx: &mut WorkerContext,
-        _error: &str,
-    ) -> MiddlewareAction {
+    async fn on_error(&self, _ctx: &mut WorkerContext, _error: &str) -> MiddlewareAction {
         MiddlewareAction::Continue
     }
 }
@@ -293,9 +281,7 @@ impl MiddlewareChain {
 
     /// Create an empty chain (no middleware).
     pub fn empty() -> Self {
-        Self {
-            layers: Vec::new(),
-        }
+        Self { layers: Vec::new() }
     }
 
     /// Number of middleware in the chain.
@@ -315,12 +301,14 @@ impl MiddlewareChain {
 
     /// Run `before_model` across all middleware.
     pub async fn run_before_model(&self, ctx: &mut WorkerContext) -> MiddlewareAction {
-        run_chain!(&self.layers, ctx, "before_model", |mw, ctx| mw.before_model(ctx))
+        run_chain!(&self.layers, ctx, "before_model", |mw, ctx| mw
+            .before_model(ctx))
     }
 
     /// Run `after_model` across all middleware.
     pub async fn run_after_model(&self, ctx: &mut WorkerContext) -> MiddlewareAction {
-        run_chain!(&self.layers, ctx, "after_model", |mw, ctx| mw.after_model(ctx))
+        run_chain!(&self.layers, ctx, "after_model", |mw, ctx| mw
+            .after_model(ctx))
     }
 
     /// Run `before_tool` across all middleware for a specific tool call.
@@ -329,7 +317,8 @@ impl MiddlewareChain {
         ctx: &mut WorkerContext,
         call: &ToolCall,
     ) -> MiddlewareAction {
-        run_chain!(&self.layers, ctx, "before_tool", |mw, ctx| mw.before_tool(ctx, call))
+        run_chain!(&self.layers, ctx, "before_tool", |mw, ctx| mw
+            .before_tool(ctx, call))
     }
 
     /// Run `after_tool` across all middleware for a specific tool call/result.
@@ -339,7 +328,8 @@ impl MiddlewareChain {
         call: &ToolCall,
         result: &ToolResult,
     ) -> MiddlewareAction {
-        run_chain!(&self.layers, ctx, "after_tool", |mw, ctx| mw.after_tool(ctx, call, result))
+        run_chain!(&self.layers, ctx, "after_tool", |mw, ctx| mw
+            .after_tool(ctx, call, result))
     }
 
     /// Run `on_complete` across all middleware.
@@ -348,18 +338,15 @@ impl MiddlewareChain {
         ctx: &mut WorkerContext,
         outcome: &Outcome,
     ) -> MiddlewareAction {
-        run_chain!(&self.layers, ctx, "on_complete", |mw, ctx| mw.on_complete(ctx, outcome))
+        run_chain!(&self.layers, ctx, "on_complete", |mw, ctx| mw
+            .on_complete(ctx, outcome))
     }
 
     /// Run `on_error` across all middleware.
-    pub async fn run_on_error(
-        &self,
-        ctx: &mut WorkerContext,
-        error: &str,
-    ) -> MiddlewareAction {
-        run_chain!(&self.layers, ctx, "on_error", |mw, ctx| mw.on_error(ctx, error))
+    pub async fn run_on_error(&self, ctx: &mut WorkerContext, error: &str) -> MiddlewareAction {
+        run_chain!(&self.layers, ctx, "on_error", |mw, ctx| mw
+            .on_error(ctx, error))
     }
-
 }
 
 // ---------------------------------------------------------------------------

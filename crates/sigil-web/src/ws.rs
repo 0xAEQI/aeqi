@@ -41,6 +41,7 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, state: AppState
 
     let poll_interval = std::time::Duration::from_secs(5);
     let mut interval = tokio::time::interval(poll_interval);
+    let mut worker_cursor: Option<u64> = None;
 
     loop {
         tokio::select! {
@@ -65,9 +66,29 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, state: AppState
                 }
 
                 // Poll and forward real-time worker execution events.
-                if let Ok(events_resp) = state.ipc.cmd("worker_events").await
-                    && let Some(events) = events_resp.get("events").and_then(|e| e.as_array())
-                {
+                let worker_req = match worker_cursor {
+                    Some(cursor) => serde_json::json!({"cursor": cursor}),
+                    None => serde_json::json!({}),
+                };
+                if let Ok(events_resp) = state.ipc.cmd_with("worker_events", worker_req).await {
+                    if let Some(next_cursor) = events_resp.get("next_cursor").and_then(|v| v.as_u64()) {
+                        worker_cursor = Some(next_cursor);
+                    }
+                    if events_resp.get("reset").and_then(|v| v.as_bool()) == Some(true) {
+                        let msg = serde_json::json!({
+                            "event": "worker_gap",
+                            "data": {
+                                "oldest_cursor": events_resp.get("oldest_cursor").cloned().unwrap_or(serde_json::json!(null)),
+                                "next_cursor": events_resp.get("next_cursor").cloned().unwrap_or(serde_json::json!(null)),
+                            }
+                        });
+                        if let Ok(text) = serde_json::to_string(&msg)
+                            && socket.send(Message::Text(text.into())).await.is_err()
+                        {
+                            break;
+                        }
+                    }
+                    if let Some(events) = events_resp.get("events").and_then(|e| e.as_array()) {
                     for event in events {
                         let msg = serde_json::json!({"event": "worker", "data": event});
                         if let Ok(text) = serde_json::to_string(&msg)
@@ -75,6 +96,7 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, state: AppState
                         {
                             break;
                         }
+                    }
                     }
                 }
             }

@@ -111,18 +111,15 @@ impl LifecycleManager {
     /// more than 50% of their significant words (from their IDs) are grouped
     /// together.  Returns groups of 2+ for merging.
     pub fn identify_compactable(&self, memories: &[MemoryAge]) -> Vec<Vec<String>> {
-        let low_hotness: Vec<&MemoryAge> =
-            memories.iter().filter(|m| m.hotness < 0.1).collect();
+        let low_hotness: Vec<&MemoryAge> = memories.iter().filter(|m| m.hotness < 0.1).collect();
 
         if low_hotness.len() < 2 {
             return Vec::new();
         }
 
         // Tokenize each memory ID into words.
-        let word_sets: Vec<HashSet<String>> = low_hotness
-            .iter()
-            .map(|m| tokenize_id(&m.id))
-            .collect();
+        let word_sets: Vec<HashSet<String>> =
+            low_hotness.iter().map(|m| tokenize_id(&m.id)).collect();
 
         let n = low_hotness.len();
         let mut visited = vec![false; n];
@@ -147,7 +144,10 @@ impl LifecycleManager {
             }
 
             if group.len() >= 2 {
-                let ids: Vec<String> = group.iter().map(|&idx| low_hotness[idx].id.clone()).collect();
+                let ids: Vec<String> = group
+                    .iter()
+                    .map(|&idx| low_hotness[idx].id.clone())
+                    .collect();
                 groups.push(ids);
             }
         }
@@ -214,7 +214,11 @@ pub struct AuditEntry {
 
 impl AuditEntry {
     /// Create a new audit entry timestamped to now.
-    pub fn new(action: LifecycleAction, memory_id: impl Into<String>, reason: impl Into<String>) -> Self {
+    pub fn new(
+        action: LifecycleAction,
+        memory_id: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Self {
         Self {
             action,
             memory_id: memory_id.into(),
@@ -334,10 +338,7 @@ mod tests {
         ];
 
         let groups = mgr.identify_compactable(&memories);
-        assert!(
-            groups.is_empty(),
-            "dissimilar IDs should not form groups"
-        );
+        assert!(groups.is_empty(), "dissimilar IDs should not form groups");
     }
 
     #[test]
@@ -349,10 +350,7 @@ mod tests {
         ];
 
         let groups = mgr.identify_compactable(&memories);
-        assert!(
-            groups.is_empty(),
-            "hot memories should not be compacted"
-        );
+        assert!(groups.is_empty(), "hot memories should not be compacted");
     }
 
     #[test]

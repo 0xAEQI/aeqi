@@ -1,17 +1,36 @@
 use anyhow::Result;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::helpers::daemon_ipc_request;
 
 /// Interactive chat REPL connected to the daemon ChatEngine.
 pub(crate) async fn cmd_chat(config_path: &Option<PathBuf>) -> Result<()> {
+    let session_id = format!(
+        "cli-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    );
+    let sender = std::env::var("USER").unwrap_or_else(|_| "cli".to_string());
+
     let status = daemon_ipc_request(config_path, &serde_json::json!({"cmd": "status"})).await;
     match &status {
         Ok(resp) if resp.get("ok").and_then(|v| v.as_bool()) == Some(true) => {
-            let projects = resp.get("projects").and_then(|v| v.as_u64()).unwrap_or(0);
-            let workers = resp.get("max_workers").and_then(|v| v.as_u64()).unwrap_or(0);
-            eprintln!("\n  \x1b[1msigil\x1b[0m \x1b[32m\u{25cf}\x1b[0m {projects} projects \u{00b7} {workers} workers\n");
+            let projects = resp
+                .get("project_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let workers = resp
+                .get("max_workers")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            eprintln!(
+                "\n  \x1b[1msigil\x1b[0m \x1b[32m\u{25cf}\x1b[0m {projects} projects \u{00b7} {workers} workers\n"
+            );
         }
         _ => {
             eprintln!("\n  \x1b[1msigil\x1b[0m \x1b[31m\u{25cf}\x1b[0m daemon offline");
@@ -33,17 +52,28 @@ pub(crate) async fn cmd_chat(config_path: &Option<PathBuf>) -> Result<()> {
         };
 
         let input = line.trim();
-        if input.is_empty() { continue; }
-        if input == "exit" || input == "quit" { break; }
+        if input.is_empty() {
+            continue;
+        }
+        if input == "exit" || input == "quit" {
+            break;
+        }
 
         if input == "status" {
-            if let Ok(resp) = daemon_ipc_request(config_path, &serde_json::json!({"cmd": "status"})).await {
-                eprintln!("  {}", serde_json::to_string_pretty(&resp).unwrap_or_default());
+            if let Ok(resp) =
+                daemon_ipc_request(config_path, &serde_json::json!({"cmd": "status"})).await
+            {
+                eprintln!(
+                    "  {}",
+                    serde_json::to_string_pretty(&resp).unwrap_or_default()
+                );
             }
             continue;
         }
         if input == "brief" {
-            if let Ok(resp) = daemon_ipc_request(config_path, &serde_json::json!({"cmd": "brief"})).await {
+            if let Ok(resp) =
+                daemon_ipc_request(config_path, &serde_json::json!({"cmd": "brief"})).await
+            {
                 if let Some(brief) = resp.get("brief").and_then(|v| v.as_str()) {
                     eprintln!("\n{brief}\n");
                 } else {
@@ -58,8 +88,14 @@ pub(crate) async fn cmd_chat(config_path: &Option<PathBuf>) -> Result<()> {
 
         let resp = daemon_ipc_request(
             config_path,
-            &serde_json::json!({"cmd": "chat", "message": input}),
-        ).await;
+            &serde_json::json!({
+                "cmd": "chat_full",
+                "message": input,
+                "session_id": session_id.clone(),
+                "sender": sender.clone(),
+            }),
+        )
+        .await;
 
         eprint!("\r    \r");
 
@@ -70,7 +106,10 @@ pub(crate) async fn cmd_chat(config_path: &Option<PathBuf>) -> Result<()> {
                 } else if let Some(err) = r.get("error").and_then(|v| v.as_str()) {
                     eprintln!("  \x1b[31m{err}\x1b[0m\n");
                 } else {
-                    eprintln!("  {}\n", serde_json::to_string_pretty(&r).unwrap_or_default());
+                    eprintln!(
+                        "  {}\n",
+                        serde_json::to_string_pretty(&r).unwrap_or_default()
+                    );
                 }
 
                 if r.get("action").and_then(|v| v.as_str()) == Some("task_created")
@@ -82,7 +121,8 @@ pub(crate) async fn cmd_chat(config_path: &Option<PathBuf>) -> Result<()> {
                         if let Ok(poll) = daemon_ipc_request(
                             config_path,
                             &serde_json::json!({"cmd": "chat_poll", "task_id": handle}),
-                        ).await
+                        )
+                        .await
                             && poll.get("completed").and_then(|v| v.as_bool()) == Some(true)
                         {
                             let text = poll.get("text").and_then(|v| v.as_str()).unwrap_or("Done.");

@@ -6,12 +6,12 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::debug;
 
 /// Monotonically increasing counter to ensure unique IDs within a process.
@@ -199,8 +199,7 @@ impl DirectiveDetector {
                 .or_else(|| {
                     // Numbered list: "1. something", "2) something"
                     let rest = trimmed.trim_start_matches(|c: char| c.is_ascii_digit());
-                    rest.strip_prefix(". ")
-                        .or_else(|| rest.strip_prefix(") "))
+                    rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") "))
                 })
                 .unwrap_or(trimmed);
 
@@ -605,7 +604,11 @@ mod tests {
         let content = "- build the auth service\n* fix the bug\n1. deploy to staging";
         let results = DirectiveDetector::detect(content);
         assert_eq!(results.len(), 3);
-        assert!(results.iter().all(|d| d.pattern_type == PatternType::Imperative));
+        assert!(
+            results
+                .iter()
+                .all(|d| d.pattern_type == PatternType::Imperative)
+        );
         assert_eq!(results[0].content, "build the auth service");
         assert_eq!(results[1].content, "fix the bug");
         assert_eq!(results[2].content, "deploy to staging");
@@ -616,7 +619,11 @@ mod tests {
         let content = "[ ] launch pricing page\n- [ ] set up monitoring\n* [ ] CDN for assets";
         let results = DirectiveDetector::detect(content);
         assert_eq!(results.len(), 3);
-        assert!(results.iter().all(|d| d.pattern_type == PatternType::Checkbox));
+        assert!(
+            results
+                .iter()
+                .all(|d| d.pattern_type == PatternType::Checkbox)
+        );
         assert_eq!(results[0].content, "launch pricing page");
         assert_eq!(results[1].content, "set up monitoring");
         assert_eq!(results[2].content, "CDN for assets");
@@ -930,9 +937,11 @@ build the pricing page v2
         assert_eq!(directives2.len(), 3);
         assert_eq!(directives2[0].content, "build the pricing page v2");
         // All reset to pending after re-detection.
-        assert!(directives2
-            .iter()
-            .all(|d| d.status == DirectiveStatus::Pending));
+        assert!(
+            directives2
+                .iter()
+                .all(|d| d.status == DirectiveStatus::Pending)
+        );
     }
 
     #[test]
@@ -971,9 +980,7 @@ build the pricing page v2
         ];
         let saved1 = store.save_directives(&note1.id, detected1).unwrap();
 
-        let note2 = store
-            .save_note("algostaking", "deploy to prod")
-            .unwrap();
+        let note2 = store.save_note("algostaking", "deploy to prod").unwrap();
         let detected2 = vec![DetectedDirective {
             line_number: 1,
             content: "deploy to prod".to_string(),

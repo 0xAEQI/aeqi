@@ -50,9 +50,13 @@ impl FailureAnalysis {
         Some(Self {
             mode: parsed.mode.unwrap_or(FailureMode::Unknown),
             reasoning: parsed.reasoning,
-            suggested_approach: parsed
-                .suggested_approach
-                .and_then(|value| if value.trim().is_empty() { None } else { Some(value) }),
+            suggested_approach: parsed.suggested_approach.and_then(|value| {
+                if value.trim().is_empty() {
+                    None
+                } else {
+                    Some(value)
+                }
+            }),
             failed_tools: parsed.failed_tools,
             missing_context_hints: parsed.missing_context_hints,
         })

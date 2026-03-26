@@ -15,9 +15,11 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 use crate::middleware::{Outcome, OutcomeStatus};
+use sigil_core::traits::provider::{ChatRequest, Message, MessageContent, Provider, Role};
 
 // ---------------------------------------------------------------------------
 // Signals
@@ -206,17 +208,32 @@ impl Default for VerificationConfig {
 /// Multi-stage verification pipeline for worker outcomes.
 pub struct VerificationPipeline {
     config: VerificationConfig,
+    /// Optional provider for LLM-backed verification stages (spec compliance, quality review).
+    provider: Option<Arc<dyn Provider>>,
+    /// Model to use for cheap verification calls (e.g. flash model).
+    model: String,
 }
 
 impl VerificationPipeline {
     /// Create a pipeline with the given configuration.
     pub fn new(config: VerificationConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            provider: None,
+            model: String::new(),
+        }
     }
 
     /// Create a pipeline with sensible defaults.
     pub fn with_defaults() -> Self {
         Self::new(VerificationConfig::default())
+    }
+
+    /// Attach a provider for LLM-backed verification (spec compliance + quality review).
+    pub fn with_provider(mut self, provider: Arc<dyn Provider>, model: String) -> Self {
+        self.provider = Some(provider);
+        self.model = model;
+        self
     }
 
     /// Run the full verification pipeline against a worker outcome.
@@ -237,15 +254,15 @@ impl VerificationPipeline {
             signals.extend(test_signals);
         }
 
-        // Stage 3: Spec compliance.
+        // Stage 3: Spec compliance (LLM-backed if provider available).
         if self.config.check_spec {
-            let spec_signals = self.check_spec(outcome, task);
+            let spec_signals = self.check_spec(outcome, task).await;
             signals.extend(spec_signals);
         }
 
-        // Stage 4: Quality review.
+        // Stage 4: Quality review (LLM-backed + red flag detection).
         if self.config.check_quality {
-            let quality_signals = self.check_quality(outcome, task);
+            let quality_signals = self.check_quality(outcome, task).await;
             signals.extend(quality_signals);
         }
 
@@ -261,13 +278,20 @@ impl VerificationPipeline {
         for signal in &signals {
             match signal {
                 VerificationSignal::NoArtifacts => {
-                    suggestions.push("No artifacts found — worker may not have produced output".into());
+                    suggestions
+                        .push("No artifacts found — worker may not have produced output".into());
                 }
                 VerificationSignal::TestArtifactsFailed => {
-                    suggestions.push("Test artifacts indicate failure — verify tests pass before accepting".into());
+                    suggestions.push(
+                        "Test artifacts indicate failure — verify tests pass before accepting"
+                            .into(),
+                    );
                 }
                 VerificationSignal::SpecViolation => {
-                    suggestions.push("Output does not satisfy the done condition — re-examine requirements".into());
+                    suggestions.push(
+                        "Output does not satisfy the done condition — re-examine requirements"
+                            .into(),
+                    );
                 }
                 VerificationSignal::QualityConcern => {
                     suggestions.push("Quality concerns detected — consider a manual review".into());
@@ -372,13 +396,7 @@ impl VerificationPipeline {
             {
                 debug!(task_id = %task.task_id, dir = %project_dir.display(), "detected package.json with test script — running npm test");
                 return self
-                    .run_test_command(
-                        task,
-                        evidence,
-                        project_dir,
-                        "npm",
-                        &["test"],
-                    )
+                    .run_test_command(task, evidence, project_dir, "npm", &["test"])
                     .await;
             }
         }
@@ -471,40 +489,141 @@ impl VerificationPipeline {
 
     /// Stage 3: Check spec / done-condition compliance.
     ///
-    /// Placeholder implementation: if a done_condition exists and the outcome has a reason
-    /// that references completion, we consider it compliant. A full implementation would
-    /// use an LLM reviewer agent.
-    fn check_spec(&self, outcome: &Outcome, task: &TaskContext) -> Vec<VerificationSignal> {
-        let Some(ref _done_condition) = task.done_condition else {
+    /// If a provider is available, uses an LLM to evaluate whether the worker's output
+    /// satisfies the done condition. Falls back to heuristic if no provider.
+    async fn check_spec(&self, outcome: &Outcome, task: &TaskContext) -> Vec<VerificationSignal> {
+        let Some(ref done_condition) = task.done_condition else {
             debug!(task_id = %task.task_id, "no done condition — skipping spec check");
             return Vec::new();
         };
 
-        // If the worker reported Done or DoneWithConcerns and provided a reason, consider
-        // spec compliant as a baseline. A real implementation would compare against the
-        // done_condition with an LLM.
+        // LLM-backed spec check if provider is available.
+        if let Some(ref provider) = self.provider {
+            let summary = outcome.reason.as_deref().unwrap_or("(no summary)");
+            let prompt = format!(
+                "You are a verification reviewer. A worker was asked to complete a task.\n\n\
+                 Task: {subject}\n\
+                 Done condition: {done_condition}\n\
+                 Worker summary: {summary}\n\n\
+                 Does the worker's output satisfy the done condition?\n\
+                 Reply with exactly one line: YES or NO, followed by a brief reason.\n\
+                 Example: YES — all required endpoints were implemented and tested.",
+                subject = task.subject,
+            );
+
+            let request = ChatRequest {
+                model: self.model.clone(),
+                messages: vec![Message {
+                    role: Role::User,
+                    content: MessageContent::text(&prompt),
+                }],
+                tools: vec![],
+                max_tokens: 128,
+                temperature: 0.0,
+            };
+
+            match provider.chat(&request).await {
+                Ok(response) if response.content.is_some() => {
+                    let text = response.content.unwrap();
+                    let lower = text.to_lowercase();
+                    if lower.starts_with("yes") {
+                        debug!(task_id = %task.task_id, response = %text, "LLM spec check: compliant");
+                        return vec![VerificationSignal::SpecCompliant];
+                    } else {
+                        info!(task_id = %task.task_id, response = %text, "LLM spec check: violation");
+                        return vec![VerificationSignal::SpecViolation];
+                    }
+                }
+                Ok(_) => {
+                    warn!(task_id = %task.task_id, "LLM spec check returned empty — falling back to heuristic");
+                }
+                Err(e) => {
+                    warn!(task_id = %task.task_id, error = %e, "LLM spec check failed — falling back to heuristic");
+                }
+            }
+        }
+
+        // Heuristic fallback: if Done with a reason, consider compliant.
         match outcome.status {
-            OutcomeStatus::Done | OutcomeStatus::DoneWithConcerns => {
-                debug!(task_id = %task.task_id, "outcome is done with done_condition present — marking spec compliant");
+            OutcomeStatus::Done | OutcomeStatus::DoneWithConcerns if outcome.reason.is_some() => {
+                debug!(task_id = %task.task_id, "heuristic spec check: done with reason — marking compliant");
                 vec![VerificationSignal::SpecCompliant]
             }
             _ => {
-                debug!(task_id = %task.task_id, "non-done outcome with done_condition — marking spec violation");
+                debug!(task_id = %task.task_id, "heuristic spec check: insufficient evidence — marking violation");
                 vec![VerificationSignal::SpecViolation]
             }
         }
     }
 
-    /// Stage 4: Quality review (placeholder).
+    /// Stage 4: Quality review.
     ///
-    /// A full implementation would use a separate reviewer agent. For now we approve
-    /// if the worker's self-confidence is high and the outcome is clean.
-    fn check_quality(&self, outcome: &Outcome, task: &TaskContext) -> Vec<VerificationSignal> {
-        if outcome.confidence >= 0.8 && outcome.status == OutcomeStatus::Done {
-            debug!(task_id = %task.task_id, "high worker confidence + clean status — quality approved");
+    /// Runs RedFlagDetector on worker output, then optionally uses an LLM reviewer
+    /// for a structured quality assessment. Falls back to confidence heuristic.
+    async fn check_quality(&self, outcome: &Outcome, task: &TaskContext) -> Vec<VerificationSignal> {
+        let summary = outcome.reason.as_deref().unwrap_or("");
+
+        // Always run red flag detection.
+        let red_flags = RedFlagDetector::with_defaults().scan(summary);
+        if !red_flags.is_empty() {
+            info!(
+                task_id = %task.task_id,
+                flags = ?red_flags,
+                "red flags detected in worker output"
+            );
+            return vec![VerificationSignal::QualityConcern];
+        }
+
+        // LLM-backed quality review if provider is available.
+        if let Some(ref provider) = self.provider {
+            let prompt = format!(
+                "You are a code reviewer. Evaluate the quality of this completed task.\n\n\
+                 Task: {subject}\n\
+                 Worker summary:\n{summary}\n\n\
+                 Assess whether the work appears thorough and well-executed.\n\
+                 Reply with exactly one line: APPROVED or CONCERN, followed by a brief reason.\n\
+                 Example: APPROVED — clean implementation with proper error handling.",
+                subject = task.subject,
+            );
+
+            let request = ChatRequest {
+                model: self.model.clone(),
+                messages: vec![Message {
+                    role: Role::User,
+                    content: MessageContent::text(&prompt),
+                }],
+                tools: vec![],
+                max_tokens: 128,
+                temperature: 0.0,
+            };
+
+            match provider.chat(&request).await {
+                Ok(response) if response.content.is_some() => {
+                    let text = response.content.unwrap();
+                    let lower = text.to_lowercase();
+                    if lower.starts_with("approved") {
+                        debug!(task_id = %task.task_id, response = %text, "LLM quality review: approved");
+                        return vec![VerificationSignal::QualityApproved];
+                    } else {
+                        info!(task_id = %task.task_id, response = %text, "LLM quality review: concern");
+                        return vec![VerificationSignal::QualityConcern];
+                    }
+                }
+                Ok(_) => {
+                    warn!(task_id = %task.task_id, "LLM quality review returned empty — falling back to heuristic");
+                }
+                Err(e) => {
+                    warn!(task_id = %task.task_id, error = %e, "LLM quality review failed — falling back to heuristic");
+                }
+            }
+        }
+
+        // Heuristic fallback.
+        if outcome.confidence >= 0.7 && outcome.status == OutcomeStatus::Done {
+            debug!(task_id = %task.task_id, "heuristic quality check: high confidence — approved");
             vec![VerificationSignal::QualityApproved]
         } else if outcome.status == OutcomeStatus::DoneWithConcerns {
-            debug!(task_id = %task.task_id, "done with concerns — quality concern");
+            debug!(task_id = %task.task_id, "heuristic quality check: done with concerns");
             vec![VerificationSignal::QualityConcern]
         } else {
             Vec::new()
@@ -644,7 +763,10 @@ mod tests {
         ];
         let confidence = pipeline.compute_confidence(&signals, &outcome);
         // 0.2 + 0.3 + 0.3 + 0.1 + (0.1 * 1.0) = 1.0
-        assert!((confidence - 1.0).abs() < 0.001, "expected 1.0, got {confidence}");
+        assert!(
+            (confidence - 1.0).abs() < 0.001,
+            "expected 1.0, got {confidence}"
+        );
     }
 
     #[test]
@@ -654,7 +776,10 @@ mod tests {
         let signals = vec![];
         let confidence = pipeline.compute_confidence(&signals, &outcome);
         // Only worker self-confidence: 0.1 * 0.5 = 0.05
-        assert!((confidence - 0.05).abs() < 0.001, "expected 0.05, got {confidence}");
+        assert!(
+            (confidence - 0.05).abs() < 0.001,
+            "expected 0.05, got {confidence}"
+        );
     }
 
     #[test]
@@ -664,7 +789,10 @@ mod tests {
         let signals = vec![VerificationSignal::ArtifactPresent];
         let confidence = pipeline.compute_confidence(&signals, &outcome);
         // 0.2 + (0.1 * 1.0) = 0.3
-        assert!((confidence - 0.3).abs() < 0.001, "expected 0.3, got {confidence}");
+        assert!(
+            (confidence - 0.3).abs() < 0.001,
+            "expected 0.3, got {confidence}"
+        );
     }
 
     #[test]
@@ -679,7 +807,10 @@ mod tests {
         ];
         let confidence = pipeline.compute_confidence(&signals, &outcome);
         // 0 + (0.1 * 0.0) = 0.0
-        assert!((confidence - 0.0).abs() < 0.001, "expected 0.0, got {confidence}");
+        assert!(
+            (confidence - 0.0).abs() < 0.001,
+            "expected 0.0, got {confidence}"
+        );
     }
 
     #[test]
@@ -695,7 +826,10 @@ mod tests {
             VerificationSignal::QualityApproved,
         ];
         let confidence = pipeline.compute_confidence(&signals, &outcome);
-        assert!((confidence - 1.0).abs() < 0.001, "expected clamped to 1.0, got {confidence}");
+        assert!(
+            (confidence - 1.0).abs() < 0.001,
+            "expected clamped to 1.0, got {confidence}"
+        );
     }
 
     #[test]
@@ -708,7 +842,10 @@ mod tests {
         ];
         let confidence = pipeline.compute_confidence(&signals, &outcome);
         // 0.2 + 0.3 + (0.1 * 0.5) = 0.55
-        assert!((confidence - 0.55).abs() < 0.001, "expected 0.55, got {confidence}");
+        assert!(
+            (confidence - 0.55).abs() < 0.001,
+            "expected 0.55, got {confidence}"
+        );
     }
 
     // -- auto-approve threshold --
@@ -717,12 +854,12 @@ mod tests {
     async fn auto_approve_high_confidence() {
         let pipeline = VerificationPipeline::with_defaults();
         let outcome = make_outcome(OutcomeStatus::Done, 1.0, vec!["main.rs".into()]);
-        let task = make_task(
-            Some("tests pass"),
-            vec!["cargo test output".into()],
-        );
+        let task = make_task(Some("tests pass"), vec!["cargo test output".into()]);
         let result = pipeline.verify(&outcome, &task).await;
-        assert!(result.approved, "expected approved for high-confidence outcome");
+        assert!(
+            result.approved,
+            "expected approved for high-confidence outcome"
+        );
         assert!(result.confidence >= 0.8);
     }
 
@@ -742,7 +879,10 @@ mod tests {
         let outcome = make_outcome(OutcomeStatus::Done, 0.0, vec![]);
         let task = make_task(None, vec![]);
         let result = pipeline.verify(&outcome, &task).await;
-        assert!(!result.approved, "expected not approved for low-confidence outcome");
+        assert!(
+            !result.approved,
+            "expected not approved for low-confidence outcome"
+        );
         assert!(
             result.confidence < 0.5,
             "expected confidence < 0.5, got {}",
@@ -760,7 +900,10 @@ mod tests {
         let base = pipeline.compute_confidence(&[], &outcome);
         let with = pipeline.compute_confidence(&[VerificationSignal::ArtifactPresent], &outcome);
         let delta = with - base;
-        assert!((delta - 0.2).abs() < 0.001, "artifact weight should be 0.2, got {delta}");
+        assert!(
+            (delta - 0.2).abs() < 0.001,
+            "artifact weight should be 0.2, got {delta}"
+        );
     }
 
     #[test]
@@ -768,9 +911,13 @@ mod tests {
         let pipeline = VerificationPipeline::with_defaults();
         let outcome = make_outcome(OutcomeStatus::Done, 0.0, vec![]);
         let base = pipeline.compute_confidence(&[], &outcome);
-        let with = pipeline.compute_confidence(&[VerificationSignal::TestArtifactsPresent], &outcome);
+        let with =
+            pipeline.compute_confidence(&[VerificationSignal::TestArtifactsPresent], &outcome);
         let delta = with - base;
-        assert!((delta - 0.3).abs() < 0.001, "test artifacts present weight should be 0.3, got {delta}");
+        assert!(
+            (delta - 0.3).abs() < 0.001,
+            "test artifacts present weight should be 0.3, got {delta}"
+        );
     }
 
     #[test]
@@ -780,7 +927,10 @@ mod tests {
         let base = pipeline.compute_confidence(&[], &outcome);
         let with = pipeline.compute_confidence(&[VerificationSignal::SpecCompliant], &outcome);
         let delta = with - base;
-        assert!((delta - 0.3).abs() < 0.001, "spec compliant weight should be 0.3, got {delta}");
+        assert!(
+            (delta - 0.3).abs() < 0.001,
+            "spec compliant weight should be 0.3, got {delta}"
+        );
     }
 
     #[test]
@@ -790,7 +940,10 @@ mod tests {
         let base = pipeline.compute_confidence(&[], &outcome);
         let with = pipeline.compute_confidence(&[VerificationSignal::QualityApproved], &outcome);
         let delta = with - base;
-        assert!((delta - 0.1).abs() < 0.001, "quality approved weight should be 0.1, got {delta}");
+        assert!(
+            (delta - 0.1).abs() < 0.001,
+            "quality approved weight should be 0.1, got {delta}"
+        );
     }
 
     #[test]
@@ -801,7 +954,10 @@ mod tests {
         let c0 = pipeline.compute_confidence(&[], &outcome_zero);
         let c1 = pipeline.compute_confidence(&[], &outcome_full);
         let delta = c1 - c0;
-        assert!((delta - 0.1).abs() < 0.001, "worker confidence weight should be 0.1, got {delta}");
+        assert!(
+            (delta - 0.1).abs() < 0.001,
+            "worker confidence weight should be 0.1, got {delta}"
+        );
     }
 
     // -- flagged for review (between thresholds) --
@@ -846,7 +1002,10 @@ mod tests {
         let task = make_task(None, vec![]);
         let result = pipeline.verify(&outcome, &task).await;
         assert!(
-            result.suggestions.iter().any(|s| s.contains("No artifacts")),
+            result
+                .suggestions
+                .iter()
+                .any(|s| s.contains("No artifacts")),
             "expected suggestion about missing artifacts"
         );
     }
@@ -868,7 +1027,10 @@ mod tests {
         let task = make_task(None, vec![]);
         let result = pipeline.verify(&outcome, &task).await;
         // Only worker self-confidence: 0.1 * 0.5 = 0.05
-        assert!(result.signals.is_empty(), "expected no signals when all stages disabled");
+        assert!(
+            result.signals.is_empty(),
+            "expected no signals when all stages disabled"
+        );
         assert!(result.approved, "should be approved with threshold 0.0");
     }
 

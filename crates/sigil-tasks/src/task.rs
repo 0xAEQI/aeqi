@@ -196,4 +196,12 @@ impl Task {
     pub fn is_ready(&self, resolved: &dyn Fn(&TaskId) -> bool) -> bool {
         self.status == TaskStatus::Pending && self.depends_on.iter().all(resolved)
     }
+
+    /// Whether the scheduler should temporarily hold this task from execution.
+    pub fn is_scheduler_held(&self) -> bool {
+        self.metadata
+            .pointer("/sigil/hold")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    }
 }

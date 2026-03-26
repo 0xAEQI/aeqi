@@ -137,10 +137,7 @@ impl HotnessScorer {
 
     /// `exp(-λ × days_since_access)` — decays exponentially from 1.0.
     fn recency_score(&self, last_accessed: DateTime<Utc>) -> f32 {
-        let days = (Utc::now() - last_accessed)
-            .num_seconds()
-            .max(0) as f64
-            / 86400.0;
+        let days = (Utc::now() - last_accessed).num_seconds().max(0) as f64 / 86400.0;
         ((-self.lambda * days).exp()) as f32
     }
 }
@@ -220,7 +217,10 @@ mod tests {
     fn contradiction_decay() {
         let mut hotness = 0.8_f32;
         on_contradiction(&mut hotness);
-        assert!((hotness - 0.24).abs() < 0.01, "after contradiction: {hotness}");
+        assert!(
+            (hotness - 0.24).abs() < 0.01,
+            "after contradiction: {hotness}"
+        );
         // A second contradiction drives it even lower.
         on_contradiction(&mut hotness);
         assert!(hotness < 0.08, "double contradiction: {hotness}");

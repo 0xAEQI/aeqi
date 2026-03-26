@@ -30,10 +30,7 @@ pub enum ExecutionEvent {
         last_tool: Option<String>,
     },
     /// A tool call has started.
-    ToolCallStarted {
-        task_id: String,
-        tool_name: String,
-    },
+    ToolCallStarted { task_id: String, tool_name: String },
     /// A tool call has completed.
     ToolCallCompleted {
         task_id: String,
@@ -42,10 +39,7 @@ pub enum ExecutionEvent {
         duration_ms: u64,
     },
     /// A checkpoint was captured during execution.
-    CheckpointCreated {
-        task_id: String,
-        message: String,
-    },
+    CheckpointCreated { task_id: String, message: String },
     /// Task completed successfully.
     TaskCompleted {
         task_id: String,
