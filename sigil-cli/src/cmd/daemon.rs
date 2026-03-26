@@ -361,6 +361,10 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 })
             });
 
+            // Shared queue for proactive Telegram messages (morning brief, completion notifications).
+            let pending_telegram_messages: Arc<std::sync::Mutex<Vec<(i64, String)>>> =
+                Arc::new(std::sync::Mutex::new(Vec::new()));
+
             // Wire Telegram if configured (single SecretStore open for all bot tokens).
             let mut advisor_bots: HashMap<String, Arc<TelegramChannel>> = HashMap::new();
             if let Some(ref tg_config) = config.channels.telegram {
@@ -415,6 +419,9 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                                             (Ok(phase1_client), Some(engine)) => {
                                                 let advisor_bots_outer = advisor_bots.clone();
                                                 let debounce_ms = tg_config.debounce_window_ms;
+                                                let ptm = pending_telegram_messages.clone();
+                                                let eb = event_broadcaster.clone();
+                                                let default_chat = tg_config.allowed_chats.first().copied().unwrap_or(0);
                                                 tokio::spawn(async move {
                                                     telegram_message_loop(
                                                         &mut rx,
@@ -424,6 +431,9 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                                                         Arc::new(phase1_client),
                                                         advisor_bots_outer,
                                                         debounce_ms,
+                                                        ptm,
+                                                        eb,
+                                                        default_chat,
                                                     )
                                                     .await;
                                                 });
@@ -640,6 +650,12 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     info!(count = rules.len(), "watchdog rules loaded");
                     daemon.set_watchdog(WatchdogEngine::new(rules));
                 }
+            }
+
+            // Wire Telegram proactive delivery (morning brief, completion notifications).
+            daemon.pending_telegram_messages = pending_telegram_messages;
+            if let Some(ref tg_config) = config.channels.telegram {
+                daemon.telegram_allowed_chats = tg_config.allowed_chats.clone();
             }
 
             daemon.run().await?;
@@ -879,6 +895,7 @@ fn build_lifecycle_engine(
     Ok(engine)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn telegram_message_loop(
     rx: &mut tokio::sync::mpsc::Receiver<sigil_core::traits::IncomingMessage>,
     engine: Arc<sigil_orchestrator::ChatEngine>,
@@ -887,6 +904,9 @@ async fn telegram_message_loop(
     phase1_client: Arc<reqwest::Client>,
     advisor_bots: HashMap<String, Arc<TelegramChannel>>,
     debounce_ms: u64,
+    pending_telegram_messages: Arc<std::sync::Mutex<Vec<(i64, String)>>>,
+    event_broadcaster: Arc<sigil_orchestrator::EventBroadcaster>,
+    default_chat_id: i64,
 ) {
     struct BufferedMsg {
         text: String,
@@ -895,15 +915,37 @@ async fn telegram_message_loop(
     }
 
     // Completion listener: polls ChatEngine for completed tasks, delivers via Telegram.
+    // Also drains proactive messages (morning brief, completion notifications) from the daemon.
     {
         let engine_cl = engine.clone();
         let tg_deliver = tg_reply.clone();
         let notify = engine.task_notify.clone();
+        let ptm = pending_telegram_messages.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
                     _ = notify.notified() => {}
-                    _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {}
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {}
+                }
+
+                // Drain and deliver proactive messages from the daemon (morning brief, etc.).
+                {
+                    let messages: Vec<(i64, String)> = if let Ok(mut queue) = ptm.lock() {
+                        queue.drain(..).collect()
+                    } else {
+                        Vec::new()
+                    };
+                    for (chat_id, text) in messages {
+                        let out = sigil_core::traits::OutgoingMessage {
+                            channel: "telegram".to_string(),
+                            recipient: String::new(),
+                            text,
+                            metadata: serde_json::json!({ "chat_id": chat_id }),
+                        };
+                        if let Err(e) = tg_deliver.send(out).await {
+                            warn!(error = %e, "failed to deliver proactive telegram message");
+                        }
+                    }
                 }
 
                 // Check for slow tasks (> 2min) and send progress.
@@ -936,6 +978,57 @@ async fn telegram_message_loop(
                             .react(completion.chat_id, completion.message_id, emoji)
                             .await;
                     }
+                }
+            }
+        });
+    }
+
+    // Proactive completion notifier: sends Telegram notifications for non-user-initiated tasks
+    // (cron jobs, watchdog tasks, proactive engine tasks) when they complete.
+    if default_chat_id != 0 {
+        let tg_notify = tg_reply.clone();
+        let engine_pending = engine.clone();
+        let mut event_rx = event_broadcaster.subscribe();
+        tokio::spawn(async move {
+            loop {
+                match event_rx.recv().await {
+                    Ok(sigil_orchestrator::ExecutionEvent::TaskCompleted {
+                        task_id,
+                        outcome,
+                        cost_usd,
+                        ..
+                    }) => {
+                        // Only notify for tasks NOT originated from a user chat message.
+                        let is_user_task = {
+                            let pending = engine_pending.pending_tasks.lock().await;
+                            pending.contains_key(&task_id)
+                        };
+                        if !is_user_task {
+                            let summary = if outcome.len() > 80 {
+                                format!("{}...", &outcome[..77])
+                            } else {
+                                outcome
+                            };
+                            let text = format!(
+                                "\u{2713} Task {} completed: {} [${:.2}]",
+                                task_id, summary, cost_usd
+                            );
+                            let out = sigil_core::traits::OutgoingMessage {
+                                channel: "telegram".to_string(),
+                                recipient: String::new(),
+                                text,
+                                metadata: serde_json::json!({ "chat_id": default_chat_id }),
+                            };
+                            if let Err(e) = tg_notify.send(out).await {
+                                warn!(error = %e, "failed to send proactive completion notification");
+                            }
+                        }
+                    }
+                    Ok(_) => {} // Ignore other event types.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(missed = n, "proactive notifier lagged behind event stream");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         });

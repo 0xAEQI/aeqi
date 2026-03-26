@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{Timelike, Utc};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -49,6 +49,12 @@ pub struct Daemon {
     pub event_collector: Arc<Mutex<Vec<ExecutionEvent>>>,
     pub pid_file: Option<PathBuf>,
     pub socket_path: Option<PathBuf>,
+    /// Date of the last morning brief sent via Telegram.
+    pub last_brief_date: Option<chrono::NaiveDate>,
+    /// Queue of outbound Telegram messages `(chat_id, text)` for proactive delivery.
+    pub pending_telegram_messages: Arc<std::sync::Mutex<Vec<(i64, String)>>>,
+    /// Chat IDs allowed for proactive Telegram delivery (from config).
+    pub telegram_allowed_chats: Vec<i64>,
     session_tracker_shutdown: Option<Arc<tokio::sync::Notify>>,
     running: Arc<std::sync::atomic::AtomicBool>,
     config_reloaded: Arc<std::sync::atomic::AtomicBool>,
@@ -77,6 +83,9 @@ impl Daemon {
             event_collector: Arc::new(Mutex::new(Vec::new())),
             pid_file: None,
             socket_path: None,
+            last_brief_date: None,
+            pending_telegram_messages: Arc::new(std::sync::Mutex::new(Vec::new())),
+            telegram_allowed_chats: Vec::new(),
             session_tracker_shutdown: None,
             running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             config_reloaded: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -410,6 +419,23 @@ impl Daemon {
                 // Cleanup completed one-shots.
                 let mut store = cron_store.lock().await;
                 let _ = store.cleanup_oneshots();
+            }
+
+            // 5b. Morning brief delivery via Telegram.
+            if !self.telegram_allowed_chats.is_empty() {
+                let now = chrono::Local::now();
+                let today = now.date_naive();
+                let hour = now.hour();
+                if (7..=9).contains(&hour) && self.last_brief_date != Some(today) {
+                    self.last_brief_date = Some(today);
+                    info!("generating morning brief for Telegram delivery");
+
+                    let brief_text = self.generate_brief_text().await;
+                    let chat_id = self.telegram_allowed_chats[0];
+                    if let Ok(mut queue) = self.pending_telegram_messages.lock() {
+                        queue.push((chat_id, brief_text));
+                    }
+                }
             }
 
             // 6. Check for config reload signal (SIGHUP).
@@ -2477,6 +2503,80 @@ impl Daemon {
     /// Check if daemon is running.
     pub fn is_running(&self) -> bool {
         self.running.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Generate morning brief text using the same logic as the "brief" IPC command.
+    async fn generate_brief_text(&self) -> String {
+        use crate::proactive::{BriefBuilder, TaskSummary};
+
+        let summaries = self.registry.list_project_summaries().await;
+        let (spent, budget, _remaining) = self.registry.cost_ledger.budget_status();
+        let worker_count = self.registry.total_max_workers().await;
+        let dispatch_health = self.dispatch_bus.health(ACK_RETRY_AGE_SECS).await;
+
+        let cron_count = if let Some(ref cs) = self.cron_store {
+            cs.lock().await.jobs.len()
+        } else {
+            0
+        };
+
+        let mut builder = BriefBuilder::new();
+        let mut completed = Vec::new();
+        let mut blocked = Vec::new();
+        let mut active = Vec::new();
+
+        for s in &summaries {
+            for _ in 0..s.done_tasks {
+                completed.push(TaskSummary {
+                    id: String::new(),
+                    subject: format!("{} task", s.name),
+                    project: s.name.clone(),
+                    agent: None,
+                    cost_usd: None,
+                });
+            }
+            for _ in 0..s.pending_tasks {
+                blocked.push(TaskSummary {
+                    id: String::new(),
+                    subject: format!("{} pending", s.name),
+                    project: s.name.clone(),
+                    agent: None,
+                    cost_usd: None,
+                });
+            }
+            for _ in 0..s.in_progress_tasks {
+                active.push(TaskSummary {
+                    id: String::new(),
+                    subject: format!("{} in progress", s.name),
+                    project: s.name.clone(),
+                    agent: None,
+                    cost_usd: None,
+                });
+            }
+        }
+
+        builder.with_completed_tasks(&completed);
+        builder.with_blocked_tasks(&blocked);
+        builder.with_active_tasks(&active);
+
+        if budget > 0.0 {
+            builder.with_cost_summary(spent, budget);
+        }
+
+        let text = builder.render_text();
+        let mut full_brief = text;
+        full_brief.push_str(&format!(
+            "--- System ---\n  {} workers, {} cron jobs, {} pending messages\n",
+            worker_count, cron_count, dispatch_health.unread
+        ));
+        if dispatch_health.dead_letters > 0 {
+            full_brief.push_str(&format!(
+                "  ! {} dead letters in dispatch queue\n",
+                dispatch_health.dead_letters
+            ));
+        }
+
+        full_brief
     }
 }
 
