@@ -5,7 +5,7 @@ use sigil_core::traits::{
     Observer, Provider, Role, Tool,
 };
 use sigil_core::{Agent, AgentConfig, Identity};
-use sigil_tasks::{Checkpoint, Task, TaskStatus};
+use sigil_tasks::{Checkpoint, Task, TaskOutcomeKind, TaskOutcomeRecord, TaskStatus};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
@@ -1073,7 +1073,10 @@ impl AgentWorker {
 
     async fn persist_runtime_execution(&self, task_id: &str, runtime: &RuntimeExecution) {
         match serde_json::to_value(runtime) {
-            Ok(value) => self.persist_runtime_value(task_id, value).await,
+            Ok(value) => {
+                self.persist_runtime_value(task_id, value).await;
+                self.persist_task_outcome(task_id, &runtime.outcome).await;
+            }
             Err(error) => warn!(
                 worker = %self.name,
                 task = %task_id,
@@ -1086,7 +1089,7 @@ impl AgentWorker {
     async fn persist_runtime_value(&self, task_id: &str, runtime: serde_json::Value) {
         let mut store = self.tasks.lock().await;
         if let Err(error) = store.update(task_id, |task| {
-            Self::set_task_sigil_metadata(task, "runtime", runtime);
+            task.set_sigil_metadata("runtime", runtime);
         }) {
             warn!(
                 worker = %self.name,
@@ -1097,34 +1100,34 @@ impl AgentWorker {
         }
     }
 
-    fn set_task_sigil_metadata(task: &mut sigil_tasks::Task, key: &str, value: serde_json::Value) {
-        let mut metadata = match std::mem::take(&mut task.metadata) {
-            serde_json::Value::Object(map) => map,
-            serde_json::Value::Null => serde_json::Map::new(),
-            other => {
-                let mut map = serde_json::Map::new();
-                map.insert("_legacy".to_string(), other);
-                map
-            }
+    async fn persist_task_outcome(&self, task_id: &str, outcome: &RuntimeOutcome) {
+        let record = TaskOutcomeRecord {
+            kind: Self::task_outcome_kind(outcome),
+            summary: outcome.summary.clone(),
+            reason: outcome.reason.clone(),
+            next_action: outcome.next_action.clone(),
         };
 
-        let sigil_value = metadata
-            .entry("sigil".to_string())
-            .or_insert_with(|| serde_json::json!({}));
-
-        if !sigil_value.is_object() {
-            *sigil_value = serde_json::json!({});
+        let mut store = self.tasks.lock().await;
+        if let Err(error) = store.update(task_id, |task| {
+            task.set_task_outcome(&record);
+        }) {
+            warn!(
+                worker = %self.name,
+                task = %task_id,
+                error = %error,
+                "failed to persist typed task outcome"
+            );
         }
+    }
 
-        if let Some(sigil_meta) = sigil_value.as_object_mut() {
-            sigil_meta.insert(key.to_string(), value);
+    fn task_outcome_kind(outcome: &RuntimeOutcome) -> TaskOutcomeKind {
+        match outcome.status {
+            crate::runtime::RuntimeOutcomeStatus::Done => TaskOutcomeKind::Done,
+            crate::runtime::RuntimeOutcomeStatus::Blocked => TaskOutcomeKind::Blocked,
+            crate::runtime::RuntimeOutcomeStatus::Handoff => TaskOutcomeKind::Handoff,
+            crate::runtime::RuntimeOutcomeStatus::Failed => TaskOutcomeKind::Failed,
         }
-
-        task.metadata = if metadata.is_empty() {
-            serde_json::Value::Null
-        } else {
-            serde_json::Value::Object(metadata)
-        };
     }
 
     fn checkpoint_path_for_task(&self, task_id: &str) -> Option<PathBuf> {
@@ -1451,79 +1454,4 @@ fn format_dispatch_for_prompt(dispatch: &Dispatch) -> String {
         dispatch.to,
         truncate_for_prompt(&dispatch.kind.body_text(), 220),
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::AgentWorker;
-    use sigil_tasks::{Task, TaskId};
-
-    #[test]
-    fn set_task_sigil_metadata_preserves_existing_sigil_fields() {
-        let mut task = Task::new(TaskId::from("sg-001"), "Runtime persistence");
-        task.metadata = serde_json::json!({
-            "sigil": {
-                "hold": true,
-                "hold_reason": "awaiting_review",
-            }
-        });
-
-        AgentWorker::set_task_sigil_metadata(
-            &mut task,
-            "runtime",
-            serde_json::json!({
-                "session": {
-                    "phase": "act",
-                }
-            }),
-        );
-
-        assert_eq!(
-            task.metadata
-                .pointer("/sigil/hold")
-                .and_then(|value| value.as_bool()),
-            Some(true)
-        );
-        assert_eq!(
-            task.metadata
-                .pointer("/sigil/hold_reason")
-                .and_then(|value| value.as_str()),
-            Some("awaiting_review")
-        );
-        assert_eq!(
-            task.metadata
-                .pointer("/sigil/runtime/session/phase")
-                .and_then(|value| value.as_str()),
-            Some("act")
-        );
-    }
-
-    #[test]
-    fn set_task_sigil_metadata_preserves_legacy_metadata() {
-        let mut task = Task::new(TaskId::from("sg-002"), "Legacy metadata");
-        task.metadata = serde_json::json!("legacy");
-
-        AgentWorker::set_task_sigil_metadata(
-            &mut task,
-            "runtime",
-            serde_json::json!({
-                "session": {
-                    "phase": "verify",
-                }
-            }),
-        );
-
-        assert_eq!(
-            task.metadata
-                .pointer("/_legacy")
-                .and_then(|value| value.as_str()),
-            Some("legacy")
-        );
-        assert_eq!(
-            task.metadata
-                .pointer("/sigil/runtime/session/phase")
-                .and_then(|value| value.as_str()),
-            Some("verify")
-        );
-    }
 }

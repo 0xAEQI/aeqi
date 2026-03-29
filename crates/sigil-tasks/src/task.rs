@@ -79,6 +79,28 @@ impl fmt::Display for TaskStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskOutcomeKind {
+    Done,
+    Blocked,
+    Handoff,
+    Failed,
+    Cancelled,
+}
+
+impl fmt::Display for TaskOutcomeKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Done => write!(f, "done"),
+            Self::Blocked => write!(f, "blocked"),
+            Self::Handoff => write!(f, "handoff"),
+            Self::Failed => write!(f, "failed"),
+            Self::Cancelled => write!(f, "cancelled"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Priority {
@@ -110,6 +132,27 @@ pub struct Checkpoint {
     pub progress: String,
     pub cost_usd: f64,
     pub turns_used: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskOutcomeRecord {
+    pub kind: TaskOutcomeKind,
+    pub summary: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub next_action: Option<String>,
+}
+
+impl TaskOutcomeRecord {
+    pub fn new(kind: TaskOutcomeKind, summary: impl Into<String>) -> Self {
+        Self {
+            kind,
+            summary: summary.into(),
+            reason: None,
+            next_action: None,
+        }
+    }
 }
 
 /// A single task in the DAG.
@@ -203,5 +246,118 @@ impl Task {
             .pointer("/sigil/hold")
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
+    }
+
+    pub fn sigil_metadata(&self, key: &str) -> Option<&serde_json::Value> {
+        self.metadata
+            .as_object()
+            .and_then(|meta| meta.get("sigil"))
+            .and_then(|sigil| sigil.as_object())
+            .and_then(|sigil| sigil.get(key))
+    }
+
+    pub fn set_sigil_metadata(&mut self, key: &str, value: serde_json::Value) {
+        let mut metadata = match std::mem::take(&mut self.metadata) {
+            serde_json::Value::Object(map) => map,
+            serde_json::Value::Null => serde_json::Map::new(),
+            other => {
+                let mut map = serde_json::Map::new();
+                map.insert("_legacy".to_string(), other);
+                map
+            }
+        };
+
+        let sigil_value = metadata
+            .entry("sigil".to_string())
+            .or_insert_with(|| serde_json::json!({}));
+
+        if !sigil_value.is_object() {
+            *sigil_value = serde_json::json!({});
+        }
+
+        if let Some(sigil_meta) = sigil_value.as_object_mut() {
+            sigil_meta.insert(key.to_string(), value);
+        }
+
+        self.metadata = if metadata.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::Object(metadata)
+        };
+    }
+
+    pub fn task_outcome(&self) -> Option<TaskOutcomeRecord> {
+        self.sigil_metadata("task_outcome")
+            .cloned()
+            .and_then(|value| serde_json::from_value(value).ok())
+    }
+
+    pub fn set_task_outcome(&mut self, outcome: &TaskOutcomeRecord) {
+        if let Ok(value) = serde_json::to_value(outcome) {
+            self.set_sigil_metadata("task_outcome", value);
+        }
+    }
+
+    pub fn runtime(&self) -> Option<serde_json::Value> {
+        self.sigil_metadata("runtime").cloned()
+    }
+
+    pub fn outcome_summary(&self) -> Option<String> {
+        self.task_outcome()
+            .map(|outcome| outcome.summary)
+            .filter(|summary| !summary.trim().is_empty())
+            .or_else(|| self.closed_reason.clone())
+    }
+
+    pub fn blocker_context(&self) -> Option<String> {
+        self.task_outcome()
+            .and_then(|outcome| {
+                outcome
+                    .reason
+                    .filter(|reason| !reason.trim().is_empty())
+                    .or_else(|| {
+                        (!outcome.summary.trim().is_empty()).then_some(outcome.summary)
+                    })
+            })
+            .or_else(|| self.closed_reason.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Task, TaskId, TaskOutcomeKind, TaskOutcomeRecord};
+
+    #[test]
+    fn task_outcome_round_trips_through_sigil_metadata() {
+        let mut task = Task::new(TaskId::from("sg-001"), "Outcome");
+        let outcome = TaskOutcomeRecord {
+            kind: TaskOutcomeKind::Blocked,
+            summary: "Waiting on staging credentials".to_string(),
+            reason: Some("Which staging account should be used?".to_string()),
+            next_action: Some("await_operator_input".to_string()),
+        };
+
+        task.set_task_outcome(&outcome);
+
+        assert_eq!(task.task_outcome(), Some(outcome));
+    }
+
+    #[test]
+    fn set_sigil_metadata_preserves_legacy_metadata() {
+        let mut task = Task::new(TaskId::from("sg-002"), "Legacy");
+        task.metadata = serde_json::json!("legacy");
+
+        task.set_sigil_metadata("runtime", serde_json::json!({"phase": "act"}));
+
+        assert_eq!(
+            task.metadata.pointer("/_legacy").and_then(|value| value.as_str()),
+            Some("legacy")
+        );
+        assert_eq!(
+            task.metadata
+                .pointer("/sigil/runtime/phase")
+                .and_then(|value| value.as_str()),
+            Some("act")
+        );
     }
 }

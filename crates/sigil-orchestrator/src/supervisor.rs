@@ -1459,11 +1459,10 @@ impl Supervisor {
         let new_depth = current_depth + 1;
         let new_label = format!("{ESCALATION_LABEL_PREFIX}{new_depth}");
 
-        // Extract the blocker question from closed_reason or description.
+        // Extract the blocker context from the typed task outcome when available.
         let blocker_context = task
-            .closed_reason
-            .as_deref()
-            .unwrap_or("(no blocker details captured)");
+            .blocker_context()
+            .unwrap_or_else(|| "(no blocker details captured)".to_string());
 
         info!(
             project = %self.project_name,
@@ -1526,7 +1525,9 @@ impl Supervisor {
                 return; // Already notified, waiting for human.
             }
             // Fire human escalation through gate channels.
-            let summary = task.closed_reason.as_deref().unwrap_or("(no details)");
+            let summary = task
+                .outcome_summary()
+                .unwrap_or_else(|| "(no details)".to_string());
             let msg = format!(
                 "BLOCKED: {}/{} — {}\n\n{}\n\nThis task has exhausted all automated resolution attempts.",
                 self.project_name, task.id, task.subject, summary

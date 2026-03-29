@@ -16,4 +16,6 @@ pub use dependency_inference::{InferredDependency, infer_dependencies};
 pub use mission::Mission;
 pub use query::TaskQuery;
 pub use store::TaskBoard;
-pub use task::{Checkpoint, Priority, Task, TaskId, TaskStatus};
+pub use task::{
+    Checkpoint, Priority, Task, TaskId, TaskOutcomeKind, TaskOutcomeRecord, TaskStatus,
+};

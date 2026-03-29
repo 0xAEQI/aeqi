@@ -134,6 +134,65 @@ fn resolve_web_chat_id(
     agency_chat_id()
 }
 
+fn task_snapshot(task: &sigil_tasks::Task) -> serde_json::Value {
+    serde_json::json!({
+        "id": task.id.0,
+        "subject": task.subject,
+        "status": task.status.to_string(),
+        "closed_reason": task.closed_reason,
+        "runtime": task.runtime(),
+        "outcome": task.task_outcome(),
+    })
+}
+
+fn merge_timeline_metadata(
+    metadata: Option<&serde_json::Value>,
+    task: Option<serde_json::Value>,
+) -> Option<serde_json::Value> {
+    match (metadata.cloned(), task) {
+        (None, None) => None,
+        (Some(mut metadata), Some(task)) => {
+            if let Some(object) = metadata.as_object_mut() {
+                object.insert("task".to_string(), task);
+                Some(metadata)
+            } else {
+                Some(serde_json::json!({
+                    "raw": metadata,
+                    "task": task,
+                }))
+            }
+        }
+        (Some(metadata), None) => Some(metadata),
+        (None, Some(task)) => Some(serde_json::json!({ "task": task })),
+    }
+}
+
+async fn find_task_snapshot(
+    registry: &Arc<ProjectRegistry>,
+    project_hint: Option<&str>,
+    task_id: &str,
+) -> Option<serde_json::Value> {
+    if let Some(project_name) = project_hint
+        && let Some(board) = registry.get_task_board(project_name).await
+    {
+        let board = board.lock().await;
+        if let Some(task) = board.get(task_id) {
+            return Some(task_snapshot(task));
+        }
+    }
+
+    for project_name in registry.project_names().await {
+        if let Some(board) = registry.get_task_board(&project_name).await {
+            let board = board.lock().await;
+            if let Some(task) = board.get(task_id) {
+                return Some(task_snapshot(task));
+            }
+        }
+    }
+
+    None
+}
+
 fn attach_chat_id(mut payload: serde_json::Value, chat_id: i64) -> serde_json::Value {
     payload["chat_id"] = serde_json::json!(chat_id);
     payload
@@ -1374,7 +1433,8 @@ impl Daemon {
                                     "updated_at": task.updated_at.map(|t| t.to_rfc3339()),
                                     "closed_at": task.closed_at.map(|t| t.to_rfc3339()),
                                     "closed_reason": task.closed_reason,
-                                    "runtime": task.metadata.pointer("/sigil/runtime").cloned(),
+                                    "runtime": task.runtime(),
+                                    "task_outcome": task.task_outcome(),
                                 }));
                             }
                         }
@@ -1495,6 +1555,8 @@ impl Daemon {
                                                 "id": task.id.0,
                                                 "status": task.status.to_string(),
                                                 "closed_reason": task.closed_reason,
+                                                "runtime": task.runtime(),
+                                                "task_outcome": task.task_outcome(),
                                             }
                                         }),
                                         Err(e) => {
@@ -1767,21 +1829,35 @@ impl Daemon {
                             );
                             match engine.get_timeline(resolved_chat_id, limit, offset).await {
                                 Ok(events) => {
-                                    let items: Vec<serde_json::Value> = events
-                                        .iter()
-                                        .map(|event| {
-                                            serde_json::json!({
-                                                "id": event.id,
-                                                "chat_id": event.chat_id,
-                                                "event_type": event.event_type,
-                                                "role": event.role,
-                                                "content": event.content,
-                                                "timestamp": event.timestamp.to_rfc3339(),
-                                                "source": event.source,
-                                                "metadata": event.metadata,
-                                            })
-                                        })
-                                        .collect();
+                                    let mut items = Vec::with_capacity(events.len());
+                                    for event in &events {
+                                        let task_snapshot = if let Some(metadata) = event.metadata.as_ref()
+                                        {
+                                            if let Some(task_id) =
+                                                metadata.get("task_id").and_then(|value| value.as_str())
+                                            {
+                                                let project_hint = metadata
+                                                    .get("project")
+                                                    .and_then(|value| value.as_str());
+                                                find_task_snapshot(&registry, project_hint, task_id).await
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        };
+
+                                        items.push(serde_json::json!({
+                                            "id": event.id,
+                                            "chat_id": event.chat_id,
+                                            "event_type": event.event_type,
+                                            "role": event.role,
+                                            "content": event.content,
+                                            "timestamp": event.timestamp.to_rfc3339(),
+                                            "source": event.source,
+                                            "metadata": merge_timeline_metadata(event.metadata.as_ref(), task_snapshot),
+                                        }));
+                                    }
                                     serde_json::json!({"ok": true, "events": items, "chat_id": resolved_chat_id})
                                 }
                                 Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
@@ -2366,14 +2442,14 @@ impl Daemon {
                         &mut skills,
                     );
 
-                    // Shared subagents.
+                    // Shared agents.
                     scan_skills(
-                        &cwd.join("projects").join("shared").join("subagents"),
-                        "shared/subagents",
+                        &cwd.join("projects").join("shared").join("agents"),
+                        "shared/agents",
                         &mut skills,
                     );
 
-                    // Per-project skills + subagents.
+                    // Per-project skills + agents.
                     for entry in std::fs::read_dir(cwd.join("projects"))
                         .into_iter()
                         .flatten()
@@ -2385,8 +2461,8 @@ impl Daemon {
                         }
                         scan_skills(&entry.path().join("skills"), &project, &mut skills);
                         scan_skills(
-                            &entry.path().join("subagents"),
-                            &format!("{project}/subagents"),
+                            &entry.path().join("agents"),
+                            &format!("{project}/agents"),
                             &mut skills,
                         );
                     }

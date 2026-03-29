@@ -240,6 +240,13 @@ impl ChatEngine {
         };
     }
 
+    fn task_completion_reason(task: &sigil_tasks::Task) -> Option<String> {
+        match task.status {
+            sigil_tasks::TaskStatus::Blocked => task.blocker_context(),
+            _ => task.outcome_summary(),
+        }
+    }
+
     fn append_council_input(description: &mut String, council_input: &[(String, String)]) {
         if council_input.is_empty() {
             return;
@@ -775,7 +782,9 @@ impl ChatEngine {
             let status = {
                 if let Some(rig) = self.registry.get_project(&project).await {
                     let store = rig.tasks.lock().await;
-                    store.get(&qid).map(|b| (b.status, b.closed_reason.clone()))
+                    store
+                        .get(&qid)
+                        .map(|b| (b.status, Self::task_completion_reason(b)))
                 } else {
                     None
                 }
@@ -863,9 +872,7 @@ impl ChatEngine {
         let status = {
             if let Some(rig) = self.registry.get_project(&project).await {
                 let store = rig.tasks.lock().await;
-                store
-                    .get(task_id)
-                    .map(|b| (b.status, b.closed_reason.clone()))
+                store.get(task_id).map(|b| (b.status, Self::task_completion_reason(b)))
             } else {
                 None
             }
@@ -1418,7 +1425,7 @@ impl ChatEngine {
                             store.get(&task_id).map(|b| {
                                 (
                                     b.status == sigil_tasks::TaskStatus::Done,
-                                    b.closed_reason.clone(),
+                                    b.outcome_summary(),
                                 )
                             })
                         } else {

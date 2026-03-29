@@ -796,6 +796,13 @@ impl Tool for QuestDetailTool {
                     if let Some(ref assignee) = task.assignee {
                         out.push_str(&format!("Assignee: {}\n", assignee));
                     }
+                    if let Some(outcome) = task.task_outcome() {
+                        out.push_str(&format!("Outcome: {}\n", outcome.kind));
+                        out.push_str(&format!("Outcome summary: {}\n", outcome.summary));
+                        if let Some(reason) = outcome.reason {
+                            out.push_str(&format!("Outcome reason: {}\n", reason));
+                        }
+                    }
                     if let Some(ref reason) = task.closed_reason {
                         out.push_str(&format!("Closed reason: {}\n", reason));
                     }
@@ -864,6 +871,10 @@ impl Tool for QuestCancelTool {
                         q.status = sigil_tasks::TaskStatus::Cancelled;
                         q.assignee = None;
                         q.closed_reason = Some(reason.to_string());
+                        q.set_task_outcome(&sigil_tasks::TaskOutcomeRecord::new(
+                            sigil_tasks::TaskOutcomeKind::Cancelled,
+                            reason,
+                        ));
                     }) {
                         Ok(_) => {
                             return Ok(ToolResult::success(format!("Task {task_id} cancelled.")));

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use tracing::debug;
 
 use crate::mission::Mission;
-use crate::task::{Task, TaskId, TaskStatus};
+use crate::task::{Task, TaskId, TaskOutcomeKind, TaskOutcomeRecord, TaskStatus};
 
 /// JSONL-based task store. One file per prefix, git-native.
 pub struct TaskBoard {
@@ -193,6 +193,7 @@ impl TaskBoard {
             b.status = TaskStatus::Done;
             b.closed_at = Some(chrono::Utc::now());
             b.closed_reason = Some(reason.to_string());
+            b.set_task_outcome(&TaskOutcomeRecord::new(TaskOutcomeKind::Done, reason));
         })?;
 
         self.cascade_parent_close(&task.id);
@@ -246,7 +247,8 @@ impl TaskBoard {
             if let Err(e) = self.update(&parent_id.0, |b| {
                 b.status = TaskStatus::Done;
                 b.closed_at = Some(chrono::Utc::now());
-                b.closed_reason = Some(reason);
+                b.closed_reason = Some(reason.clone());
+                b.set_task_outcome(&TaskOutcomeRecord::new(TaskOutcomeKind::Done, reason.clone()));
             }) {
                 debug!(parent = %parent_id, error = %e, "failed to auto-close parent task");
                 return;
@@ -264,6 +266,7 @@ impl TaskBoard {
             b.status = TaskStatus::Cancelled;
             b.closed_at = Some(chrono::Utc::now());
             b.closed_reason = Some(reason.to_string());
+            b.set_task_outcome(&TaskOutcomeRecord::new(TaskOutcomeKind::Cancelled, reason));
         })
     }
 
