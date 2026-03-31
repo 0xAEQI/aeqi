@@ -13,4 +13,4 @@ pub use provider::{
     ChatRequest, ChatResponse, ContentPart, Message, MessageContent, Provider, Role, StopReason,
     StreamEvent, ToolCall, ToolSpec, Usage,
 };
-pub use tool::{Tool, ToolResult};
+pub use tool::{InterruptBehavior, Tool, ToolResult};
