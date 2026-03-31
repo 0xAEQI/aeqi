@@ -285,6 +285,7 @@ pub struct Agent {
     observer: Arc<dyn Observer>,
     identity: Identity,
     memory: Option<Arc<dyn Memory>>,
+    chat_stream: Option<crate::chat_stream::ChatStreamSender>,
 }
 
 impl Agent {
@@ -302,6 +303,7 @@ impl Agent {
             observer,
             identity,
             memory: None,
+            chat_stream: None,
         }
     }
 
@@ -309,6 +311,19 @@ impl Agent {
     pub fn with_memory(mut self, memory: Arc<dyn Memory>) -> Self {
         self.memory = Some(memory);
         self
+    }
+
+    /// Attach a chat stream sender for real-time event streaming to clients.
+    pub fn with_chat_stream(mut self, sender: crate::chat_stream::ChatStreamSender) -> Self {
+        self.chat_stream = Some(sender);
+        self
+    }
+
+    /// Emit a chat stream event if a sender is attached.
+    fn emit(&self, event: crate::chat_stream::ChatStreamEvent) {
+        if let Some(ref tx) = self.chat_stream {
+            tx.send(event);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -472,6 +487,11 @@ impl Agent {
                 })
                 .await;
 
+            self.emit(crate::chat_stream::ChatStreamEvent::TurnStart {
+                turn: iterations,
+                model: active_model.clone(),
+            });
+
             // --- Call provider with retry ---
             let response = match self.call_with_retry(&request).await {
                 Ok(resp) => {
@@ -552,6 +572,21 @@ impl Agent {
                     completion_tokens: response.usage.completion_tokens,
                 })
                 .await;
+
+            // Emit text delta for chat stream.
+            if let Some(ref text) = response.content {
+                if !text.is_empty() {
+                    self.emit(crate::chat_stream::ChatStreamEvent::TextDelta {
+                        text: text.clone(),
+                    });
+                }
+            }
+
+            self.emit(crate::chat_stream::ChatStreamEvent::TurnComplete {
+                turn: iterations,
+                prompt_tokens: response.usage.prompt_tokens,
+                completion_tokens: response.usage.completion_tokens,
+            });
 
             // --- after_model hook ---
             match self
@@ -705,6 +740,10 @@ impl Agent {
                     name: tc.name.clone(),
                     input: tc.arguments.clone(),
                 });
+                self.emit(crate::chat_stream::ChatStreamEvent::ToolStart {
+                    tool_use_id: tc.id.clone(),
+                    tool_name: tc.name.clone(),
+                });
             }
 
             messages.push(Message {
@@ -814,6 +853,14 @@ impl Agent {
                             .observer
                             .after_tool(&name, &tr.output, tr.is_error)
                             .await;
+
+                        self.emit(crate::chat_stream::ChatStreamEvent::ToolComplete {
+                            tool_use_id: id.clone(),
+                            tool_name: name.clone(),
+                            success: !tr.is_error,
+                            output_preview: tr.output.chars().take(500).collect(),
+                            duration_ms,
+                        });
 
                         // Empty result injection — prevents model confusion on turn boundaries.
                         let output = if tr.output.trim().is_empty() && !tr.is_error {
@@ -996,6 +1043,14 @@ impl Agent {
                 iterations,
             })
             .await;
+
+        self.emit(crate::chat_stream::ChatStreamEvent::Complete {
+            stop_reason: format!("{:?}", stop_reason),
+            total_prompt_tokens: tracker.total_prompt_tokens,
+            total_completion_tokens: tracker.total_completion_tokens,
+            iterations,
+            cost_usd: 0.0, // Calculated by orchestrator layer
+        });
 
         info!(
             agent = %self.config.name,
@@ -1618,6 +1673,12 @@ impl Agent {
                 }),
             })
             .await;
+
+        self.emit(crate::chat_stream::ChatStreamEvent::Compacted {
+            original_messages: messages.len(),
+            remaining_messages: compacted.len(),
+            compaction_number: 0, // Caller tracks this
+        });
 
         info!(
             agent = %self.config.name,
