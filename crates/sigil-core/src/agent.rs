@@ -39,6 +39,26 @@ const PERSIST_PREVIEW_SIZE: usize = 2000;
 // Configuration
 // ---------------------------------------------------------------------------
 
+/// Session type — determines what the agent loop is allowed to do.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum SessionType {
+    /// Perpetual session (Telegram/Discord channel). Never ends.
+    /// Can self-delegate async sessions. The only session type that
+    /// can spawn background work on itself.
+    Perpetual,
+    /// Async session (CLI chat, task, cron). Runs to completion.
+    /// Cannot spawn async sessions on itself. Can delegate to
+    /// ephemeral subagents (different identity) but they also
+    /// cannot delegate (no recursion).
+    Async,
+}
+
+impl Default for SessionType {
+    fn default() -> Self {
+        Self::Async
+    }
+}
+
 /// Configuration for an agent loop.
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
@@ -87,6 +107,8 @@ pub struct AgentConfig {
     /// conversation state after each compaction. On restart, if the file exists,
     /// the agent resumes from the saved state instead of starting fresh.
     pub session_file: Option<PathBuf>,
+    /// Session type — Perpetual (never ends, can self-delegate) or Async (runs to completion).
+    pub session_type: SessionType,
 }
 
 impl Default for AgentConfig {
@@ -110,6 +132,7 @@ impl Default for AgentConfig {
             fallback_model: None,
             persist_dir: None,
             session_file: None,
+            session_type: SessionType::Async,
         }
     }
 }
