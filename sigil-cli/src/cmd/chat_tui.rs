@@ -23,6 +23,7 @@ struct ChatLine {
     style: Style,
 }
 
+#[allow(dead_code)]
 struct AppState {
     messages: Vec<ChatLine>,
     input: String,

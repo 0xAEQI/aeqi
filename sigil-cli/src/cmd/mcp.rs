@@ -491,7 +491,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                             }
                         });
 
-                        let mut result = if let Some(val) = cached_hit {
+                        let result = if let Some(val) = cached_hit {
                             Ok(val)
                         } else {
                             recall_cache.remove(&cache_key);
