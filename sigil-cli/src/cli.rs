@@ -226,6 +226,9 @@ pub enum Commands {
         action: GraphAction,
     },
 
+    /// Interactive streaming chat with a Sigil agent (TUI).
+    Chat,
+
     /// Run as an MCP (Model Context Protocol) server.
     Mcp,
 }

@@ -2,6 +2,7 @@ pub(crate) mod agent;
 pub(crate) mod audit;
 pub(crate) mod blackboard;
 pub(crate) mod chat;
+pub(crate) mod chat_tui;
 pub(crate) mod config;
 pub(crate) mod cron;
 pub(crate) mod daemon;
