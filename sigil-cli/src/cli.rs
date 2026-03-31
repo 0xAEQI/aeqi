@@ -329,9 +329,37 @@ pub enum BlackboardAction {
 pub enum AgentAction {
     /// List all discovered agents (from disk + TOML).
     List,
+    /// Spawn a new persistent agent from a template file.
+    Spawn {
+        /// Path to the agent template file (frontmatter + system prompt).
+        template: String,
+        /// Override project scope from template.
+        #[arg(short = 'r', long = "project", alias = "rig")]
+        project: Option<String>,
+    },
+    /// Show details of a persistent agent.
+    Show {
+        /// Agent name.
+        name: String,
+    },
+    /// Retire a persistent agent (preserves memory).
+    Retire {
+        /// Agent name.
+        name: String,
+    },
+    /// Reactivate a paused or retired agent.
+    Activate {
+        /// Agent name.
+        name: String,
+    },
+    /// List all persistent agents from the registry.
+    Registry {
+        /// Filter by project.
+        #[arg(short = 'r', long = "project", alias = "rig")]
+        project: Option<String>,
+    },
     /// Migrate `[[agents]]` from sigil.toml to agent.toml files on disk.
     Migrate {
-        /// Overwrite existing agent.toml files.
         #[arg(long)]
         force: bool,
     },

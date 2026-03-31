@@ -86,6 +86,9 @@ pub struct AgentWorker {
     pub event_broadcaster: Option<Arc<EventBroadcaster>>,
     /// Optional debounced write queue for batching reflection memory writes.
     pub write_queue: Option<Arc<tokio::sync::Mutex<sigil_memory::debounce::WriteQueue>>>,
+    /// Persistent agent UUID for entity-scoped memory. When set, memory queries
+    /// include this agent's entity memories alongside domain/system memories.
+    pub persistent_agent_id: Option<String>,
 }
 
 impl AgentWorker {
@@ -130,6 +133,7 @@ impl AgentWorker {
             middleware_chain: None,
             event_broadcaster: None,
             write_queue: None,
+            persistent_agent_id: None,
         }
     }
 
@@ -170,6 +174,7 @@ impl AgentWorker {
             middleware_chain: None,
             event_broadcaster: None,
             write_queue: None,
+            persistent_agent_id: None,
         }
     }
 
@@ -186,6 +191,12 @@ impl AgentWorker {
 
     pub fn with_project_dir(mut self, project_dir: PathBuf) -> Self {
         self.project_dir = Some(project_dir);
+        self
+    }
+
+    /// Set the persistent agent UUID for entity-scoped memory.
+    pub fn with_persistent_agent(mut self, agent_id: String) -> Self {
+        self.persistent_agent_id = Some(agent_id);
         self
     }
 
@@ -544,6 +555,7 @@ impl AgentWorker {
         );
 
         // Enrich identity with dynamic memory recall via query planner.
+        // When a persistent agent UUID is set, also recall entity-scoped memories.
         let enriched_identity = if let Some(ref mem) = self.memory {
             // Try query planner first — generates typed, prioritized queries.
             let entries = match std::panic::catch_unwind(|| {
@@ -588,9 +600,26 @@ impl AgentWorker {
                 }
             };
 
-            if !entries.is_empty() {
+            // Also recall entity-scoped memories for persistent agents.
+            let mut all = entries;
+            if let Some(ref agent_id) = self.persistent_agent_id {
+                let eq = sigil_core::traits::MemoryQuery::new(&task_context, 10)
+                    .with_scope(MemoryScope::Entity)
+                    .with_entity(agent_id.clone());
+                if let Ok(entity_entries) = mem.search(&eq).await {
+                    debug!(
+                        worker = %self.name,
+                        agent_id = %agent_id,
+                        entity_memories = entity_entries.len(),
+                        "entity memory recall for persistent agent"
+                    );
+                    all.extend(entity_entries);
+                }
+            }
+
+            if !all.is_empty() {
                 let mut id = self.identity.clone();
-                let dynamic = entries
+                let dynamic = all
                     .iter()
                     .map(|e| format!("- [{}] {}: {}", e.scope, e.key, e.content))
                     .collect::<Vec<_>>()
