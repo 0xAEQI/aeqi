@@ -19,33 +19,106 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, info};
 
-/// A persistent agent identity.
+/// A persistent agent identity — one record = one agent ready to go.
+///
+/// Created from a template with YAML frontmatter:
+/// ```text
+/// ---
+/// name: shadow
+/// display_name: "Shadow — Your Dark Butler"
+/// model: anthropic/claude-sonnet-4.6
+/// capabilities: [spawn_agents, spawn_projects]
+/// ---
+///
+/// You are Shadow, the user's personal assistant...
+/// ```
+///
+/// Frontmatter → DB columns (searchable). Body → system_prompt field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistentAgent {
     /// Stable UUID — used as entity_id for memory scoping.
     pub id: String,
-    /// Human-readable name (e.g., "rei", "ops-monitor").
+    /// Human-readable name (unique, e.g., "shadow", "sigil-architect").
     pub name: String,
-    /// Display name (e.g., "Rei — The Living Sigil").
+    /// Display name shown in UI.
     pub display_name: Option<String>,
-    /// The identity template this agent was created from (e.g., "rei", "researcher").
-    pub template: String,
+    /// The full system prompt — the agent's identity, personality, role,
+    /// instructions. Stored in DB. This IS the agent.
+    pub system_prompt: String,
     /// Project scope. None = root (cross-project).
     pub project: Option<String>,
     /// Department scope within project. None = project-level.
     pub department: Option<String>,
-    /// Preferred model for this agent.
+    /// Preferred model.
     pub model: Option<String>,
+    /// Capabilities beyond normal tools.
+    /// "spawn_agents" = can create persistent agents (system leader).
+    /// "spawn_projects" = can create projects (system leader).
+    pub capabilities: Vec<String>,
     /// Agent status.
     pub status: AgentStatus,
-    /// When the agent was created.
     pub created_at: DateTime<Utc>,
-    /// When the agent last ran a session.
     pub last_active: Option<DateTime<Utc>>,
-    /// Total sessions this agent has participated in.
     pub session_count: u32,
-    /// Total tokens consumed across all sessions.
     pub total_tokens: u64,
+}
+
+/// Frontmatter parsed from a template file.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentTemplateFrontmatter {
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub model: Option<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    pub project: Option<String>,
+    pub department: Option<String>,
+}
+
+/// Parse a template with YAML frontmatter into (frontmatter, system_prompt body).
+pub fn parse_agent_template(content: &str) -> (AgentTemplateFrontmatter, String) {
+    let trimmed = content.trim();
+    if !trimmed.starts_with("---") {
+        return (AgentTemplateFrontmatter::default(), content.to_string());
+    }
+
+    if let Some(end) = trimmed[3..].find("\n---") {
+        let yaml_block = trimmed[3..3 + end].trim();
+        let body = trimmed[3 + end + 4..].trim();
+
+        match serde_json::from_value::<AgentTemplateFrontmatter>(parse_simple_yaml(yaml_block)) {
+            Ok(fm) => (fm, body.to_string()),
+            Err(_) => (AgentTemplateFrontmatter::default(), content.to_string()),
+        }
+    } else {
+        (AgentTemplateFrontmatter::default(), content.to_string())
+    }
+}
+
+/// Minimal YAML-like parser for frontmatter key: value pairs.
+fn parse_simple_yaml(text: &str) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((key, val)) = line.split_once(':') {
+            let key = key.trim().to_string();
+            let val = val.trim().trim_matches('"');
+
+            if val.starts_with('[') && val.ends_with(']') {
+                let items: Vec<serde_json::Value> = val[1..val.len() - 1]
+                    .split(',')
+                    .map(|s| serde_json::Value::String(s.trim().trim_matches('"').to_string()))
+                    .collect();
+                map.insert(key, serde_json::Value::Array(items));
+            } else {
+                map.insert(key, serde_json::Value::String(val.to_string()));
+            }
+        }
+    }
+    serde_json::Value::Object(map)
 }
 
 /// Lifecycle status of a persistent agent.
@@ -88,10 +161,11 @@ impl AgentRegistry {
                  id TEXT PRIMARY KEY,
                  name TEXT NOT NULL UNIQUE,
                  display_name TEXT,
-                 template TEXT NOT NULL,
+                 system_prompt TEXT NOT NULL DEFAULT '',
                  project TEXT,
                  department TEXT,
                  model TEXT,
+                 capabilities TEXT NOT NULL DEFAULT '[]',
                  status TEXT NOT NULL DEFAULT 'active',
                  created_at TEXT NOT NULL,
                  last_active TEXT,
@@ -108,27 +182,49 @@ impl AgentRegistry {
         })
     }
 
-    /// Spawn a new persistent agent from a template.
+    /// Spawn a new persistent agent from a template string (frontmatter + prompt body).
+    pub async fn spawn_from_template(
+        &self,
+        template_content: &str,
+        project_override: Option<&str>,
+    ) -> Result<PersistentAgent> {
+        let (fm, system_prompt) = parse_agent_template(template_content);
+        let name = fm.name.unwrap_or_else(|| format!("agent-{}", &uuid::Uuid::new_v4().to_string()[..8]));
+        self.spawn(
+            &name,
+            fm.display_name.as_deref(),
+            &system_prompt,
+            project_override.or(fm.project.as_deref()),
+            fm.department.as_deref(),
+            fm.model.as_deref(),
+            &fm.capabilities,
+        ).await
+    }
+
+    /// Spawn a new persistent agent directly.
     pub async fn spawn(
         &self,
         name: &str,
-        template: &str,
+        display_name: Option<&str>,
+        system_prompt: &str,
         project: Option<&str>,
         department: Option<&str>,
         model: Option<&str>,
-        display_name: Option<&str>,
+        capabilities: &[String],
     ) -> Result<PersistentAgent> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now();
+        let caps_json = serde_json::to_string(capabilities)?;
 
         let agent = PersistentAgent {
             id: id.clone(),
             name: name.to_string(),
             display_name: display_name.map(|s| s.to_string()),
-            template: template.to_string(),
+            system_prompt: system_prompt.to_string(),
             project: project.map(|s| s.to_string()),
             department: department.map(|s| s.to_string()),
             model: model.map(|s| s.to_string()),
+            capabilities: capabilities.to_vec(),
             status: AgentStatus::Active,
             created_at: now,
             last_active: None,
@@ -138,22 +234,23 @@ impl AgentRegistry {
 
         let db = self.db.lock().await;
         db.execute(
-            "INSERT INTO agents (id, name, display_name, template, project, department, model, status, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO agents (id, name, display_name, system_prompt, project, department, model, capabilities, status, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 agent.id,
                 agent.name,
                 agent.display_name,
-                agent.template,
+                agent.system_prompt,
                 agent.project,
                 agent.department,
                 agent.model,
+                caps_json,
                 agent.status.to_string(),
                 agent.created_at.to_rfc3339(),
             ],
         )?;
 
-        info!(id = %agent.id, name = %agent.name, template = %template, "persistent agent spawned");
+        info!(id = %agent.id, name = %agent.name, "persistent agent spawned");
         Ok(agent)
     }
 
@@ -284,14 +381,18 @@ fn row_to_agent(row: &rusqlite::Row) -> PersistentAgent {
         _ => AgentStatus::Active,
     };
 
+    let caps_str: String = row.get("capabilities").unwrap_or_else(|_| "[]".to_string());
+    let capabilities: Vec<String> = serde_json::from_str(&caps_str).unwrap_or_default();
+
     PersistentAgent {
         id: row.get("id").unwrap_or_default(),
         name: row.get("name").unwrap_or_default(),
         display_name: row.get("display_name").ok(),
-        template: row.get("template").unwrap_or_default(),
+        system_prompt: row.get("system_prompt").unwrap_or_default(),
         project: row.get("project").ok(),
         department: row.get("department").ok(),
         model: row.get("model").ok(),
+        capabilities,
         status,
         created_at: row
             .get::<_, String>("created_at")
@@ -326,25 +427,27 @@ mod tests {
     async fn spawn_and_get() {
         let reg = test_registry().await;
         let agent = reg
-            .spawn("rei", "rei", None, None, Some("claude-sonnet-4.6"), Some("Rei"))
+            .spawn("shadow", Some("Shadow"), "You are Shadow.", None, None, Some("claude-sonnet-4.6"), &["spawn_agents".into()])
             .await
             .unwrap();
 
-        assert_eq!(agent.name, "rei");
-        assert_eq!(agent.template, "rei");
+        assert_eq!(agent.name, "shadow");
+        assert_eq!(agent.system_prompt, "You are Shadow.");
+        assert_eq!(agent.capabilities, vec!["spawn_agents"]);
         assert!(agent.project.is_none());
         assert_eq!(agent.status, AgentStatus::Active);
         assert_eq!(agent.session_count, 0);
 
-        let fetched = reg.get_by_name("rei").await.unwrap().unwrap();
+        let fetched = reg.get_by_name("shadow").await.unwrap().unwrap();
         assert_eq!(fetched.id, agent.id);
+        assert_eq!(fetched.system_prompt, "You are Shadow.");
     }
 
     #[tokio::test]
     async fn spawn_project_scoped() {
         let reg = test_registry().await;
         let agent = reg
-            .spawn("sigil-lead", "rei", Some("sigil"), None, None, None)
+            .spawn("sigil-lead", None, "Lead for sigil.", Some("sigil"), None, None, &[])
             .await
             .unwrap();
 
@@ -362,7 +465,7 @@ mod tests {
     async fn record_session_updates_stats() {
         let reg = test_registry().await;
         let agent = reg
-            .spawn("test-agent", "researcher", None, None, None, None)
+            .spawn("test-agent", None, "Test agent.", None, None, None, &[])
             .await
             .unwrap();
 
@@ -378,7 +481,7 @@ mod tests {
     #[tokio::test]
     async fn status_lifecycle() {
         let reg = test_registry().await;
-        reg.spawn("lifecycle", "rei", None, None, None, None)
+        reg.spawn("lifecycle", None, "Lifecycle test.", None, None, None, &[])
             .await
             .unwrap();
 
@@ -402,10 +505,10 @@ mod tests {
     #[tokio::test]
     async fn default_for_project() {
         let reg = test_registry().await;
-        reg.spawn("root-rei", "rei", None, None, None, None)
+        reg.spawn("root-shadow", None, "Root agent.", None, None, None, &[])
             .await
             .unwrap();
-        reg.spawn("sigil-lead", "rei", Some("sigil"), None, None, None)
+        reg.spawn("sigil-lead", None, "Sigil lead.", Some("sigil"), None, None, &[])
             .await
             .unwrap();
 
@@ -415,20 +518,42 @@ mod tests {
 
         // Unknown project falls back to root.
         let default = reg.default_for_project(Some("unknown")).await.unwrap().unwrap();
-        assert_eq!(default.name, "root-rei");
+        assert_eq!(default.name, "root-shadow");
 
         // No project → root.
         let default = reg.default_for_project(None).await.unwrap().unwrap();
-        assert_eq!(default.name, "root-rei");
+        assert_eq!(default.name, "root-shadow");
     }
 
     #[tokio::test]
     async fn duplicate_name_rejected() {
         let reg = test_registry().await;
-        reg.spawn("unique", "rei", None, None, None, None)
+        reg.spawn("unique", None, "Unique.", None, None, None, &[])
             .await
             .unwrap();
-        let result = reg.spawn("unique", "rei", None, None, None, None).await;
+        let result = reg.spawn("unique", None, "Dup.", None, None, None, &[]).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn spawn_from_template_parses_frontmatter() {
+        let reg = test_registry().await;
+        let template = r#"---
+name: shadow
+display_name: "Shadow — Your Dark Butler"
+model: anthropic/claude-sonnet-4.6
+capabilities: [spawn_agents, spawn_projects]
+---
+
+You are Shadow, the user's personal assistant.
+You learn everything about the user aggressively.
+"#;
+        let agent = reg.spawn_from_template(template, None).await.unwrap();
+        assert_eq!(agent.name, "shadow");
+        assert_eq!(agent.display_name.as_deref(), Some("Shadow — Your Dark Butler"));
+        assert_eq!(agent.model.as_deref(), Some("anthropic/claude-sonnet-4.6"));
+        assert_eq!(agent.capabilities, vec!["spawn_agents", "spawn_projects"]);
+        assert!(agent.system_prompt.contains("personal assistant"));
+        assert!(agent.project.is_none()); // Root scope
     }
 }
