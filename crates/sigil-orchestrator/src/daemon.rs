@@ -20,7 +20,6 @@ use crate::proactive;
 use crate::reflection::Reflection;
 use crate::registry::ProjectRegistry;
 use crate::agent_registry::AgentRegistry;
-use crate::schedule::ScheduleStore;
 use crate::trigger::TriggerStore;
 use crate::session_tracker::SessionTracker;
 use crate::watchdog::WatchdogEngine;
@@ -210,7 +209,6 @@ pub struct Daemon {
     pub pulses: Vec<Heartbeat>,
     pub reflections: Vec<Reflection>,
     pub lifecycle: Option<LifecycleEngine>,
-    pub cron_store: Option<Arc<Mutex<ScheduleStore>>>,
     pub trigger_store: Option<Arc<TriggerStore>>,
     pub agent_registry: Option<Arc<AgentRegistry>>,
     pub watchdog: Option<WatchdogEngine>,
@@ -245,7 +243,6 @@ impl Daemon {
             pulses: Vec::new(),
             reflections: Vec::new(),
             lifecycle: None,
-            cron_store: None,
             trigger_store: None,
             agent_registry: None,
             watchdog: None,
@@ -377,11 +374,6 @@ impl Daemon {
     /// Set the lifecycle engine for autonomous agent processes.
     pub fn set_lifecycle(&mut self, engine: LifecycleEngine) {
         self.lifecycle = Some(engine);
-    }
-
-    /// Set the cron store for scheduled jobs (legacy, prefer set_trigger_store).
-    pub fn set_cron_store(&mut self, store: ScheduleStore) {
-        self.cron_store = Some(Arc::new(Mutex::new(store)));
     }
 
     /// Set the trigger store for agent-owned triggers.
@@ -610,7 +602,6 @@ impl Daemon {
                     let registry = self.registry.clone();
                     let dispatch_bus = self.dispatch_bus.clone();
                     let pulse_count = self.pulses.len();
-                    let cron_store = self.cron_store.clone();
                     let trigger_store = self.trigger_store.clone();
                     let chat_engine = self.chat_engine.clone();
                     let note_store = self.note_store.clone();
@@ -624,7 +615,6 @@ impl Daemon {
                             registry,
                             dispatch_bus,
                             pulse_count,
-                            cron_store,
                             trigger_store,
                             chat_engine,
                             note_store,
@@ -655,7 +645,7 @@ impl Daemon {
 
         info!(
             pulses = self.pulses.len(),
-            cron = self.cron_store.is_some(),
+            triggers = self.trigger_store.is_some(),
             "daemon started"
         );
 
@@ -706,50 +696,7 @@ impl Daemon {
                 }
             }
 
-            // 5. Run due cron jobs.
-            if let Some(ref cron_store) = self.cron_store {
-                let due_jobs = {
-                    let store = cron_store.lock().await;
-                    store
-                        .due_jobs()
-                        .into_iter()
-                        .map(|j| {
-                            (
-                                j.name.clone(),
-                                j.project.clone(),
-                                j.prompt.clone(),
-                                j.isolated,
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                };
-
-                for (name, project, prompt, _isolated) in due_jobs {
-                    info!(name = %name, project = %project, "cron job triggered");
-
-                    match self
-                        .registry
-                        .assign(&project, &format!("[cron] {name}"), &prompt)
-                        .await
-                    {
-                        Ok(task) => {
-                            info!(task = %task.id, "cron job created task");
-                        }
-                        Err(e) => {
-                            warn!(name = %name, error = %e, "cron job failed to create task");
-                        }
-                    }
-
-                    let mut store = cron_store.lock().await;
-                    let _ = store.mark_run(&name);
-                }
-
-                // Cleanup completed one-shots.
-                let mut store = cron_store.lock().await;
-                let _ = store.cleanup_oneshots();
-            }
-
-            // 5a. Run due triggers (schedule + once types).
+            // 5. Run due triggers (schedule + once types).
             if let Some(ref trigger_store) = self.trigger_store {
                 match trigger_store.due_schedule_triggers().await {
                     Ok(due) => {
@@ -1210,7 +1157,6 @@ impl Daemon {
         registry: Arc<ProjectRegistry>,
         dispatch_bus: Arc<DispatchBus>,
         pulse_count: usize,
-        cron_store: Option<Arc<Mutex<ScheduleStore>>>,
         trigger_store: Option<Arc<TriggerStore>>,
         chat_engine: Option<Arc<ChatEngine>>,
         note_store: Option<Arc<NoteStore>>,
@@ -1226,7 +1172,6 @@ impl Daemon {
                 Ok((stream, _)) => {
                     let registry = registry.clone();
                     let dispatch_bus = dispatch_bus.clone();
-                    let cron_store = cron_store.clone();
                     let trigger_store = trigger_store.clone();
                     let chat_engine = chat_engine.clone();
                     let note_store = note_store.clone();
@@ -1238,7 +1183,6 @@ impl Daemon {
                             registry,
                             dispatch_bus,
                             pulse_count,
-                            cron_store,
                             trigger_store,
                             chat_engine,
                             note_store,
@@ -1267,7 +1211,6 @@ impl Daemon {
         registry: Arc<ProjectRegistry>,
         dispatch_bus: Arc<DispatchBus>,
         pulse_count: usize,
-        cron_store: Option<Arc<Mutex<ScheduleStore>>>,
         trigger_store: Option<Arc<TriggerStore>>,
         chat_engine: Option<Arc<ChatEngine>>,
         note_store: Option<Arc<NoteStore>>,
@@ -1294,11 +1237,6 @@ impl Daemon {
                     let worker_count = registry.total_max_workers().await;
                     let dispatch_health = dispatch_bus.health(ACK_RETRY_AGE_SECS).await;
                     let mail_count = dispatch_health.unread;
-                    let cron_count = if let Some(ref cs) = cron_store {
-                        cs.lock().await.jobs.len()
-                    } else {
-                        0
-                    };
                     let trigger_count = if let Some(ref ts) = trigger_store {
                         ts.count_enabled().await.unwrap_or(0)
                     } else {
@@ -1328,7 +1266,6 @@ impl Daemon {
                         "project_count": project_names.len(),
                         "max_workers": worker_count,
                         "pulses": pulse_count,
-                        "cron_jobs": cron_count,
                         "triggers": trigger_count,
                         "pending_mail": mail_count,
                         "dispatch_health": {
@@ -2258,34 +2195,6 @@ impl Daemon {
                     None => serde_json::json!({"ok": true, "triggers": []}),
                 },
 
-                "crons" => match &cron_store {
-                    Some(store) => {
-                        let store = store.lock().await;
-                        let jobs: Vec<serde_json::Value> = store
-                            .jobs
-                            .iter()
-                            .map(|j| {
-                                let schedule_str = match &j.schedule {
-                                    crate::schedule::CronSchedule::Cron { expr } => expr.clone(),
-                                    crate::schedule::CronSchedule::Once { at } => {
-                                        format!("once@{}", at.to_rfc3339())
-                                    }
-                                };
-                                serde_json::json!({
-                                    "name": j.name,
-                                    "project": j.project,
-                                    "schedule": schedule_str,
-                                    "prompt": j.prompt,
-                                    "last_run": j.last_run.map(|t| t.to_rfc3339()),
-                                    "created_at": j.created_at.to_rfc3339(),
-                                })
-                            })
-                            .collect();
-                        serde_json::json!({"ok": true, "jobs": jobs})
-                    }
-                    None => serde_json::json!({"ok": true, "jobs": []}),
-                },
-
                 "watchdogs" => {
                     serde_json::json!({"ok": true, "rules": registry.watchdog_rules_config})
                 }
@@ -2318,9 +2227,8 @@ impl Daemon {
                         .filter(|e| e.decision_type.to_string().contains("assigned"))
                         .count();
 
-                    // Cron status.
-                    let cron_count = if let Some(ref cs) = cron_store {
-                        cs.lock().await.jobs.len()
+                    let trigger_count = if let Some(ref ts) = trigger_store {
+                        ts.count_enabled().await.unwrap_or(0)
                     } else {
                         0
                     };
@@ -2377,8 +2285,8 @@ impl Daemon {
                     // Append system health info (not modeled in BriefBuilder).
                     let mut full_brief = text;
                     full_brief.push_str(&format!(
-                        "--- System ---\n  {} workers, {} cron jobs, {} pending messages\n",
-                        worker_count, cron_count, dispatch_health.unread
+                        "--- System ---\n  {} workers, {} triggers, {} pending messages\n",
+                        worker_count, trigger_count, dispatch_health.unread
                     ));
                     if dispatch_health.dead_letters > 0 {
                         full_brief.push_str(&format!(
@@ -2396,7 +2304,7 @@ impl Daemon {
                             "tasks_assigned": tasks_assigned,
                             "budget_used_pct": if budget > 0.0 { (spent / budget) * 100.0 } else { 0.0 },
                             "workers": worker_count,
-                            "cron_jobs": cron_count,
+                            "triggers": trigger_count,
                             "dead_letters": dispatch_health.dead_letters,
                         }
                     })
@@ -3211,8 +3119,8 @@ impl Daemon {
         let worker_count = self.registry.total_max_workers().await;
         let dispatch_health = self.dispatch_bus.health(ACK_RETRY_AGE_SECS).await;
 
-        let cron_count = if let Some(ref cs) = self.cron_store {
-            cs.lock().await.jobs.len()
+        let trigger_count = if let Some(ref ts) = self.trigger_store {
+            ts.count_enabled().await.unwrap_or(0)
         } else {
             0
         };
@@ -3263,8 +3171,8 @@ impl Daemon {
         let text = builder.render_text();
         let mut full_brief = text;
         full_brief.push_str(&format!(
-            "--- System ---\n  {} workers, {} cron jobs, {} pending messages\n",
-            worker_count, cron_count, dispatch_health.unread
+            "--- System ---\n  {} workers, {} triggers, {} pending messages\n",
+            worker_count, trigger_count, dispatch_health.unread
         ));
         if dispatch_health.dead_letters > 0 {
             full_brief.push_str(&format!(

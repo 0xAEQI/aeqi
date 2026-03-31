@@ -123,15 +123,7 @@ pub enum Commands {
         action: PipelineAction,
     },
 
-    // --- Phase 6: Cron (legacy) ---
-    /// [deprecated: use 'trigger'] Manage scheduled cron jobs.
-    #[command(hide = true)]
-    Cron {
-        #[command(subcommand)]
-        action: CronAction,
-    },
-
-    // --- Phase 6a: Triggers ---
+    // --- Phase 6: Triggers ---
     /// Manage agent triggers (scheduled + event-driven).
     Trigger {
         #[command(subcommand)]
@@ -419,28 +411,6 @@ pub enum ConfigAction {
     Reload,
     /// Show current config.
     Show,
-}
-
-#[derive(Subcommand)]
-pub enum CronAction {
-    /// Add a scheduled job.
-    Add {
-        name: String,
-        #[arg(short, long)]
-        schedule: Option<String>,
-        #[arg(long)]
-        at: Option<String>,
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
-        #[arg(short, long)]
-        prompt: String,
-        #[arg(long)]
-        isolated: bool,
-    },
-    /// List all cron jobs.
-    List,
-    /// Remove a cron job.
-    Remove { name: String },
 }
 
 #[derive(Subcommand)]

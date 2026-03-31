@@ -44,7 +44,6 @@ pub mod project;
 pub mod reflection;
 pub mod registry;
 pub mod runtime;
-pub mod schedule;
 pub mod session_tracker;
 pub mod skill_promotion;
 pub mod supervisor;
@@ -84,7 +83,6 @@ pub use runtime::{
     Artifact, ArtifactKind, RuntimeExecution, RuntimeOutcome, RuntimeOutcomeStatus, RuntimePhase,
     RuntimeSession, RuntimeSessionStatus, VerificationReport,
 };
-pub use schedule::{ScheduleStore, ScheduledJob};
 pub use session_tracker::SessionTracker;
 pub use trigger::{EventPattern, Trigger, TriggerStore, TriggerType};
 pub use supervisor::Supervisor;

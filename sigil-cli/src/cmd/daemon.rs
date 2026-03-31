@@ -6,7 +6,7 @@ use sigil_gates::TelegramChannel;
 use sigil_orchestrator::tools::build_orchestration_tools;
 use sigil_orchestrator::{
     AgentRouter, AuditLog, Blackboard, ConversationStore, Daemon, DispatchBus, EmotionalState,
-    ExpertiseLedger, LifecycleEngine, Project, ProjectRegistry, ScheduleStore, Supervisor,
+    ExpertiseLedger, LifecycleEngine, Project, ProjectRegistry, Supervisor,
     WatchdogEngine,
 };
 use std::collections::HashMap;
@@ -567,19 +567,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 heartbeats.len()
             );
 
-            // Load cron store.
-            let cron_path = config.data_dir().join("fate.json");
-            let cron_store = if background_automation_enabled {
-                Some(ScheduleStore::open(&cron_path)?)
-            } else {
-                None
-            };
             let socket_path = config.data_dir().join("rm.sock");
-
-            match &cron_store {
-                Some(store) => println!("Cron: {} jobs loaded", store.jobs.len()),
-                None => println!("Cron: disabled (background automation off)"),
-            }
             println!("PID file: {}", pid_path.display());
             println!("IPC socket: {}", socket_path.display());
 
@@ -617,10 +605,6 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             daemon.set_background_automation_enabled(background_automation_enabled);
             daemon.set_pid_file(pid_path);
             daemon.set_socket_path(socket_path.clone());
-            if let Some(cron_store) = cron_store {
-                daemon.set_cron_store(cron_store);
-            }
-
             // Initialize trigger store + agent registry for persistent agent triggers.
             match sigil_orchestrator::agent_registry::AgentRegistry::open(&config.data_dir()) {
                 Ok(agent_reg) => {
