@@ -1,3 +1,9 @@
+---
+name: rust-expertise
+description: Rust Expertise — Shared Knowledge Base
+phase: implement
+---
+
 # Rust Expertise — Shared Knowledge Base
 
 Domain knowledge for all Rust projects. Retrieved via `sigil_skills(action="get", name="rust-expertise")`.

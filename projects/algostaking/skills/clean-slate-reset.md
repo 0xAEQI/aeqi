@@ -1,3 +1,9 @@
+---
+name: clean-slate-reset
+description: Full database purge + service restart procedure for dev environment
+phase: implement
+---
+
 # Clean Slate Reset
 
 Full database purge + service restart procedure for the dev environment.

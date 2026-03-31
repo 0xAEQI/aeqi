@@ -23,8 +23,9 @@ use crate::message::{Dispatch, DispatchBus, DispatchKind};
 use crate::metrics::SigilMetrics;
 use crate::middleware::{
     ClarificationMiddleware, ContextBudgetMiddleware, ContextCompressionMiddleware,
-    CostTrackingMiddleware, GuardrailsMiddleware, LoopDetectionMiddleware, MemoryRefreshMiddleware,
-    MiddlewareChain, Outcome, OutcomeStatus, SafetyNetMiddleware,
+    CostTrackingMiddleware, GraphGuardrailsMiddleware, GuardrailsMiddleware,
+    LoopDetectionMiddleware, MemoryRefreshMiddleware, MiddlewareChain, Outcome, OutcomeStatus,
+    SafetyNetMiddleware,
 };
 use crate::preflight::{PreflightAssessment, PreflightVerdict};
 use crate::project::Project;
@@ -479,6 +480,9 @@ impl Supervisor {
             Box::new(LoopDetectionMiddleware::new()),
             Box::new(CostTrackingMiddleware::new(budget)),
             Box::new(ContextBudgetMiddleware::new(200)),
+            Box::new(GraphGuardrailsMiddleware::new(
+                &dirs::home_dir().unwrap_or_default().join(".sigil"),
+            )),
             Box::new(GuardrailsMiddleware::with_defaults()),
             Box::new(ContextCompressionMiddleware::new()),
             Box::new(MemoryRefreshMiddleware::new()),
@@ -973,10 +977,13 @@ impl Supervisor {
                             }
                         }
 
-                        // Record to expertise ledger.
+                        // Record to expertise ledger (skip cron tasks — automated, not skill-based).
                         if let Some(ref ledger) = expertise_ledger {
                             let domain =
                                 ExpertiseLedger::extract_domain(&task_labels, &task_subject);
+                            if domain == "cron" {
+                                tracing::trace!(task_id = %task_id_clone, "skipping expertise record for cron task");
+                            } else {
                             let outcome_kind = match &outcome {
                                 TaskOutcome::Done(_) => TaskOutcomeKind::Done,
                                 TaskOutcome::Failed(_) => TaskOutcomeKind::Failed,
@@ -992,6 +999,7 @@ impl Supervisor {
                                 turns,
                                 timestamp: chrono::Utc::now(),
                             });
+                            }
                         }
 
                         // Record audit: task outcome.

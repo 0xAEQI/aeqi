@@ -1,6 +1,7 @@
 ---
 name: deploy-watcher
 description: Monitor deployment status and verify successful deploys. Use after merging to dev/master or when checking deployment health.
+phase: verify
 tools: Bash, Read
 model: haiku
 ---

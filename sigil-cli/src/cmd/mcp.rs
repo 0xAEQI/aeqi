@@ -1,7 +1,9 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
+use std::time::Instant;
 
 use crate::helpers::load_config;
 
@@ -53,7 +55,26 @@ fn ipc_request_sync(
     Ok(response)
 }
 
-/// Scan a directory for files, returning entries with name, source, content.
+fn extract_frontmatter_field(content: &str, field: &str) -> Option<String> {
+    let mut in_frontmatter = false;
+    for line in content.lines() {
+        if line.trim() == "---" {
+            if in_frontmatter {
+                return None;
+            }
+            in_frontmatter = true;
+            continue;
+        }
+        if in_frontmatter {
+            let prefix = format!("{field}: ");
+            if let Some(val) = line.strip_prefix(&prefix) {
+                return Some(val.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
 fn scan_dir(dir: &std::path::Path, source: &str) -> Vec<serde_json::Value> {
     let mut items = Vec::new();
     if !dir.exists() {
@@ -67,12 +88,21 @@ fn scan_dir(dir: &std::path::Path, source: &str) -> Vec<serde_json::Value> {
         }
         let name = path.file_stem().and_then(|n| n.to_str()).unwrap_or("").to_string();
         let content = std::fs::read_to_string(&path).unwrap_or_default();
-        let preview = content.lines().take(3).collect::<Vec<_>>().join(" ").chars().take(120).collect::<String>();
+        let description = extract_frontmatter_field(&content, "description").unwrap_or_default();
+        let phase = extract_frontmatter_field(&content, "phase").unwrap_or_default();
+        let model = extract_frontmatter_field(&content, "model").unwrap_or_default();
+        let preview: String = if description.is_empty() {
+            content.lines().take(3).collect::<Vec<_>>().join(" ").chars().take(120).collect()
+        } else {
+            description.chars().take(120).collect()
+        };
         items.push(serde_json::json!({
             "name": name,
             "source": source,
             "kind": if ext == "toml" { "skill" } else { "doc" },
             "preview": preview,
+            "phase": phase,
+            "model": model,
             "content": content,
         }));
     }
@@ -80,9 +110,10 @@ fn scan_dir(dir: &std::path::Path, source: &str) -> Vec<serde_json::Value> {
 }
 
 pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
-    let (config, _) = load_config(config_path)?;
+    let (config, config_file) = load_config(config_path)?;
     let data_dir = config.data_dir();
-    let cwd = std::env::current_dir().unwrap_or_default();
+    let base_dir = config_file.parent().and_then(|p| p.parent()).map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
     let tools = vec![
         ToolDef {
@@ -103,24 +134,26 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
         },
         ToolDef {
             name: "sigil_skills".to_string(),
-            description: "List or retrieve skills — domain knowledge, procedures, and checklists. Skills are reference material loaded into context.".to_string(),
+            description: "List or retrieve skills — domain knowledge, procedures, and checklists. Filter by phase to get phase-relevant knowledge.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["list", "get"], "default": "list"},
                     "project": {"type": "string", "description": "Filter by project (optional)"},
+                    "phase": {"type": "string", "enum": ["discover", "plan", "implement", "verify", "finalize", "workflow"], "description": "Filter by pipeline phase (optional)"},
                     "name": {"type": "string", "description": "Skill name (required for get)"}
                 }
             }),
         },
         ToolDef {
             name: "sigil_agents".to_string(),
-            description: "List or retrieve agent definitions — autonomous actor templates with model preferences, tool policies, and specialized prompts. Use these when spawning subagents for specific tasks.".to_string(),
+            description: "List or retrieve agent definitions — autonomous actor templates with specialized prompts. Filter by pipeline phase (discover/plan/implement/verify/finalize) to get only relevant agents.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["list", "get"], "default": "list"},
                     "project": {"type": "string", "description": "Filter by project (optional)"},
+                    "phase": {"type": "string", "enum": ["discover", "plan", "implement", "verify", "finalize", "workflow"], "description": "Filter by pipeline phase (optional)"},
                     "name": {"type": "string", "description": "Agent name (required for get)"}
                 }
             }),
@@ -167,15 +200,26 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
         },
         ToolDef {
             name: "sigil_blackboard".to_string(),
-            description: "Ephemeral inter-agent notes. Post breadcrumbs or read coordination state.".to_string(),
+            description: "Shared coordination surface. Post discoveries, claim resources, signal state, query entries, and coordinate across agents and projects.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["read", "post"]},
+                    "action": {
+                        "type": "string",
+                        "enum": ["read", "post", "get", "query", "claim", "release", "delete"],
+                        "description": "read: list all entries. post: create entry. get: lookup by key. query: filter by tags. claim: exclusive resource lock. release: drop claim. delete: remove entry."
+                    },
                     "project": {"type": "string"},
-                    "key": {"type": "string", "description": "Entry key (for post)"},
-                    "content": {"type": "string", "description": "Entry content (for post)"},
-                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags (for post)"}
+                    "key": {"type": "string", "description": "Entry key (post/get/delete)"},
+                    "resource": {"type": "string", "description": "Resource to claim/release (e.g. file path)"},
+                    "content": {"type": "string", "description": "Entry content (post/claim)"},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for filtering (post/query)"},
+                    "prefix": {"type": "string", "description": "Filter entries by key prefix (read/query). E.g. 'task:abc' returns all task:abc:* entries."},
+                    "durability": {"type": "string", "enum": ["transient", "durable"], "description": "TTL class (default: transient=24h, durable=7d)"},
+                    "since": {"type": "string", "description": "ISO 8601 timestamp — only return entries created after this (read/query)"},
+                    "cross_project": {"type": "boolean", "description": "Search across all projects (read/query)"},
+                    "limit": {"type": "integer", "description": "Max results (read/query, default: 20)"},
+                    "force": {"type": "boolean", "description": "Force release even if claimed by another agent"}
                 },
                 "required": ["action", "project"]
             }),
@@ -205,7 +249,44 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                 "required": ["task_id"]
             }),
         },
+        ToolDef {
+            name: "sigil_graph".to_string(),
+            description: "Query the code intelligence graph. Search symbols, get 360° context (callers/callees/implementors), analyze blast radius of changes, list communities or processes.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["search", "context", "impact", "file", "stats", "index"], "description": "search=FTS symbol search, context=360° view of a symbol, impact=blast radius, file=symbols in a file, stats=graph statistics, index=re-index project"},
+                    "project": {"type": "string", "description": "Project name"},
+                    "query": {"type": "string", "description": "Search query (for search action)"},
+                    "node_id": {"type": "string", "description": "Node ID (for context/impact actions)"},
+                    "file_path": {"type": "string", "description": "File path relative to project root (for file action)"},
+                    "depth": {"type": "integer", "description": "Max traversal depth (impact, default 3)", "default": 3},
+                    "limit": {"type": "integer", "description": "Max results (default 10)", "default": 10}
+                },
+                "required": ["action", "project"]
+            }),
+        },
+        ToolDef {
+            name: "sigil_delegate".to_string(),
+            description: "Delegate work to a Sigil agent. Loads the agent template, gathers task context from the blackboard, and returns a structured prompt ready to pass to a Claude Code subagent. One call replaces: sigil_agents(get) + sigil_blackboard(read) + manual prompt assembly.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "agent": {"type": "string", "description": "Agent name (e.g. 'researcher', 'reviewer', 'architect')"},
+                    "task_id": {"type": "string", "description": "Task ID for blackboard context (e.g. 'sg-010')"},
+                    "project": {"type": "string", "description": "Project name"},
+                    "prompt": {"type": "string", "description": "Additional instructions for the agent"}
+                },
+                "required": ["agent", "project"]
+            }),
+        },
     ];
+
+    // Recall result cache: avoids redundant IPC queries within a session.
+    // Key = "project\0query\0scope\0limit", Value = (timestamp, result).
+    // Entries older than 5 minutes are treated as stale.
+    let mut recall_cache: HashMap<String, (Instant, serde_json::Value)> = HashMap::new();
+    const RECALL_CACHE_TTL_SECS: u64 = 300;
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -271,7 +352,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                     // ── Primer ──
                     "sigil_primer" => {
                         let project = args.get("project").and_then(|v| v.as_str()).unwrap_or("");
-                        let project_dir = cwd.join("projects").join(project);
+                        let project_dir = base_dir.join("projects").join(project);
                         let sigil_md = project_dir.join("SIGIL.md");
                         let content = if sigil_md.exists() {
                             std::fs::read_to_string(&sigil_md).unwrap_or_default()
@@ -291,7 +372,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                             Ok(serde_json::json!({"ok": false, "error": format!("no primer found for project '{project}'")}))
                         } else {
                             let shared = if project != "shared" {
-                                let shared_sigil = cwd.join("projects").join("shared").join("SIGIL.md");
+                                let shared_sigil = base_dir.join("projects").join("shared").join("SIGIL.md");
                                 if shared_sigil.exists() {
                                     format!("\n\n---\n\n{}", std::fs::read_to_string(&shared_sigil).unwrap_or_default())
                                 } else {
@@ -312,11 +393,12 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                     "sigil_skills" => {
                         let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("list");
                         let project_filter = args.get("project").and_then(|v| v.as_str());
+                        let phase_filter = args.get("phase").and_then(|v| v.as_str());
                         let name_filter = args.get("name").and_then(|v| v.as_str());
 
                         let mut all_skills = Vec::new();
-                        all_skills.extend(scan_dir(&cwd.join("projects/shared/skills"), "shared"));
-                        for entry in std::fs::read_dir(cwd.join("projects")).into_iter().flatten().flatten() {
+                        all_skills.extend(scan_dir(&base_dir.join("projects/shared/skills"), "shared"));
+                        for entry in std::fs::read_dir(base_dir.join("projects")).into_iter().flatten().flatten() {
                             let p = entry.file_name().to_string_lossy().to_string();
                             if p == "shared" { continue; }
                             all_skills.extend(scan_dir(&entry.path().join("skills"), &p));
@@ -331,14 +413,18 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                         } else {
                             let filtered: Vec<serde_json::Value> = all_skills.into_iter()
                                 .filter(|s| {
-                                    project_filter.is_none_or(|pf| {
+                                    let project_ok = project_filter.is_none_or(|pf| {
                                         let src = s.get("source").and_then(|v| v.as_str()).unwrap_or("");
                                         src == pf || src == "shared"
-                                    })
+                                    });
+                                    let phase_ok = phase_filter.is_none_or(|pf| {
+                                        s.get("phase").and_then(|v| v.as_str()).is_some_and(|p| p == pf)
+                                    });
+                                    project_ok && phase_ok
                                 })
                                 .map(|s| serde_json::json!({
                                     "name": s["name"], "source": s["source"],
-                                    "kind": s["kind"], "preview": s["preview"],
+                                    "phase": s["phase"], "preview": s["preview"],
                                 }))
                                 .collect();
                             Ok(serde_json::json!({"ok": true, "count": filtered.len(), "skills": filtered}))
@@ -349,11 +435,12 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                     "sigil_agents" => {
                         let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("list");
                         let project_filter = args.get("project").and_then(|v| v.as_str());
+                        let phase_filter = args.get("phase").and_then(|v| v.as_str());
                         let name_filter = args.get("name").and_then(|v| v.as_str());
 
                         let mut all_agents = Vec::new();
-                        all_agents.extend(scan_dir(&cwd.join("projects/shared/agents"), "shared"));
-                        for entry in std::fs::read_dir(cwd.join("projects")).into_iter().flatten().flatten() {
+                        all_agents.extend(scan_dir(&base_dir.join("projects/shared/agents"), "shared"));
+                        for entry in std::fs::read_dir(base_dir.join("projects")).into_iter().flatten().flatten() {
                             let p = entry.file_name().to_string_lossy().to_string();
                             if p == "shared" { continue; }
                             all_agents.extend(scan_dir(&entry.path().join("agents"), &p));
@@ -368,14 +455,19 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                         } else {
                             let filtered: Vec<serde_json::Value> = all_agents.into_iter()
                                 .filter(|a| {
-                                    project_filter.is_none_or(|pf| {
+                                    let project_ok = project_filter.is_none_or(|pf| {
                                         let src = a.get("source").and_then(|v| v.as_str()).unwrap_or("");
                                         src == pf || src == "shared"
-                                    })
+                                    });
+                                    let phase_ok = phase_filter.is_none_or(|pf| {
+                                        a.get("phase").and_then(|v| v.as_str()).is_some_and(|p| p == pf)
+                                    });
+                                    project_ok && phase_ok
                                 })
                                 .map(|a| serde_json::json!({
                                     "name": a["name"], "source": a["source"],
-                                    "kind": a["kind"], "preview": a["preview"],
+                                    "phase": a["phase"], "model": a["model"],
+                                    "preview": a["preview"],
                                 }))
                                 .collect();
                             Ok(serde_json::json!({"ok": true, "count": filtered.len(), "agents": filtered}))
@@ -384,19 +476,51 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
 
                     // ── Memory ──
                     "sigil_recall" => {
-                        let ipc = serde_json::json!({
-                            "cmd": "memories",
-                            "project": args.get("project").and_then(|v| v.as_str()).unwrap_or(""),
-                            "query": args.get("query").and_then(|v| v.as_str()).unwrap_or(""),
-                            "limit": args.get("limit").and_then(|v| v.as_u64()).unwrap_or(5),
+                        let project = args.get("project").and_then(|v| v.as_str()).unwrap_or("");
+                        let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                        let scope = args.get("scope").and_then(|v| v.as_str()).unwrap_or("domain");
+                        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(5);
+
+                        let cache_key = format!("{project}\0{query}\0{scope}\0{limit}");
+
+                        let cached_hit = recall_cache.get(&cache_key).and_then(|(ts, val)| {
+                            if ts.elapsed().as_secs() < RECALL_CACHE_TTL_SECS {
+                                Some(val.clone())
+                            } else {
+                                None
+                            }
                         });
-                        ipc_request_sync(&data_dir, &ipc)
+
+                        let mut result = if let Some(val) = cached_hit {
+                            Ok(val)
+                        } else {
+                            recall_cache.remove(&cache_key);
+                            let ipc = serde_json::json!({
+                                "cmd": "memories",
+                                "project": project,
+                                "query": query,
+                                "scope": scope,
+                                "limit": limit,
+                            });
+                            let r = ipc_request_sync(&data_dir, &ipc);
+                            if let Ok(ref val) = r {
+                                recall_cache.insert(cache_key, (Instant::now(), val.clone()));
+                            }
+                            r
+                        };
+
+                        result
                     }
                     "sigil_remember" => {
                         let mut ipc = args.clone();
                         ipc["cmd"] = serde_json::json!("knowledge_store");
                         if !ipc.get("scope").and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty()) {
                             ipc["scope"] = serde_json::json!("domain");
+                        }
+                        // Invalidate recall cache for this project — new memories change results.
+                        if let Some(project) = args.get("project").and_then(|v| v.as_str()) {
+                            let prefix = format!("{project}\0");
+                            recall_cache.retain(|k, _| !k.starts_with(&prefix));
                         }
                         ipc_request_sync(&data_dir, &ipc)
                     }
@@ -411,29 +535,414 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                     }
                     "sigil_blackboard" => {
                         let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("read");
-                        if action == "post" {
-                            let mut ipc = args.clone();
-                            ipc["cmd"] = serde_json::json!("post_blackboard");
-                            ipc["agent"] = serde_json::json!("worker");
-                            ipc["durability"] = serde_json::json!("durable");
-                            ipc_request_sync(&data_dir, &ipc)
-                        } else {
-                            let ipc = serde_json::json!({
-                                "cmd": "blackboard",
-                                "project": args.get("project").and_then(|v| v.as_str()).unwrap_or(""),
-                            });
-                            ipc_request_sync(&data_dir, &ipc)
+                        match action {
+                            "post" => {
+                                let mut ipc = args.clone();
+                                ipc["cmd"] = serde_json::json!("post_blackboard");
+                                ipc["agent"] = serde_json::json!("worker");
+                                if ipc.get("durability").and_then(|v| v.as_str()).is_none() {
+                                    ipc["durability"] = serde_json::json!("durable");
+                                }
+                                ipc_request_sync(&data_dir, &ipc)
+                            }
+                            "get" => {
+                                let ipc = serde_json::json!({
+                                    "cmd": "get_blackboard",
+                                    "project": args.get("project").and_then(|v| v.as_str()).unwrap_or(""),
+                                    "key": args.get("key").and_then(|v| v.as_str()).unwrap_or(""),
+                                });
+                                ipc_request_sync(&data_dir, &ipc)
+                            }
+                            "claim" => {
+                                let ipc = serde_json::json!({
+                                    "cmd": "claim_blackboard",
+                                    "project": args.get("project").and_then(|v| v.as_str()).unwrap_or(""),
+                                    "resource": args.get("resource").and_then(|v| v.as_str()).unwrap_or(""),
+                                    "content": args.get("content").and_then(|v| v.as_str()).unwrap_or(""),
+                                    "agent": "worker",
+                                });
+                                ipc_request_sync(&data_dir, &ipc)
+                            }
+                            "release" => {
+                                let ipc = serde_json::json!({
+                                    "cmd": "release_blackboard",
+                                    "project": args.get("project").and_then(|v| v.as_str()).unwrap_or(""),
+                                    "resource": args.get("resource").and_then(|v| v.as_str()).unwrap_or(""),
+                                    "agent": "worker",
+                                    "force": args.get("force").and_then(|v| v.as_bool()).unwrap_or(false),
+                                });
+                                ipc_request_sync(&data_dir, &ipc)
+                            }
+                            "delete" => {
+                                let ipc = serde_json::json!({
+                                    "cmd": "delete_blackboard",
+                                    "project": args.get("project").and_then(|v| v.as_str()).unwrap_or(""),
+                                    "key": args.get("key").and_then(|v| v.as_str()).unwrap_or(""),
+                                });
+                                ipc_request_sync(&data_dir, &ipc)
+                            }
+                            _ => {
+                                let prefix_filter = args.get("prefix").and_then(|v| v.as_str());
+                                let mut ipc = serde_json::json!({
+                                    "cmd": "blackboard",
+                                    "project": args.get("project").and_then(|v| v.as_str()).unwrap_or(""),
+                                });
+                                if let Some(tags) = args.get("tags") {
+                                    ipc["tags"] = tags.clone();
+                                }
+                                if let Some(since) = args.get("since") {
+                                    ipc["since"] = since.clone();
+                                }
+                                if let Some(limit) = args.get("limit") {
+                                    ipc["limit"] = limit.clone();
+                                }
+                                if let Some(cross) = args.get("cross_project") {
+                                    ipc["cross_project"] = cross.clone();
+                                }
+                                let result = ipc_request_sync(&data_dir, &ipc);
+                                if let Some(pf) = prefix_filter {
+                                    result.map(|mut v| {
+                                        if let Some(entries) = v.get_mut("entries").and_then(|e| e.as_array_mut()) {
+                                            entries.retain(|e| {
+                                                e.get("key").and_then(|k| k.as_str()).is_some_and(|k| k.starts_with(pf))
+                                            });
+                                        }
+                                        v
+                                    })
+                                } else {
+                                    result
+                                }
+                            }
                         }
                     }
+                    "sigil_delegate" => {
+                        let agent_name = args.get("agent").and_then(|v| v.as_str()).unwrap_or("");
+                        let project = args.get("project").and_then(|v| v.as_str()).unwrap_or("");
+                        let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let extra_prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
+
+                        // 1. Load agent template
+                        let agent_template = {
+                            let mut found = String::new();
+                            for dir in &[
+                                base_dir.join("projects").join(project).join("agents"),
+                                base_dir.join("projects/shared/agents"),
+                            ] {
+                                let path = dir.join(format!("{agent_name}.md"));
+                                if path.exists() {
+                                    if let Ok(content) = std::fs::read_to_string(&path) {
+                                        found = content;
+                                        break;
+                                    }
+                                }
+                            }
+                            if found.is_empty() {
+                                return Err(anyhow::anyhow!("agent '{agent_name}' not found"));
+                            }
+                            found
+                        };
+
+                        // 2. Gather blackboard context for the task
+                        let mut bb_context = String::new();
+                        if !task_id.is_empty() {
+                            let bb_req = serde_json::json!({
+                                "cmd": "blackboard",
+                                "project": project,
+                                "prefix": format!("task:{task_id}"),
+                                "limit": 10
+                            });
+                            if let Ok(bb_resp) = ipc_request_sync(&data_dir, &bb_req) {
+                                if let Some(entries) = bb_resp.get("entries").and_then(|e| e.as_array()) {
+                                    for entry in entries {
+                                        let key = entry.get("key").and_then(|k| k.as_str()).unwrap_or("");
+                                        let content = entry.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                                        if !content.is_empty() {
+                                            bb_context.push_str(&format!("\n## {key}\n{content}\n"));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 3. Assemble the delegation prompt
+                        let mut prompt = String::new();
+                        prompt.push_str(&agent_template);
+                        prompt.push_str("\n\n---\n\n");
+                        prompt.push_str(&format!("# Delegation Context\n\nProject: {project}\n"));
+                        if !task_id.is_empty() {
+                            prompt.push_str(&format!("Task: {task_id}\n"));
+                        }
+                        if !bb_context.is_empty() {
+                            prompt.push_str(&format!("\n# Blackboard Context\n{bb_context}\n"));
+                        }
+                        if !extra_prompt.is_empty() {
+                            prompt.push_str(&format!("\n# Instructions\n{extra_prompt}\n"));
+                        }
+                        prompt.push_str(&format!(
+                            "\nWhen done, post your results to the blackboard:\n\
+                             sigil_blackboard(action='post', project='{project}', key='task:{task_id}:{agent_name}', content='<your findings>')\n"
+                        ));
+
+                        Ok(serde_json::json!({
+                            "ok": true,
+                            "agent": agent_name,
+                            "project": project,
+                            "task_id": task_id,
+                            "prompt": prompt,
+                            "usage": "Pass the 'prompt' field to a Claude Code Agent subagent. The agent will read blackboard context and post results back."
+                        }))
+                    }
+
                     "sigil_create_task" => {
                         let mut ipc = args.clone();
                         ipc["cmd"] = serde_json::json!("create_task");
                         ipc_request_sync(&data_dir, &ipc)
                     }
                     "sigil_close_task" => {
+                        let project = args.get("project").and_then(|v| v.as_str())
+                            .or_else(|| args.get("task_id").and_then(|v| v.as_str()).and_then(|id| id.split('-').next()))
+                            .unwrap_or("");
+                        let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
                         let mut ipc = args.clone();
                         ipc["cmd"] = serde_json::json!("close_task");
-                        ipc_request_sync(&data_dir, &ipc)
+                        let mut result = ipc_request_sync(&data_dir, &ipc);
+
+                        // Enrich: check if review was posted for this task
+                        if let Ok(ref mut val) = result {
+                            if !task_id.is_empty() {
+                                let review_key = format!("task:{task_id}:review");
+                                let bb_req = serde_json::json!({
+                                    "cmd": "blackboard",
+                                    "project": project,
+                                    "prefix": &review_key,
+                                    "limit": 1
+                                });
+                                let has_review = ipc_request_sync(&data_dir, &bb_req)
+                                    .ok()
+                                    .and_then(|r| r.get("entries")?.as_array().map(|a| !a.is_empty()))
+                                    .unwrap_or(false);
+
+                                if !has_review {
+                                    val["review_warning"] = serde_json::json!(
+                                        format!("No review posted for {task_id}. For significant changes, delegate: sigil_delegate(agent='reviewer', project='{project}', task_id='{task_id}')")
+                                    );
+                                }
+                            }
+                        }
+
+                        result
+                    }
+
+                    "sigil_graph" => {
+                        let project = args.get("project").and_then(|v| v.as_str()).unwrap_or("");
+                        let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("stats");
+
+                        // Find project repo path from config
+                        let repo_path = config.projects.iter()
+                            .find(|p| p.name == project)
+                            .map(|p| {
+                                let r = p.repo.replace('~', &dirs::home_dir().unwrap_or_default().to_string_lossy());
+                                std::path::PathBuf::from(r)
+                            });
+
+                        let graph_dir = data_dir.join("codegraph");
+                        std::fs::create_dir_all(&graph_dir).ok();
+                        let db_path = graph_dir.join(format!("{project}.db"));
+
+                        match action {
+                            "index" => {
+                                let repo = repo_path.ok_or_else(|| anyhow::anyhow!("project '{project}' not found in config"))?;
+                                let store = sigil_graph::GraphStore::open(&db_path)?;
+                                let indexer = sigil_graph::Indexer::new();
+                                let result = indexer.index(&repo, &store)?;
+                                Ok(serde_json::json!({
+                                    "ok": true,
+                                    "project": project,
+                                    "result": result.to_string(),
+                                    "files": result.files_parsed,
+                                    "nodes": result.nodes,
+                                    "edges": result.edges,
+                                    "communities": result.communities,
+                                    "processes": result.processes,
+                                    "unresolved": result.unresolved,
+                                }))
+                            }
+                            "search" => {
+                                let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                                let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+                                let store = sigil_graph::GraphStore::open(&db_path)?;
+                                let results = store.search_nodes(query, limit)?;
+                                Ok(serde_json::json!({
+                                    "ok": true,
+                                    "count": results.len(),
+                                    "nodes": results,
+                                }))
+                            }
+                            "context" => {
+                                let node_id = args.get("node_id").and_then(|v| v.as_str()).unwrap_or("");
+                                let store = sigil_graph::GraphStore::open(&db_path)?;
+                                let ctx = store.context(node_id)?;
+                                Ok(serde_json::json!({
+                                    "ok": true,
+                                    "node": ctx.node,
+                                    "callers": ctx.callers,
+                                    "callees": ctx.callees,
+                                    "implementors": ctx.implementors,
+                                    "incoming_edges": ctx.incoming_count,
+                                    "outgoing_edges": ctx.outgoing_count,
+                                }))
+                            }
+                            "impact" => {
+                                let node_id = args.get("node_id").and_then(|v| v.as_str()).unwrap_or("");
+                                let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(3) as u32;
+                                let store = sigil_graph::GraphStore::open(&db_path)?;
+                                let entries = store.impact(&[node_id], depth)?;
+                                let affected: Vec<serde_json::Value> = entries.iter().map(|e| {
+                                    serde_json::json!({
+                                        "node": e.node,
+                                        "depth": e.depth,
+                                    })
+                                }).collect();
+                                Ok(serde_json::json!({
+                                    "ok": true,
+                                    "source": node_id,
+                                    "affected_count": affected.len(),
+                                    "affected": affected,
+                                }))
+                            }
+                            "file" => {
+                                let file_path = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+                                let store = sigil_graph::GraphStore::open(&db_path)?;
+                                let nodes = store.nodes_in_file(file_path)?;
+                                Ok(serde_json::json!({
+                                    "ok": true,
+                                    "file": file_path,
+                                    "count": nodes.len(),
+                                    "nodes": nodes,
+                                }))
+                            }
+                            "stats" => {
+                                let store = sigil_graph::GraphStore::open(&db_path)?;
+                                let stats = store.stats()?;
+                                let indexed_at = store.get_meta("indexed_at")?.unwrap_or_default();
+                                Ok(serde_json::json!({
+                                    "ok": true,
+                                    "project": project,
+                                    "nodes": stats.node_count,
+                                    "edges": stats.edge_count,
+                                    "files": stats.file_count,
+                                    "indexed_at": indexed_at,
+                                }))
+                            }
+                            "diff_impact" => {
+                                let repo = repo_path.ok_or_else(|| anyhow::anyhow!("project '{project}' not found"))?;
+                                let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(3) as u32;
+                                let store = sigil_graph::GraphStore::open(&db_path)?;
+                                let indexer = sigil_graph::Indexer::new();
+                                let impact = indexer.diff_impact(&repo, &store, depth)?;
+                                let changed: Vec<serde_json::Value> = impact.changed_symbols.iter().map(|s| {
+                                    serde_json::json!({"name": s.name, "label": s.label, "file": s.file_path, "line": s.start_line})
+                                }).collect();
+                                let affected: Vec<serde_json::Value> = impact.affected.iter().map(|e| {
+                                    serde_json::json!({"name": e.node.name, "label": e.node.label, "file": e.node.file_path, "depth": e.depth})
+                                }).collect();
+                                Ok(serde_json::json!({
+                                    "ok": true,
+                                    "changed_files": impact.changed_files,
+                                    "changed_symbols": changed,
+                                    "affected_count": affected.len(),
+                                    "affected": affected,
+                                }))
+                            }
+                            "file_summary" => {
+                                let file_path = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+                                let store = sigil_graph::GraphStore::open(&db_path)?;
+                                let summary = store.file_summary(file_path)?;
+                                Ok(serde_json::json!({
+                                    "ok": true,
+                                    "file": file_path,
+                                    "summary": summary,
+                                }))
+                            }
+                            "incremental" => {
+                                let repo = repo_path.ok_or_else(|| anyhow::anyhow!("project '{project}' not found"))?;
+                                let store = sigil_graph::GraphStore::open(&db_path)?;
+                                let indexer = sigil_graph::Indexer::new();
+                                let result = indexer.index_incremental(&repo, &store)?;
+                                Ok(serde_json::json!({
+                                    "ok": true,
+                                    "project": project,
+                                    "result": result.to_string(),
+                                    "files": result.files_parsed,
+                                    "nodes": result.nodes,
+                                    "edges": result.edges,
+                                }))
+                            }
+                            "synthesize" => {
+                                let community_id = args.get("community_id").and_then(|v| v.as_str()).unwrap_or("");
+                                let store = sigil_graph::GraphStore::open(&db_path)?;
+
+                                // Read existing nodes and edges from the graph DB (no re-index)
+                                let all_nodes: Vec<sigil_graph::CodeNode> = {
+                                    let mut stmt = store.conn().prepare(
+                                        "SELECT id, label, name, file_path, start_line, end_line, language, is_exported, signature, doc_comment, community_id FROM code_nodes"
+                                    )?;
+                                    stmt.query_map([], |row| {
+                                        Ok(sigil_graph::CodeNode {
+                                            id: row.get(0)?,
+                                            label: serde_json::from_str(&format!("\"{}\"", row.get::<_,String>(1)?)).unwrap_or(sigil_graph::NodeLabel::Function),
+                                            name: row.get(2)?,
+                                            file_path: row.get(3)?,
+                                            start_line: row.get(4)?,
+                                            end_line: row.get(5)?,
+                                            language: row.get(6)?,
+                                            is_exported: row.get(7)?,
+                                            signature: row.get(8)?,
+                                            doc_comment: row.get(9)?,
+                                            community_id: row.get(10)?,
+                                        })
+                                    })?.filter_map(|r| r.ok()).collect()
+                                };
+
+                                let all_edges: Vec<sigil_graph::CodeEdge> = {
+                                    let mut stmt = store.conn().prepare(
+                                        "SELECT source_id, target_id, edge_type, confidence, tier, step FROM code_edges"
+                                    )?;
+                                    stmt.query_map([], |row| {
+                                        Ok(sigil_graph::CodeEdge {
+                                            source_id: row.get(0)?,
+                                            target_id: row.get(1)?,
+                                            edge_type: serde_json::from_str(&format!("\"{}\"", row.get::<_,String>(2)?)).unwrap_or(sigil_graph::EdgeType::Uses),
+                                            confidence: row.get(3)?,
+                                            tier: row.get(4)?,
+                                            step: row.get(5)?,
+                                        })
+                                    })?.filter_map(|r| r.ok()).collect()
+                                };
+
+                                // Find the community
+                                let communities = sigil_graph::detect_communities(&all_nodes, &all_edges, 3);
+                                let community = if community_id.is_empty() {
+                                    communities.first()
+                                } else {
+                                    communities.iter().find(|c| c.id == community_id)
+                                };
+
+                                match community {
+                                    Some(comm) => {
+                                        let skill = sigil_graph::synthesize_skill(comm, &all_nodes, &all_edges);
+                                        Ok(serde_json::json!({
+                                            "ok": true,
+                                            "skill_name": skill.name,
+                                            "description": skill.description,
+                                            "content": skill.content,
+                                        }))
+                                    }
+                                    None => Err(anyhow::anyhow!("community '{community_id}' not found")),
+                                }
+                            }
+                            _ => Err(anyhow::anyhow!("unknown sigil_graph action: {action}")),
+                        }
                     }
 
                     _ => Err(anyhow::anyhow!("unknown tool: {tool_name}")),

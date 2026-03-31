@@ -1,3 +1,9 @@
+---
+name: systemd
+description: Systemd service management — unit files, algostaking CLI, logs
+phase: implement
+---
+
 # Systemd Service Management
 
 ## AlgoStaking Services

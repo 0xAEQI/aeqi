@@ -1,3 +1,9 @@
+---
+name: development-workflow
+description: R-D-R pipeline — research, develop, review workflow with agent orchestration
+phase: plan
+---
+
 # Development Workflow: Research → Develop → Review
 
 ## Overview

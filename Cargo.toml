@@ -10,6 +10,7 @@ members = [
     "crates/sigil-memory",
     "crates/sigil-gates",
     "crates/sigil-web",
+    "crates/sigil-graph",
 ]
 
 [workspace.package]
@@ -89,6 +90,7 @@ sigil-orchestrator = { path = "crates/sigil-orchestrator" }
 sigil-memory = { path = "crates/sigil-memory" }
 sigil-gates = { path = "crates/sigil-gates" }
 sigil-web = { path = "crates/sigil-web" }
+sigil-graph = { path = "crates/sigil-graph" }
 
 
 [profile.release]

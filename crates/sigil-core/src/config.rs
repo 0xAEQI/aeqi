@@ -861,6 +861,9 @@ pub struct OrchestratorConfig {
     /// Blackboard durable entry TTL in days (Phase 3).
     #[serde(default = "default_blackboard_durable_ttl_days")]
     pub blackboard_durable_ttl_days: u64,
+    /// Blackboard claim TTL in hours.
+    #[serde(default = "default_blackboard_claim_ttl_hours")]
+    pub blackboard_claim_ttl_hours: u64,
     /// Enable adaptive retry with failure analysis (Phase 4).
     #[serde(default)]
     pub adaptive_retry: bool,
@@ -901,6 +904,7 @@ impl Default for OrchestratorConfig {
             expertise_routing: false,
             blackboard_transient_ttl_hours: default_blackboard_transient_ttl_hours(),
             blackboard_durable_ttl_days: default_blackboard_durable_ttl_days(),
+            blackboard_claim_ttl_hours: default_blackboard_claim_ttl_hours(),
             adaptive_retry: false,
             failure_analysis_model: String::new(),
             preflight_enabled: false,
@@ -981,6 +985,9 @@ fn default_blackboard_transient_ttl_hours() -> u64 {
 }
 fn default_blackboard_durable_ttl_days() -> u64 {
     7
+}
+fn default_blackboard_claim_ttl_hours() -> u64 {
+    2
 }
 fn default_preflight_max_cost_usd() -> f64 {
     0.01

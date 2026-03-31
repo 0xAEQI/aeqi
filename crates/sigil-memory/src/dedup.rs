@@ -183,6 +183,44 @@ pub fn is_contradiction(a: &str, b: &str) -> bool {
     false
 }
 
+const SUPPORT_MARKERS: &[&str] = &[
+    "confirms",
+    "validated",
+    "verified",
+    "still ",
+    "consistent with",
+    "aligns with",
+    "proves",
+    "supports",
+    "corroborates",
+    "reaffirms",
+    "as expected",
+];
+
+/// Simple heuristic support check.
+///
+/// Returns `true` when the candidate text contains confirmation markers
+/// relative to existing content. This detects "A confirms B" patterns.
+pub fn is_support(candidate: &str, existing: &str) -> bool {
+    let candidate_lower = candidate.to_lowercase();
+
+    // Check if candidate contains support markers
+    let has_support = SUPPORT_MARKERS
+        .iter()
+        .any(|m| candidate_lower.contains(m));
+
+    if !has_support {
+        return false;
+    }
+
+    // Both texts should NOT have negation markers (support ≠ double-negative)
+    let candidate_has_neg = NEGATION_MARKERS.iter().any(|m| candidate_lower.contains(m));
+    let existing_lower = existing.to_lowercase();
+    let existing_has_neg = NEGATION_MARKERS.iter().any(|m| existing_lower.contains(m));
+
+    has_support && !candidate_has_neg && !existing_has_neg
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -311,10 +349,41 @@ mod tests {
 
     #[test]
     fn no_contradiction_when_both_have_negation() {
-        // Both sides have negation markers — ambiguous, not flagged.
         assert!(!is_contradiction(
             "We don't use MySQL",
             "We no longer use Oracle"
+        ));
+    }
+
+    #[test]
+    fn support_detection() {
+        assert!(is_support(
+            "Testing confirms PostgreSQL is the right choice",
+            "We use PostgreSQL for the database"
+        ));
+    }
+
+    #[test]
+    fn support_with_still_marker() {
+        assert!(is_support(
+            "The service is still running on port 8080",
+            "Service runs on port 8080"
+        ));
+    }
+
+    #[test]
+    fn no_support_when_negation_present() {
+        assert!(!is_support(
+            "Testing confirms we should not use MySQL",
+            "We use MySQL"
+        ));
+    }
+
+    #[test]
+    fn no_support_without_markers() {
+        assert!(!is_support(
+            "The database is PostgreSQL",
+            "We use PostgreSQL"
         ));
     }
 }

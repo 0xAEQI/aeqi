@@ -1,3 +1,9 @@
+---
+name: pipeline-trading
+description: Trading pipeline — PMS, OMS, EMS services, order flow, state machine
+phase: discover
+---
+
 # Pipeline: Trading
 
 ## Services

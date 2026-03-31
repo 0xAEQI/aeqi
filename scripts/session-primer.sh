@@ -1,86 +1,289 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# SessionStart hook: injects Sigil primers into Claude Code context.
+#
+# Event behavior:
+#   startup  — daemon health + full primer + reverse channel
+#   resume   — daemon health + full primer + reverse channel
+#   compact  — short primer with project context if recently injected (<5 min), full otherwise
 
-SIGIL_BIN="/home/claudedev/sigil/target/debug/sigil"
-if [ ! -x "$SIGIL_BIN" ]; then
-    SIGIL_BIN="/home/claudedev/sigil/target/release/sigil"
-fi
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/hook-log.sh"
+source "$SCRIPT_DIR/detect-project.sh"
+
+export SIGIL_CONFIG
+SIGIL_BIN="/home/claudedev/sigil/target/release/sigil"
+[ -x "$SIGIL_BIN" ] || SIGIL_BIN="/home/claudedev/sigil/target/debug/sigil"
 if [ ! -x "$SIGIL_BIN" ]; then
     echo "# Sigil Primer: UNAVAILABLE (binary not found)" >&2
     exit 0
 fi
 
-CWD="${PWD}"
+SIGIL_DIR="$(dirname "$SCRIPT_DIR")"
+EVENT="${1:-startup}"
+SOCK="${SIGIL_DATA_DIR:-$HOME/.sigil}/rm.sock"
 
-# Single MCP session: initialize, get projects, get shared primer
-INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"hook","version":"0.1"}}}'
-PROJECTS_CALL='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sigil_projects","arguments":{}}}'
-SHARED_CALL='{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"sigil_primer","arguments":{"project":"shared"}}}'
+# --- Detect project from $PWD ---
+PROJECT=$(detect_project)
 
-RESPONSES=$(printf '%s\n%s\n%s\n' "$INIT" "$PROJECTS_CALL" "$SHARED_CALL" | "$SIGIL_BIN" mcp 2>/dev/null)
+# --- Daemon health check ---
+emit_health() {
+    if [ ! -S "$SOCK" ]; then
+        echo "# Sigil: daemon OFFLINE (socket missing)"
+        return
+    fi
+    local resp
+    resp=$(printf '{"cmd":"ping"}' | socat -t2 - UNIX-CONNECT:"$SOCK" 2>/dev/null) || true
+    if [ -z "$resp" ]; then
+        echo "# Sigil: daemon OFFLINE (no response)"
+        return
+    fi
+    # Get memory count and active claims for context
+    local status_resp
+    status_resp=$(printf '{"cmd":"status"}' | socat -t2 - UNIX-CONNECT:"$SOCK" 2>/dev/null) || true
+    if [ -n "$status_resp" ]; then
+        local uptime workers
+        uptime=$(printf '%s' "$status_resp" | jq -r '.uptime // empty' 2>/dev/null)
+        workers=$(printf '%s' "$status_resp" | jq -r '.active_workers // 0' 2>/dev/null)
+        echo "# Sigil: daemon UP | uptime: ${uptime:-?} | workers: ${workers:-0}"
+    else
+        echo "# Sigil: daemon UP"
+    fi
+}
 
-# Extract shared primer (id=3, last line)
-SHARED=$(echo "$RESPONSES" | tail -1 | python3 -c "
-import sys, json
-try:
-    r = json.loads(sys.stdin.read())
-    inner = json.loads(r['result']['content'][0]['text'])
-    print(inner.get('content', ''))
-except Exception:
-    pass
-" 2>/dev/null)
+# --- Reverse blackboard channel: surface signals from previous sessions ---
+emit_reverse_channel() {
+    [ -S "$SOCK" ] || return 0
+    local proj="${1:-sigil}"
+    # Query for recent nudges and findings
+    local bb_resp
+    bb_resp=$(printf '{"cmd":"blackboard","project":"%s","limit":10}' "$proj" | socat -t2 - UNIX-CONNECT:"$SOCK" 2>/dev/null) || true
+    [ -z "$bb_resp" ] && return 0
 
-if [ -n "$SHARED" ]; then
-    echo "# Shared Workflow Primer (from Sigil)"
-    echo "$SHARED"
+    # Extract entries with signal: or finding: prefixes from recent blackboard
+    local signals
+    signals=$(printf '%s' "$bb_resp" | jq -r '
+        .entries // [] | map(select(
+            (.key | startswith("signal:remember-nudge")) or
+            (.key | startswith("finding:")) or
+            (.key | startswith("decision:"))
+        )) | .[:5] | .[] | "- [\(.key)] \(.content[:120])"
+    ' 2>/dev/null) || true
+
+    if [ -n "$signals" ]; then
+        echo ""
+        echo "## Blackboard Signals"
+        echo "$signals"
+    fi
+}
+
+# --- Graph staleness check + auto-index ---
+emit_graph_status() {
+    local proj="${1:-sigil}"
+    local graph_dir="${SIGIL_DATA_DIR:-$HOME/.sigil}/codegraph"
+    local db_path="$graph_dir/${proj}.db"
+
+    if [ ! -f "$db_path" ]; then
+        echo "# Graph: not indexed. Run sigil_graph(action='index', project='$proj') to build."
+        return
+    fi
+
+    # Check if graph is stale (compare indexed commit vs HEAD)
+    local repo_path
+    repo_path=$(awk -v proj="$proj" -v home="$HOME" '
+        /^\[\[projects\]\]/ { in_proj=1; name=""; repo=""; next }
+        /^\[/ && !/^\[\[projects\./ { if (in_proj && name==proj) { gsub(/^~/,home,repo); print repo; exit }; in_proj=0 }
+        in_proj && /^name[[:space:]]*=/ { val=$0; sub(/^[^=]*=[[:space:]]*"?/,"",val); sub(/".*/, "",val); if(!name) name=val }
+        in_proj && /^repo[[:space:]]*=/ { val=$0; sub(/^[^=]*=[[:space:]]*"?/,"",val); sub(/".*/, "",val); repo=val }
+        END { if (in_proj && name==proj) { gsub(/^~/,home,repo); print repo } }
+    ' "$SIGIL_CONFIG" 2>/dev/null)
+
+    local node_count edge_count
+    node_count=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM code_nodes" 2>/dev/null || echo "0")
+    edge_count=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM code_edges" 2>/dev/null || echo "0")
+
+    if [ -n "$repo_path" ] && [ -d "$repo_path/.git" ]; then
+        local head_commit
+        head_commit=$(git -C "$repo_path" rev-parse --short HEAD 2>/dev/null) || true
+        local indexed_commit
+        indexed_commit=$(sqlite3 "$db_path" "SELECT value FROM meta WHERE key='last_commit'" 2>/dev/null) || true
+
+        if [ -n "$head_commit" ] && [ "$head_commit" != "$indexed_commit" ]; then
+            # Auto-index if stale and binary available
+            if [ -x "$SIGIL_BIN" ]; then
+                local INIT_CALL='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"hook","version":"0.2"}}}'
+                local INDEX_CALL="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"sigil_graph\",\"arguments\":{\"action\":\"incremental\",\"project\":\"$proj\"}}}"
+                local idx_resp
+                idx_resp=$(cd "$SIGIL_DIR" && printf '%s\n%s\n' "$INIT_CALL" "$INDEX_CALL" | "$SIGIL_BIN" mcp 2>/dev/null | tail -1) || true
+                if [ -n "$idx_resp" ]; then
+                    local new_nodes new_edges
+                    new_nodes=$(printf '%s' "$idx_resp" | jq -r '.result.content[0].text' 2>/dev/null | jq -r '.nodes // 0' 2>/dev/null) || true
+                    new_edges=$(printf '%s' "$idx_resp" | jq -r '.result.content[0].text' 2>/dev/null | jq -r '.edges // 0' 2>/dev/null) || true
+                    echo "# Graph: re-indexed ${proj} (${new_nodes:-?} nodes, ${new_edges:-?} edges)"
+                    log_hook "session-primer" "graph-reindex" "project=$proj nodes=${new_nodes:-?}"
+                    return
+                fi
+            fi
+            echo "# Graph: STALE (indexed at ${indexed_commit:-?}, HEAD is ${head_commit}). Run sigil_graph(action='index', project='$proj')."
+        else
+            echo "# Graph: ${node_count:-?} nodes, ${edge_count:-?} edges (current)"
+        fi
+    else
+        echo "# Graph: ${node_count:-?} nodes, ${edge_count:-?} edges"
+    fi
+}
+
+# --- Compact event: context was compressed, model lost context ---
+# Clear the recall gate — model must recall again to get domain knowledge back.
+# Always inject the FULL primer (no short version — compaction means context is gone).
+if [ "$EVENT" = "compact" ]; then
+    rm -f "$SIGIL_SESSION_DIR/recall.gate" 2>/dev/null || true
+    log_hook "session-primer" "compact" "recall gate cleared — model must re-recall"
+
+    # Surface previously loaded skills so the model knows to reload them
+    SKILLS_FILE="$SIGIL_SESSION_DIR/skills.loaded"
+    if [ -f "$SKILLS_FILE" ] && [ -s "$SKILLS_FILE" ]; then
+        LOST_SKILLS=$(tr '\n' ', ' < "$SKILLS_FILE" | sed 's/, $//')
+        echo "# Context compacted. Previously loaded skills: $LOST_SKILLS"
+        echo "# Re-load with: sigil_skills(action='get', name='<skill>')"
+        echo ""
+    fi
+
+    # Fall through to full primer injection below
 fi
 
-# Detect project from PWD
-PROJECTS_LINE=$(echo "$RESPONSES" | sed -n '2p')
-PROJECT=$(echo "$PROJECTS_LINE" | python3 -c "
-import sys, json, os
-cwd = os.environ.get('CWD', '')
-try:
-    r = json.loads(sys.stdin.read())
-    inner = json.loads(r['result']['content'][0]['text'])
-    best = ''
-    best_name = ''
-    for p in inner.get('projects', []):
-        repo = p.get('repo', '')
-        if repo and cwd.startswith(repo) and len(repo) > len(best):
-            best = repo
-            best_name = p['name']
-    if best_name:
-        print(best_name)
-except Exception:
-    pass
-" 2>/dev/null)
+# --- Full primer injection (startup / resume / compact) ---
 
+# Emit health + graph status
+emit_health
+emit_graph_status "${PROJECT:-sigil}"
+
+# Build MCP calls
+INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"hook","version":"0.2"}}}'
+SHARED_CALL='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sigil_primer","arguments":{"project":"shared"}}}'
+
+AGENTS_CALL='{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"sigil_agents","arguments":{"action":"list"}}}'
+
+if [ -n "$PROJECT" ] && [ "$PROJECT" != "shared" ]; then
+    PROJECT_CALL="{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"sigil_primer\",\"arguments\":{\"project\":\"$PROJECT\"}}}"
+    SKILLS_CALL='{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"sigil_skills","arguments":{"action":"list"}}}'
+    RESPONSES=$(cd "$SIGIL_DIR" && printf '%s\n%s\n%s\n%s\n%s\n' "$INIT" "$SHARED_CALL" "$PROJECT_CALL" "$SKILLS_CALL" "$AGENTS_CALL" | "$SIGIL_BIN" mcp 2>/dev/null) || true
+else
+    PROJECTS_CALL='{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"sigil_projects","arguments":{}}}'
+    RESPONSES=$(cd "$SIGIL_DIR" && printf '%s\n%s\n%s\n%s\n' "$INIT" "$SHARED_CALL" "$PROJECTS_CALL" "$AGENTS_CALL" | "$SIGIL_BIN" mcp 2>/dev/null) || true
+fi
+
+# Parse responses and emit formatted primer (jq — zero python dependency)
+_mcp_inner() {
+    printf '%s' "$RESPONSES" | jq -s --argjson id "$1" \
+        '[.[] | select(.id == $id)] | .[0].result.content[0].text // empty' -r 2>/dev/null
+}
+
+# Shared primer (id=2)
+SHARED_RAW=$(_mcp_inner 2)
+if [ -n "$SHARED_RAW" ]; then
+    SHARED_BODY=$(printf '%s' "$SHARED_RAW" | jq -r '.content // empty' 2>/dev/null)
+    if [ -n "$SHARED_BODY" ]; then
+        printf '# Shared Workflow Primer (from Sigil)\n%s\n\n' "$SHARED_BODY"
+    fi
+fi
+
+# Project primer (id=3) — strip shared primer appended after standalone ---
+PROJECT_RAW=$(_mcp_inner 3)
+if [ -n "$PROJECT_RAW" ]; then
+    PROJECT_BODY=$(printf '%s' "$PROJECT_RAW" | jq -r '.content // empty' 2>/dev/null)
+    if [ -n "$PROJECT_BODY" ]; then
+        PROJECT_BODY=$(printf '%s' "$PROJECT_BODY" | awk '/^---$/{exit} {print}')
+        if [ -n "$PROJECT_BODY" ]; then
+            printf '# Project Primer: %s (from Sigil)\n%s\n\n' "$PROJECT" "$PROJECT_BODY"
+        fi
+    fi
+fi
+
+# Quick Reference (always)
+cat <<'QREF'
+## Quick Reference — MCP Tool Names
+  mcp__sigil__sigil_recall, mcp__sigil__sigil_remember, mcp__sigil__sigil_primer
+  mcp__sigil__sigil_skills, mcp__sigil__sigil_agents, mcp__sigil__sigil_blackboard
+  mcp__sigil__sigil_create_task, mcp__sigil__sigil_close_task, mcp__sigil__sigil_status
+QREF
+
+# Skills list (id=4) — workflow skills first, then by phase
+if [ -n "$PROJECT" ] && [ "$PROJECT" != "shared" ]; then
+    SKILLS_RAW=$(_mcp_inner 4)
+    if [ -n "$SKILLS_RAW" ]; then
+        # Workflow skills — shown prominently with descriptions for selection
+        WORKFLOW_FMT=$(printf '%s' "$SKILLS_RAW" | jq -r '
+            .skills // [] |
+            map(select(.phase == "workflow")) |
+            if length == 0 then empty else
+            .[] | "  - \(.name): \(.preview)"
+            end
+        ' 2>/dev/null)
+        if [ -n "$WORKFLOW_FMT" ]; then
+            printf '\n## Workflows (load one before starting)\n%s\n' "$WORKFLOW_FMT"
+        fi
+
+        # Phase skills — grouped by phase, excluding workflows
+        SKILLS_FMT=$(printf '%s' "$SKILLS_RAW" | jq -r --arg proj "$PROJECT" '
+            .skills // [] |
+            map(select((.source == $proj or .source == "shared") and .phase != "workflow")) |
+            group_by(.phase // "implement") |
+            map({
+                phase: (.[0].phase // "implement"),
+                names: ([.[] | .name] | .[0:5] | join(", ")) +
+                    (if length > 5 then ", ..." else "" end)
+            }) |
+            sort_by(
+                {"workflow":-1,"discover":0,"plan":1,"implement":2,"verify":3,"finalize":4}[.phase] // 99
+            ) |
+            .[] | "  \(.phase): \(.names)"
+        ' 2>/dev/null)
+        if [ -n "$SKILLS_FMT" ]; then
+            printf '\n## Skills for %s (load per phase as needed)\n%s\n' "$PROJECT" "$SKILLS_FMT"
+        fi
+    fi
+fi
+
+# Agents list (id=6) — show available agents for current project or shared
+AGENTS_RAW=$(_mcp_inner 6)
+if [ -n "$AGENTS_RAW" ]; then
+    PROJ_FILTER="${PROJECT:-shared}"
+    AGENTS_FMT=$(printf '%s' "$AGENTS_RAW" | jq -r --arg proj "$PROJ_FILTER" '
+        .agents // [] |
+        map(select(.source == $proj or .source == "shared")) |
+        sort_by(
+            {"workflow":-1,"discover":0,"plan":1,"implement":2,"verify":3,"finalize":4}[.phase] // 99
+        ) |
+        .[] | "  \(.phase): \(.name) (\(.model))"
+    ' 2>/dev/null)
+    if [ -n "$AGENTS_FMT" ]; then
+        printf '\n## Agents (use sigil_agents to load templates)\n%s\n' "$AGENTS_FMT"
+    fi
+fi
+
+# Projects list (id=5) — when in root directory
 if [ -z "$PROJECT" ] || [ "$PROJECT" = "shared" ]; then
-    exit 0
+    PROJECTS_RAW=$(_mcp_inner 5)
+    if [ -n "$PROJECTS_RAW" ]; then
+        PROJECTS_FMT=$(printf '%s' "$PROJECTS_RAW" | jq -r '
+            {
+                "sigil": "agent runtime + orchestration (Rust, 9 crates)",
+                "algostaking": "lunar-epoch market making (Rust, 15 services)",
+                "riftdecks-shop": "card e-commerce (Next.js)",
+                "entity-legal": "legal entity platform (Next.js)",
+                "aeqi": "venture OS smart contracts (Solidity)",
+                "unifutures": "decentralized futures (Solidity)"
+            } as $descs |
+            .projects // [] | .[] |
+            "  \(.name) \u2014 \($descs[.name] // "prefix=\(.prefix // "?")")"
+        ' 2>/dev/null)
+        if [ -n "$PROJECTS_FMT" ]; then
+            printf '\n## Active Projects\n%s\n' "$PROJECTS_FMT"
+        fi
+    fi
 fi
 
-# Fetch project primer (shared content already printed, so we strip it)
-PROJECT_CALL="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"sigil_primer\",\"arguments\":{\"project\":\"$PROJECT\"}}}"
-PROJECT_RESPONSE=$(printf '%s\n%s\n' "$INIT" "$PROJECT_CALL" | "$SIGIL_BIN" mcp 2>/dev/null | tail -1)
+# Reverse blackboard channel — surface signals from prior sessions
+emit_reverse_channel "${PROJECT:-sigil}"
 
-PROJECT_CONTENT=$(echo "$PROJECT_RESPONSE" | python3 -c "
-import sys, json
-try:
-    r = json.loads(sys.stdin.read())
-    inner = json.loads(r['result']['content'][0]['text'])
-    content = inner.get('content', '')
-    # The project primer includes shared content after '---', strip it since we already printed it
-    if '---' in content:
-        content = content[:content.rfind('---')].rstrip()
-    if content:
-        print(content)
-except Exception:
-    pass
-" 2>/dev/null)
-
-if [ -n "$PROJECT_CONTENT" ]; then
-    echo ""
-    echo "# Project Primer: $PROJECT (from Sigil)"
-    echo "$PROJECT_CONTENT"
-fi
+log_hook "session-primer" "injected" "event=$EVENT project=${PROJECT:-root}"

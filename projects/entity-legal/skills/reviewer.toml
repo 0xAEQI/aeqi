@@ -1,6 +1,7 @@
 [skill]
 name = "reviewer"
 description = "Code review for entity.legal — legal accuracy, privacy, compliance"
+phase = "verify"
 triggers = ["review", "check", "audit", "validate"]
 
 [tools]

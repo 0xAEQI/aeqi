@@ -1,3 +1,9 @@
+---
+name: service-ingestion
+description: Ingestion service — exchange WebSocket adapters, tick normalization, ZMQ publishing
+phase: implement
+---
+
 # Service: ingestion
 
 ## Required Reading

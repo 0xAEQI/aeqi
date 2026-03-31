@@ -1,6 +1,7 @@
 [skill]
 name = "developer"
 description = "Implement features for entity.legal — legal tech, document generation, compliance"
+phase = "implement"
 triggers = ["implement", "build", "code", "develop", "write"]
 
 [tools]

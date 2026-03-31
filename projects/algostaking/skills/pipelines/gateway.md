@@ -1,3 +1,9 @@
+---
+name: pipeline-gateway
+description: Gateway pipeline — configuration, API, stream services and data flow
+phase: discover
+---
+
 # Pipeline: Gateway
 
 ## Services

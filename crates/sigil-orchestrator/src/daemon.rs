@@ -1341,10 +1341,39 @@ impl Daemon {
                         .and_then(|v| v.as_str())
                         .unwrap_or("*");
                     let limit = request.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
+                    let since = request
+                        .get("since")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                        .map(|dt| dt.with_timezone(&Utc));
+                    let tags: Vec<String> = request
+                        .get("tags")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let cross_project = request
+                        .get("cross_project")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
                     match &registry.blackboard {
                         Some(bb) => {
-                            let entries =
-                                bb.list_project(project_filter, limit).unwrap_or_default();
+                            let entries = if cross_project {
+                                bb.query_cross_project(&tags, since, limit).unwrap_or_default()
+                            } else if !tags.is_empty() {
+                                if let Some(since_dt) = since {
+                                    bb.query_since(project_filter, &tags, since_dt, limit).unwrap_or_default()
+                                } else {
+                                    bb.query(project_filter, &tags, limit).unwrap_or_default()
+                                }
+                            } else if let Some(since_dt) = since {
+                                bb.query_since(project_filter, &[], since_dt, limit).unwrap_or_default()
+                            } else {
+                                bb.list_project(project_filter, limit).unwrap_or_default()
+                            };
                             let items: Vec<serde_json::Value> = entries
                                 .iter()
                                 .map(|e| {
@@ -1364,6 +1393,103 @@ impl Daemon {
                         None => {
                             serde_json::json!({"ok": false, "error": "blackboard not initialized"})
                         }
+                    }
+                }
+
+                "get_blackboard" => {
+                    let project = request.get("project").and_then(|v| v.as_str()).unwrap_or("");
+                    let key = request.get("key").and_then(|v| v.as_str()).unwrap_or("");
+                    match &registry.blackboard {
+                        Some(bb) => match bb.get_by_key(project, key) {
+                            Ok(Some(entry)) => serde_json::json!({
+                                "ok": true,
+                                "entry": {
+                                    "key": entry.key,
+                                    "content": entry.content,
+                                    "agent": entry.agent,
+                                    "project": entry.project,
+                                    "tags": entry.tags,
+                                    "created_at": entry.created_at.to_rfc3339(),
+                                    "expires_at": entry.expires_at.to_rfc3339(),
+                                }
+                            }),
+                            Ok(None) => serde_json::json!({"ok": true, "entry": null}),
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                        },
+                        None => serde_json::json!({"ok": false, "error": "blackboard not initialized"}),
+                    }
+                }
+
+                "claim_blackboard" => {
+                    let resource = request.get("resource").and_then(|v| v.as_str()).unwrap_or("");
+                    let project = request.get("project").and_then(|v| v.as_str()).unwrap_or("");
+                    let agent = request.get("agent").and_then(|v| v.as_str()).unwrap_or("worker");
+                    let content = request.get("content").and_then(|v| v.as_str()).unwrap_or("");
+
+                    if resource.is_empty() || project.is_empty() {
+                        serde_json::json!({"ok": false, "error": "resource and project are required"})
+                    } else {
+                        match &registry.blackboard {
+                            Some(bb) => match bb.claim(resource, agent, project, content) {
+                                Ok(crate::blackboard::ClaimResult::Acquired) => {
+                                    serde_json::json!({"ok": true, "result": "acquired", "resource": resource})
+                                }
+                                Ok(crate::blackboard::ClaimResult::Renewed) => {
+                                    serde_json::json!({"ok": true, "result": "renewed", "resource": resource})
+                                }
+                                Ok(crate::blackboard::ClaimResult::Held { holder, content }) => {
+                                    serde_json::json!({"ok": true, "result": "held", "holder": holder, "content": content})
+                                }
+                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                            },
+                            None => serde_json::json!({"ok": false, "error": "blackboard not initialized"}),
+                        }
+                    }
+                }
+
+                "release_blackboard" => {
+                    let resource = request.get("resource").and_then(|v| v.as_str()).unwrap_or("");
+                    let project = request.get("project").and_then(|v| v.as_str()).unwrap_or("");
+                    let agent = request.get("agent").and_then(|v| v.as_str()).unwrap_or("worker");
+                    let force = request.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                    match &registry.blackboard {
+                        Some(bb) => match bb.release(resource, agent, project, force) {
+                            Ok(true) => serde_json::json!({"ok": true, "released": true}),
+                            Ok(false) => serde_json::json!({"ok": true, "released": false, "reason": "not found or not owned"}),
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                        },
+                        None => serde_json::json!({"ok": false, "error": "blackboard not initialized"}),
+                    }
+                }
+
+                "delete_blackboard" => {
+                    let project = request.get("project").and_then(|v| v.as_str()).unwrap_or("");
+                    let key = request.get("key").and_then(|v| v.as_str()).unwrap_or("");
+
+                    match &registry.blackboard {
+                        Some(bb) => match bb.delete_by_key(project, key) {
+                            Ok(true) => serde_json::json!({"ok": true, "deleted": true}),
+                            Ok(false) => serde_json::json!({"ok": true, "deleted": false}),
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                        },
+                        None => serde_json::json!({"ok": false, "error": "blackboard not initialized"}),
+                    }
+                }
+
+                "check_claim" => {
+                    let resource = request.get("resource").and_then(|v| v.as_str()).unwrap_or("");
+                    let project = request.get("project").and_then(|v| v.as_str()).unwrap_or("");
+
+                    match &registry.blackboard {
+                        Some(bb) => match bb.check_claim(resource, project) {
+                            Ok(Some((agent, content))) => serde_json::json!({
+                                "ok": true, "claimed": true, "agent": agent, "content": content
+                            }),
+                            Ok(None) => serde_json::json!({"ok": true, "claimed": false}),
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                        },
+                        None => serde_json::json!({"ok": false, "error": "blackboard not initialized"}),
                     }
                 }
 
@@ -1549,16 +1675,34 @@ impl Daemon {
                                 if let Some(board) = registry.get_task_board(&name).await {
                                     let mut board = board.lock().await;
                                     match board.close(task_id, reason) {
-                                        Ok(task) => serde_json::json!({
-                                            "ok": true,
-                                            "task": {
-                                                "id": task.id.0,
-                                                "status": task.status.to_string(),
-                                                "closed_reason": task.closed_reason,
-                                                "runtime": task.runtime(),
-                                                "task_outcome": task.task_outcome(),
+                                        Ok(task) => {
+                                            // Clean up task:* blackboard entries on close.
+                                            if let Some(ref bb) = registry.blackboard {
+                                                let prefix = format!("task:{}:", task_id);
+                                                if let Ok(entries) = bb.list_project(&name, 200) {
+                                                    let mut cleaned = 0u32;
+                                                    for entry in &entries {
+                                                        if entry.key.starts_with(&prefix) {
+                                                            let _ = bb.delete_by_key(&name, &entry.key);
+                                                            cleaned += 1;
+                                                        }
+                                                    }
+                                                    if cleaned > 0 {
+                                                        tracing::debug!(task_id, cleaned, "cleaned blackboard entries on task close");
+                                                    }
+                                                }
                                             }
-                                        }),
+                                            serde_json::json!({
+                                                "ok": true,
+                                                "task": {
+                                                    "id": task.id.0,
+                                                    "status": task.status.to_string(),
+                                                    "closed_reason": task.closed_reason,
+                                                    "runtime": task.runtime(),
+                                                    "task_outcome": task.task_outcome(),
+                                                }
+                                            })
+                                        }
                                         Err(e) => {
                                             serde_json::json!({"ok": false, "error": e.to_string()})
                                         }
@@ -2176,52 +2320,34 @@ impl Daemon {
                             }
                         }
                         serde_json::json!({"ok": true, "projects": project_memories})
-                    } else {
-                        // Query memories for a specific project.
-                        let cwd = std::env::current_dir().unwrap_or_default();
-                        let db_path = cwd
-                            .join("projects")
-                            .join(project)
-                            .join(".sigil")
-                            .join("memory.db");
-                        if !db_path.exists() {
-                            serde_json::json!({"ok": true, "memories": []})
-                        } else if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-                            let sql = if query.is_empty() {
-                                format!(
-                                    "SELECT id, key, content, category, scope, entity_id, created_at FROM memories ORDER BY created_at DESC LIMIT {limit}"
-                                )
-                            } else {
-                                format!(
-                                    "SELECT id, key, content, category, scope, entity_id, created_at FROM memories WHERE content LIKE '%{}%' OR key LIKE '%{}%' ORDER BY created_at DESC LIMIT {limit}",
-                                    query.replace('\'', ""),
-                                    query.replace('\'', "")
-                                )
-                            };
-                            let rows: Vec<serde_json::Value> = conn
-                                .prepare(&sql)
-                                .ok()
-                                .map(|mut stmt| {
-                                    stmt.query_map([], |row| {
-                                        Ok(serde_json::json!({
-                                            "id": row.get::<_, String>(0)?,
-                                            "key": row.get::<_, String>(1)?,
-                                            "content": row.get::<_, String>(2)?,
-                                            "category": row.get::<_, String>(3)?,
-                                            "scope": row.get::<_, String>(4)?,
-                                            "entity_id": row.get::<_, Option<String>>(5)?,
-                                            "created_at": row.get::<_, String>(6)?,
-                                        }))
-                                    })
-                                    .ok()
-                                    .map(|iter| iter.filter_map(|r| r.ok()).collect())
-                                    .unwrap_or_default()
-                                })
-                                .unwrap_or_default();
-                            serde_json::json!({"ok": true, "memories": rows, "count": rows.len()})
+                    } else if let Some(ref engine) = chat_engine {
+                        if let Some(mem) = engine.memory_stores.get(project) {
+                            let mq = sigil_core::traits::MemoryQuery::new(query, limit);
+                            match mem.search(&mq).await {
+                                Ok(entries) => {
+                                    let rows: Vec<serde_json::Value> = entries
+                                        .iter()
+                                        .map(|e| {
+                                            serde_json::json!({
+                                                "id": e.id,
+                                                "key": e.key,
+                                                "content": e.content,
+                                                "category": format!("{:?}", e.category),
+                                                "scope": format!("{:?}", e.scope),
+                                                "entity_id": e.entity_id,
+                                                "created_at": e.created_at.to_rfc3339(),
+                                            })
+                                        })
+                                        .collect();
+                                    serde_json::json!({"ok": true, "memories": rows, "count": rows.len()})
+                                }
+                                Err(e) => serde_json::json!({"ok": false, "error": format!("search failed: {e}")}),
+                            }
                         } else {
-                            serde_json::json!({"ok": true, "memories": []})
+                            serde_json::json!({"ok": true, "memories": [], "count": 0})
                         }
+                    } else {
+                        serde_json::json!({"ok": true, "memories": []})
                     }
                 }
 

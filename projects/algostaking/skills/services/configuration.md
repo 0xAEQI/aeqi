@@ -1,3 +1,9 @@
+---
+name: service-configuration
+description: Configuration service — registry distribution, subscription management
+phase: implement
+---
+
 # Service: configuration
 
 ## Required Reading

@@ -1,3 +1,9 @@
+---
+name: crate-service
+description: Service crate — config loading, graceful shutdown, common config types
+phase: implement
+---
+
 # Crate: service
 
 ## Purpose

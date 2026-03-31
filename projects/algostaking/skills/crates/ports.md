@@ -1,3 +1,9 @@
+---
+name: crate-ports
+description: Ports crate — single source of truth for all network port allocations
+phase: implement
+---
+
 # Crate: ports
 
 ## Purpose

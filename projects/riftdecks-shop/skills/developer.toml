@@ -1,6 +1,7 @@
 [skill]
 name = "developer"
 description = "Implement features for RiftDecks — Next.js, React, Stripe, Redis"
+phase = "implement"
 triggers = ["implement", "build", "code", "develop", "write"]
 
 [tools]

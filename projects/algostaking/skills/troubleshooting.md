@@ -1,3 +1,9 @@
+---
+name: troubleshooting
+description: Troubleshooting guide — service diagnostics, Prometheus, Grafana, DB, Nginx
+phase: verify
+---
+
 # Troubleshooting Guide
 
 ## Service Won't Start

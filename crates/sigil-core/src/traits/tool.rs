@@ -37,4 +37,12 @@ pub trait Tool: Send + Sync {
 
     /// Tool name (must match spec().name).
     fn name(&self) -> &str;
+
+    /// Whether this tool is safe to run concurrently with other concurrent-safe tools.
+    /// Read-only tools (file reads, searches, greps) should return true.
+    /// Write tools (file edits, shell commands that mutate) should return false.
+    /// The agent runs concurrent-safe tools in parallel and exclusive tools sequentially.
+    fn is_concurrent_safe(&self, _input: &serde_json::Value) -> bool {
+        true
+    }
 }

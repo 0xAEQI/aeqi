@@ -1112,8 +1112,60 @@ impl Tool for BlackboardTool {
                     Err(e) => Ok(ToolResult::error(format!("Get failed: {e}"))),
                 }
             }
+            "claim" => {
+                let resource = args
+                    .get("resource")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("missing resource"))?;
+                let content = args
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                match self.blackboard.claim(resource, &self.agent_name, &self.project_name, content) {
+                    Ok(crate::blackboard::ClaimResult::Acquired) => {
+                        Ok(ToolResult::success(format!("Claimed: {resource}")))
+                    }
+                    Ok(crate::blackboard::ClaimResult::Renewed) => {
+                        Ok(ToolResult::success(format!("Renewed claim: {resource}")))
+                    }
+                    Ok(crate::blackboard::ClaimResult::Held { holder, content }) => {
+                        Ok(ToolResult::success(format!(
+                            "BLOCKED — {resource} is claimed by {holder}: {content}"
+                        )))
+                    }
+                    Err(e) => Ok(ToolResult::error(format!("Claim failed: {e}"))),
+                }
+            }
+            "release" => {
+                let resource = args
+                    .get("resource")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("missing resource"))?;
+                let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                match self.blackboard.release(resource, &self.agent_name, &self.project_name, force) {
+                    Ok(true) => Ok(ToolResult::success(format!("Released: {resource}"))),
+                    Ok(false) => Ok(ToolResult::success(format!(
+                        "No active claim found for: {resource}"
+                    ))),
+                    Err(e) => Ok(ToolResult::error(format!("Release failed: {e}"))),
+                }
+            }
+            "delete" => {
+                let key = args
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("missing key"))?;
+
+                match self.blackboard.delete_by_key(&self.project_name, key) {
+                    Ok(true) => Ok(ToolResult::success(format!("Deleted: {key}"))),
+                    Ok(false) => Ok(ToolResult::success(format!("No entry found for: {key}"))),
+                    Err(e) => Ok(ToolResult::error(format!("Delete failed: {e}"))),
+                }
+            }
             _ => Ok(ToolResult::error(format!(
-                "Unknown action: {action}. Use: post, query, get"
+                "Unknown action: {action}. Use: post, query, get, claim, release, delete"
             ))),
         }
     }
@@ -1121,16 +1173,18 @@ impl Tool for BlackboardTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "blackboard".to_string(),
-            description: "Share discoveries with other agents via the project blackboard. Post findings, query existing knowledge, or get a specific entry by key.".to_string(),
+            description: "Shared coordination surface. Post discoveries, claim resources, signal state, query entries. Key prefixes: claim: (locks), signal: (broadcasts), finding: (results), decision: (choices).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "action": { "type": "string", "enum": ["post", "query", "get"], "description": "Action to perform (default: query)" },
-                    "key": { "type": "string", "description": "Key for post/get actions" },
-                    "content": { "type": "string", "description": "Content to post" },
+                    "action": { "type": "string", "enum": ["post", "query", "get", "claim", "release", "delete"], "description": "Action to perform (default: query)" },
+                    "key": { "type": "string", "description": "Key for post/get/delete" },
+                    "resource": { "type": "string", "description": "Resource path for claim/release (e.g. src/api/auth.rs)" },
+                    "content": { "type": "string", "description": "Content to post or claim description" },
                     "tags": { "type": "array", "items": { "type": "string" }, "description": "Tags for filtering/categorization" },
                     "durability": { "type": "string", "enum": ["transient", "durable"], "description": "How long the entry persists (default: transient)" },
-                    "limit": { "type": "integer", "description": "Max results for query (default: 10)" }
+                    "limit": { "type": "integer", "description": "Max results for query (default: 10)" },
+                    "force": { "type": "boolean", "description": "Force release even if claimed by another agent" }
                 }
             }),
         }

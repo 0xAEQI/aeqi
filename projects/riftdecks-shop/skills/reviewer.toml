@@ -1,6 +1,7 @@
 [skill]
 name = "reviewer"
 description = "Code review for RiftDecks — security, UX, e-commerce correctness"
+phase = "verify"
 triggers = ["review", "check", "audit", "validate"]
 
 [tools]

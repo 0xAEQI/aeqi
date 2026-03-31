@@ -1,3 +1,9 @@
+---
+name: latency-debugging
+description: Latency diagnostics — perf profiling, cache analysis, syscall tracing
+phase: discover
+---
+
 # Latency Debugging Guide
 
 ## Quick Diagnostics

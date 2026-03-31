@@ -1,3 +1,9 @@
+---
+name: pipeline-data
+description: Data pipeline — ingestion, aggregation, persistence services and data flow
+phase: discover
+---
+
 # Pipeline: Data
 
 ## Services

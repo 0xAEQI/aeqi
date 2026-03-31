@@ -1,3 +1,9 @@
+---
+name: service-ems
+description: EMS service — multi-account order execution, paper/live routing
+phase: implement
+---
+
 # Service: ems (Execution Management System)
 
 ## Required Reading

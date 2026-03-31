@@ -1,3 +1,9 @@
+---
+name: service-pms
+description: PMS service — Kelly sizing, risk limits, account selection
+phase: implement
+---
+
 # Service: pms (Portfolio Management System)
 
 ## Required Reading

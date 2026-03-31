@@ -1,3 +1,9 @@
+---
+name: monitoring
+description: Prometheus and Grafana monitoring — targets, dashboards, queries
+phase: discover
+---
+
 # Prometheus & Grafana Monitoring
 
 ## Architecture

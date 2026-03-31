@@ -1,3 +1,9 @@
+---
+name: pipeline-semantics
+description: Full data pipeline semantics — stage details, ZMQ topics, checkpointing
+phase: discover
+---
+
 # Pipeline Semantics
 
 ## Data Flow Overview

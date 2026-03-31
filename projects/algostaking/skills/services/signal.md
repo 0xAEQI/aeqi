@@ -1,3 +1,9 @@
+---
+name: service-signal
+description: Signal service — LTC network, multi-resolution aggregation, Kelly sizing
+phase: implement
+---
+
 # Service: signal
 
 ## Required Reading

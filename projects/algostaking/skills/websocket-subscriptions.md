@@ -1,3 +1,9 @@
+---
+name: websocket-subscriptions
+description: WebSocket channel subscriptions — subscribe/unsubscribe, binary frames, snapshots
+phase: implement
+---
+
 # WebSocket Channel Subscriptions
 
 ## Overview

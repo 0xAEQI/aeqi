@@ -1,3 +1,9 @@
+---
+name: crate-keys
+description: Keys crate — zero-alloc key packing, binary topic formatting, ID types
+phase: implement
+---
+
 # Crate: keys
 
 ## Purpose

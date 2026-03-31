@@ -1,3 +1,9 @@
+---
+name: crate-metrics
+description: Metrics crate — HFT-compliant Prometheus metrics, zero-alloc recording
+phase: implement
+---
+
 # Crate: metrics
 
 ## Purpose

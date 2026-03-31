@@ -1,6 +1,7 @@
 [skill]
 name = "researcher"
 description = "Deep codebase research for RiftDecks — Next.js, React, e-commerce, card data"
+phase = "discover"
 triggers = ["research", "explore", "investigate", "understand", "find"]
 
 [tools]

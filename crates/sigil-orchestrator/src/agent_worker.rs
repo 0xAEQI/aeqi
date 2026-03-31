@@ -1,8 +1,8 @@
 use anyhow::Result;
 use chrono::Utc;
 use sigil_core::traits::{
-    ChatRequest, LogObserver, Memory, MemoryCategory, MemoryScope, Message, MessageContent,
-    Observer, Provider, Role, Tool,
+    ChatRequest, Event, LogObserver, LoopAction, Memory, MemoryCategory, MemoryScope, Message,
+    MessageContent, Observer, Provider, Role, Tool,
 };
 use sigil_core::{Agent, AgentConfig, Identity};
 use sigil_tasks::{Checkpoint, Task, TaskOutcomeKind, TaskOutcomeRecord, TaskStatus};
@@ -81,7 +81,7 @@ pub struct AgentWorker {
     /// Model used for failure analysis when adaptive retry is enabled.
     pub failure_analysis_model: String,
     /// Middleware chain for composable execution behavior (guardrails, cost tracking, etc.).
-    pub middleware_chain: Option<MiddlewareChain>,
+    pub middleware_chain: Option<Arc<MiddlewareChain>>,
     /// Event broadcaster for real-time execution event streaming.
     pub event_broadcaster: Option<Arc<EventBroadcaster>>,
     /// Optional debounced write queue for batching reflection memory writes.
@@ -202,7 +202,7 @@ impl AgentWorker {
 
     /// Set the middleware chain for this worker.
     pub fn set_middleware(&mut self, chain: MiddlewareChain) {
-        self.middleware_chain = Some(chain);
+        self.middleware_chain = Some(Arc::new(chain));
     }
 
     /// Set the event broadcaster for real-time execution event streaming.
@@ -1253,7 +1253,22 @@ impl AgentWorker {
         task_context: &str,
         identity: &Identity,
     ) -> Result<sigil_core::AgentResult> {
-        let observer: Arc<dyn Observer> = Arc::new(LogObserver);
+        let observer: Arc<dyn Observer> = if let Some(ref chain) = self.middleware_chain {
+            let worker_ctx = crate::middleware::WorkerContext::new(
+                self.hook.as_ref().map(|h| h.task_id.0.as_str()).unwrap_or("unknown"),
+                task_context.chars().take(500).collect::<String>(),
+                &self.agent_name,
+                &self.project_name,
+            );
+            Arc::new(MiddlewareObserver::from_arc(
+                Arc::clone(chain),
+                worker_ctx,
+                Arc::new(LogObserver),
+            ))
+        } else {
+            Arc::new(LogObserver)
+        };
+
         let agent_config = AgentConfig {
             model: model.to_string(),
             max_iterations: 20,
@@ -1464,6 +1479,39 @@ impl AgentWorker {
                             );
                         }
                     }
+
+                    // Infer additional edges: search scoped to same scope/entity
+                    let mut edge_query = sigil_core::traits::MemoryQuery::new(content, 3)
+                        .with_scope(scope);
+                    if let Some(eid) = entity_id {
+                        edge_query = edge_query.with_entity(eid.to_string());
+                    }
+                    if let Ok(related) = mem.search(&edge_query).await {
+                        for entry in &related {
+                            if entry.id == id {
+                                continue;
+                            }
+                            if sigil_memory::dedup::is_support(content, &entry.content) {
+                                let _ = mem
+                                    .store_memory_edge(&id, &entry.id, "supports", 0.7)
+                                    .await;
+                                debug!(
+                                    worker = %worker_name,
+                                    source = %id, target = %entry.id,
+                                    "supports edge created"
+                                );
+                            } else if entry.score > 0.7 && entry.key != key {
+                                let _ = mem
+                                    .store_memory_edge(&id, &entry.id, "related_to", 0.5)
+                                    .await;
+                                debug!(
+                                    worker = %worker_name,
+                                    source = %id, target = %entry.id,
+                                    "related_to edge created"
+                                );
+                            }
+                        }
+                    }
                 }
                 Ok(_) => {
                     debug!(worker = %worker_name, key = %key, "store returned empty id (likely dedup)")
@@ -1527,4 +1575,89 @@ fn format_dispatch_for_prompt(dispatch: &Dispatch) -> String {
         dispatch.to,
         truncate_for_prompt(&dispatch.kind.body_text(), 220),
     )
+}
+
+// ---------------------------------------------------------------------------
+// MiddlewareObserver — bridges the middleware chain into the agent loop
+// ---------------------------------------------------------------------------
+
+use crate::middleware::{ToolCall as MwToolCall, ToolResult as MwToolResult};
+
+struct MiddlewareObserver {
+    chain: Arc<MiddlewareChain>,
+    ctx: tokio::sync::Mutex<WorkerContext>,
+    inner: Arc<dyn Observer>,
+}
+
+impl MiddlewareObserver {
+    fn from_arc(
+        chain: Arc<MiddlewareChain>,
+        ctx: WorkerContext,
+        inner: Arc<dyn Observer>,
+    ) -> Self {
+        Self {
+            chain,
+            ctx: tokio::sync::Mutex::new(ctx),
+            inner,
+        }
+    }
+
+    fn map_action(action: MiddlewareAction) -> LoopAction {
+        match action {
+            MiddlewareAction::Continue | MiddlewareAction::Skip => LoopAction::Continue,
+            MiddlewareAction::Halt(reason) => LoopAction::Halt(reason),
+            MiddlewareAction::Inject(msgs) => LoopAction::Inject(msgs),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Observer for MiddlewareObserver {
+    async fn record(&self, event: Event) {
+        self.inner.record(event).await;
+    }
+
+    fn name(&self) -> &str {
+        "middleware-bridge"
+    }
+
+    async fn before_model(&self, _iteration: u32) -> LoopAction {
+        let mut ctx = self.ctx.lock().await;
+        Self::map_action(self.chain.run_before_model(&mut ctx).await)
+    }
+
+    async fn after_model(
+        &self,
+        _iteration: u32,
+        _prompt_tokens: u32,
+        completion_tokens: u32,
+    ) -> LoopAction {
+        let mut ctx = self.ctx.lock().await;
+        // Update cost estimate (rough: $3/MTok output for sonnet-class)
+        ctx.cost_usd += completion_tokens as f64 * 3.0 / 1_000_000.0;
+        Self::map_action(self.chain.run_after_model(&mut ctx).await)
+    }
+
+    async fn before_tool(&self, tool_name: &str, input: &serde_json::Value) -> LoopAction {
+        let mut ctx = self.ctx.lock().await;
+        let call = MwToolCall {
+            name: tool_name.to_string(),
+            input: input.to_string(),
+        };
+        Self::map_action(self.chain.run_before_tool(&mut ctx, &call).await)
+    }
+
+    async fn after_tool(&self, tool_name: &str, output: &str, is_error: bool) -> LoopAction {
+        let mut ctx = self.ctx.lock().await;
+        let call = MwToolCall {
+            name: tool_name.to_string(),
+            input: String::new(),
+        };
+        let result = MwToolResult {
+            success: !is_error,
+            output: output.chars().take(500).collect(),
+        };
+        ctx.tool_call_history.push(call.clone());
+        Self::map_action(self.chain.run_after_tool(&mut ctx, &call, &result).await)
+    }
 }

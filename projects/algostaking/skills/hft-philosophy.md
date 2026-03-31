@@ -1,3 +1,9 @@
+---
+name: hft-philosophy
+description: HFT design principles — latency budgets, zero-alloc patterns, measurement rules
+phase: plan
+---
+
 # HFT Philosophy & Principles
 
 ## Core Tenets

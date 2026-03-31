@@ -1,3 +1,9 @@
+---
+name: harness-evolution
+description: Meta-agent for analyzing and improving the agent harness itself
+phase: finalize
+---
+
 # Skill: Harness Evolution
 
 **Invoke:** `/evolve-harness` or ask "improve the agent harness"

@@ -1,3 +1,9 @@
+---
+name: build-gates
+description: Build Gates
+phase: verify
+---
+
 # Build Gates
 
 Minimum quality gates that must pass before work is considered done. Check the project type and apply the relevant gates.

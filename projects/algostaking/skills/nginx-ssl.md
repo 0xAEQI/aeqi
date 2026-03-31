@@ -1,3 +1,9 @@
+---
+name: nginx-ssl
+description: Nginx reverse proxy and SSL/certbot configuration
+phase: implement
+---
+
 # Nginx & SSL Configuration
 
 ## Domains

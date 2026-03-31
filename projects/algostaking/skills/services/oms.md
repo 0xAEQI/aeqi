@@ -1,3 +1,9 @@
+---
+name: service-oms
+description: OMS service — order lifecycle, state machine, fill tracking, deduplication
+phase: implement
+---
+
 # Service: oms (Order Management System)
 
 ## Required Reading

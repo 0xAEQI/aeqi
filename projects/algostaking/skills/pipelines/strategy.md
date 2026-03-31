@@ -1,3 +1,9 @@
+---
+name: pipeline-strategy
+description: Strategy pipeline — feature, prediction, signal services and data flow
+phase: discover
+---
+
 # Pipeline: Strategy
 
 ## Services

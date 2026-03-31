@@ -1,3 +1,9 @@
+---
+name: infrastructure-overview
+description: Server architecture, environments, port map, service topology
+phase: discover
+---
+
 # AlgoStaking Infrastructure Overview
 
 ## Server

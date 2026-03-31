@@ -1,3 +1,9 @@
+---
+name: crate-types
+description: Types crate — FlatBuffer schemas, shared data structures, canonical parsing
+phase: implement
+---
+
 # Crate: types
 
 ## Purpose

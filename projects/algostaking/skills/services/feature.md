@@ -1,3 +1,9 @@
+---
+name: service-feature
+description: Feature service — DAG computation, lookback windows, normalization
+phase: implement
+---
+
 # Service: feature
 
 ## Required Reading

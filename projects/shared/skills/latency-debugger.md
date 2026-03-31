@@ -1,6 +1,7 @@
 ---
 name: latency-debugger
 description: Profile and debug latency issues in the HFT pipeline. Use when services are slow, P99 is high, or you need performance analysis.
+phase: discover
 tools: Bash, Read, Grep
 model: sonnet
 ---

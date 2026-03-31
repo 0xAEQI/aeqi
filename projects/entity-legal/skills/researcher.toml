@@ -1,6 +1,7 @@
 [skill]
 name = "researcher"
 description = "Research for entity.legal — legal tech, compliance, document structure, requirements"
+phase = "discover"
 triggers = ["research", "explore", "investigate", "understand", "find"]
 
 [tools]

@@ -17,6 +17,7 @@ sigil-orchestrator = { workspace = true }
 sigil-gates = { workspace = true }
 sigil-memory = { workspace = true }
 sigil-web = { workspace = true }
+sigil-graph = { workspace = true }
 
 tokio = { workspace = true }
 clap = { workspace = true }

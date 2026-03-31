@@ -1,3 +1,9 @@
+---
+name: zmq
+description: ZeroMQ messaging — port map, pub/sub patterns, topic formats
+phase: implement
+---
+
 # ZeroMQ Messaging
 
 ## Overview

@@ -1,3 +1,9 @@
+---
+name: protocol-compatibility
+description: Binary protocol rules — canonical serialization, anti-patterns, format reference
+phase: implement
+---
+
 # Protocol Compatibility & Binary Serialization
 
 ## Golden Rule

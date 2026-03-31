@@ -116,6 +116,7 @@ async fn main() -> Result<()> {
         Some(Commands::Operation { action }) => {
             cmd::operation::cmd_operation(&cli.config, action).await
         }
+        Some(Commands::Hooks { action }) => cmd::hooks::cmd_hooks(action).await,
         Some(Commands::Hook { worker, task_id }) => {
             cmd::tasks::cmd_hook(&cli.config, &worker, &task_id).await
         }

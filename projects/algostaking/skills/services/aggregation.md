@@ -1,3 +1,9 @@
+---
+name: service-aggregation
+description: Aggregation service — AVBB bar construction, volatility estimators
+phase: implement
+---
+
 # Service: aggregation
 
 ## Required Reading

@@ -1,3 +1,9 @@
+---
+name: service-stream
+description: Stream service — sub-microsecond WebSocket gateway, binary frames, channel subs
+phase: implement
+---
+
 # Service: stream
 
 ## Required Reading

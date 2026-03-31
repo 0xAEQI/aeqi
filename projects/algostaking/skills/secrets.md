@@ -1,3 +1,9 @@
+---
+name: secrets
+description: Secrets management — env files, database credentials, JWT, SSL certs
+phase: implement
+---
+
 # Secrets Management
 
 ## Environment Files

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use crate::cli::BlackboardAction;
 use crate::helpers::load_config;
-use sigil_orchestrator::blackboard::{Blackboard, EntryDurability};
+use sigil_orchestrator::blackboard::{Blackboard, ClaimResult, EntryDurability};
 
 pub(crate) async fn cmd_blackboard(
     config_path: &Option<PathBuf>,
@@ -17,6 +17,7 @@ pub(crate) async fn cmd_blackboard(
         &bb_path,
         orch.blackboard_transient_ttl_hours,
         orch.blackboard_durable_ttl_days,
+        orch.blackboard_claim_ttl_hours,
     )?;
 
     match action {
@@ -73,6 +74,59 @@ pub(crate) async fn cmd_blackboard(
             }
             for entry in &entries {
                 println!("{}: {} (by {})", entry.key, entry.content, entry.agent);
+            }
+        }
+        BlackboardAction::Get { project, key } => {
+            match bb.get_by_key(&project, &key)? {
+                Some(entry) => {
+                    println!(
+                        "{}: {} (by {}, expires {})",
+                        entry.key,
+                        entry.content,
+                        entry.agent,
+                        entry.expires_at.format("%Y-%m-%d %H:%M"),
+                    );
+                }
+                None => println!("No entry found for key '{key}'."),
+            }
+        }
+        BlackboardAction::Claim {
+            project,
+            resource,
+            content,
+            agent,
+        } => {
+            let agent = agent.as_deref().unwrap_or("cli");
+            match bb.claim(&resource, agent, &project, &content)? {
+                ClaimResult::Acquired => {
+                    println!("Claimed: {resource}");
+                }
+                ClaimResult::Renewed => {
+                    println!("Renewed claim: {resource}");
+                }
+                ClaimResult::Held { holder, content } => {
+                    println!("Held by {holder}: {content}");
+                }
+            }
+        }
+        BlackboardAction::Release {
+            project,
+            resource,
+            agent,
+            force,
+        } => {
+            let agent = agent.as_deref().unwrap_or("cli");
+            if bb.release(&resource, agent, &project, force)? {
+                println!("Released: {resource}");
+            } else {
+                println!("No claim found for '{resource}' (or not owned by {agent}).");
+            }
+        }
+        BlackboardAction::Delete { project, key } => {
+            if bb.delete_by_key(&project, &key)? {
+                println!("Deleted: {key}");
+            } else {
+                println!("No entry found for key '{key}'.");
             }
         }
     }

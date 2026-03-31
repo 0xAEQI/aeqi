@@ -1,3 +1,9 @@
+---
+name: crate-zmq-transport
+description: ZMQ transport crate — resilient subscriber/publisher, auto-reconnect, parser trait
+phase: implement
+---
+
 # Crate: zmq_transport
 
 ## Purpose

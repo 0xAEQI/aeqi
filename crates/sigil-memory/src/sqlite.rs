@@ -567,7 +567,7 @@ impl SqliteMemory {
     /// Store a memory edge (upsert on conflict).
     pub fn store_edge(&self, edge: &MemoryEdge) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        let relation_str = serde_json::to_value(&edge.relation)?
+        let relation_str = serde_json::to_value(edge.relation)?
             .as_str()
             .unwrap_or("related_to")
             .to_string();

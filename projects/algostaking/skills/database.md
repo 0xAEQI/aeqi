@@ -1,3 +1,9 @@
+---
+name: database
+description: TimescaleDB/PostgreSQL — schema management, queries, backup
+phase: implement
+---
+
 # TimescaleDB / PostgreSQL
 
 ## Connection Info

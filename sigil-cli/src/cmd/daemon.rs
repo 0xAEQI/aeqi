@@ -80,6 +80,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 &data_dir.join("blackboard.db"),
                 config.orchestrator.blackboard_transient_ttl_hours,
                 config.orchestrator.blackboard_durable_ttl_days,
+                config.orchestrator.blackboard_claim_ttl_hours,
             ) {
                 Ok(bb) => {
                     let bb = Arc::new(bb);

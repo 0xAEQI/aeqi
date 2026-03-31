@@ -1,3 +1,9 @@
+---
+name: git-workflow
+description: Git Workflow
+phase: implement
+---
+
 # Git Workflow
 
 Standard git practices for all projects on this server.

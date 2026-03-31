@@ -1,3 +1,9 @@
+---
+name: service-persistence
+description: Persistence service — batch writes to TimescaleDB, bar/tick/trade storage
+phase: implement
+---
+
 # Service: persistence
 
 ## Required Reading

@@ -152,6 +152,11 @@ pub enum Commands {
     },
 
     // --- Worker management ---
+    /// Development tools for Claude Code hook scripts.
+    Hooks {
+        #[command(subcommand)]
+        action: HooksAction,
+    },
     /// Pin work to a worker.
     Hook { worker: String, task_id: String },
     /// Mark task as done, trigger cleanup.
@@ -247,6 +252,43 @@ pub enum BlackboardAction {
         tags: Vec<String>,
         #[arg(short, long, default_value = "10")]
         limit: u32,
+    },
+    /// Get a specific entry by key.
+    Get {
+        #[arg(short = 'r', long = "project", alias = "rig")]
+        project: String,
+        key: String,
+    },
+    /// Claim exclusive access to a resource.
+    Claim {
+        #[arg(short = 'r', long = "project", alias = "rig")]
+        project: String,
+        /// Resource to claim (e.g. file path, module name).
+        resource: String,
+        /// Description of what you're doing with the resource.
+        content: String,
+        /// Agent name (defaults to "cli").
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Release a previously claimed resource.
+    Release {
+        #[arg(short = 'r', long = "project", alias = "rig")]
+        project: String,
+        /// Resource to release.
+        resource: String,
+        /// Agent name (defaults to "cli").
+        #[arg(long)]
+        agent: Option<String>,
+        /// Force release even if claimed by another agent.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Delete an entry by key.
+    Delete {
+        #[arg(short = 'r', long = "project", alias = "rig")]
+        project: String,
+        key: String,
     },
 }
 
@@ -407,6 +449,33 @@ pub enum PipelineAction {
     },
     /// Show status of a pipeline (parent task and its children).
     Status { id: String },
+}
+
+#[derive(Subcommand)]
+pub enum HooksAction {
+    /// Test a hook script with simulated input.
+    Test {
+        /// Script name (e.g., "check-recall") or full path.
+        script: String,
+        /// Tool input JSON.
+        #[arg(long)]
+        input: Option<String>,
+        /// Tool name context.
+        #[arg(long, default_value = "Edit")]
+        tool: String,
+    },
+    /// Validate all hook scripts from Claude Code settings.
+    Validate,
+    /// List active hooks from Claude Code settings.
+    List,
+    /// Benchmark hook execution times.
+    Bench {
+        /// Script name to benchmark (benchmarks all hot-path hooks if omitted).
+        script: Option<String>,
+        /// Number of iterations.
+        #[arg(long, default_value = "20")]
+        iterations: u32,
+    },
 }
 
 #[derive(Subcommand)]

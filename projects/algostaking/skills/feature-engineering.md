@@ -1,3 +1,9 @@
+---
+name: feature-engineering
+description: Quantitative feature engineering — DAG computation, normalization, SIMD patterns
+phase: implement
+---
+
 # Feature Engineering for Quantitative Trading
 
 ## Overview

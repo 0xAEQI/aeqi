@@ -1,3 +1,9 @@
+---
+name: service-api
+description: API service — REST endpoints, JWT auth, TOTP 2FA, fund/strategy CRUD
+phase: implement
+---
+
 # Service: api
 
 ## Required Reading

@@ -2,6 +2,18 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// Action returned by observer hooks to influence agent loop execution.
+#[derive(Debug, Clone, Default)]
+pub enum LoopAction {
+    /// Continue execution normally.
+    #[default]
+    Continue,
+    /// Stop the agent loop with a reason.
+    Halt(String),
+    /// Inject system messages into the conversation before the next LLM call.
+    Inject(Vec<String>),
+}
+
 /// Event types for observability.
 #[derive(Debug, Clone)]
 pub enum Event {
@@ -35,14 +47,67 @@ pub enum Event {
     },
 }
 
-/// Observability trait for metrics, logging, tracing.
+/// Observability and interception trait for the agent loop.
+///
+/// The `record` method is one-way logging. The `before_*`/`after_*` hooks can
+/// influence execution by returning [`LoopAction`]. Default implementations
+/// return `Continue`, so existing observers are unaffected.
 #[async_trait]
 pub trait Observer: Send + Sync {
-    /// Record an event.
+    /// Record an event (one-way, cannot influence execution).
     async fn record(&self, event: Event);
 
     /// Observer name.
     fn name(&self) -> &str;
+
+    /// Called before each LLM call. Return Halt to stop, Inject to add system messages.
+    async fn before_model(&self, _iteration: u32) -> LoopAction {
+        LoopAction::Continue
+    }
+
+    /// Called after each LLM response. Return Halt to stop, Inject to add messages.
+    async fn after_model(
+        &self,
+        _iteration: u32,
+        _prompt_tokens: u32,
+        _completion_tokens: u32,
+    ) -> LoopAction {
+        LoopAction::Continue
+    }
+
+    /// Called before each tool execution. Return Halt to block the tool call.
+    async fn before_tool(&self, _tool_name: &str, _input: &Value) -> LoopAction {
+        LoopAction::Continue
+    }
+
+    /// Called after each tool execution completes.
+    async fn after_tool(
+        &self,
+        _tool_name: &str,
+        _output: &str,
+        _is_error: bool,
+    ) -> LoopAction {
+        LoopAction::Continue
+    }
+
+    /// Called when the agent encounters an API or execution error.
+    /// Return Halt to stop, Continue to let the agent's built-in recovery handle it.
+    async fn on_error(&self, _iteration: u32, _error: &str) -> LoopAction {
+        LoopAction::Continue
+    }
+
+    /// Called when the model finishes with no tool calls (end of turn).
+    /// Return Continue to accept the stop. Return Inject to add messages and
+    /// force the agent to continue (e.g., for validation or correction).
+    /// Return Halt to stop with a specific reason.
+    async fn after_turn(
+        &self,
+        _iteration: u32,
+        _response_text: &str,
+        _stop_reason: &str,
+    ) -> LoopAction {
+        LoopAction::Continue
+    }
 }
 
 /// Default observer that logs to tracing.

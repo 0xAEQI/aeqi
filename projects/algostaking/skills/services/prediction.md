@@ -1,3 +1,9 @@
+---
+name: service-prediction
+description: Prediction service — FNO inference, model hot-swap, multi-horizon forecasting
+phase: implement
+---
+
 # Service: prediction
 
 ## Required Reading

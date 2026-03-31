@@ -1,3 +1,9 @@
+---
+name: keys-packing
+description: Packed integer keys and binary ZMQ topic system
+phase: implement
+---
+
 # Key Packing & Topic System
 
 ## Overview

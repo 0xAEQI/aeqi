@@ -1,3 +1,9 @@
+---
+name: cicd
+description: CI/CD pipeline — git hooks, deployment flow, rollback procedures
+phase: implement
+---
+
 # CI/CD Pipeline
 
 ## Git Workflow
