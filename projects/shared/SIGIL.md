@@ -22,6 +22,26 @@ Trivial fixes (typos, one-line config): `sigil_recall` → edit → `sigil_remem
 | `sigil_close_task(task_id)` | Close task (triggers integration check) |
 | `sigil_agents(action, phase)` | Browse available agents by phase |
 
+## Delegation Rules (MANDATORY)
+
+When spawning subagents for research, review, implementation, or any focused work:
+
+1. **Use `sigil_delegate`** to get the proper agent template — never spawn a raw Agent with an inline prompt
+2. **Subagents MUST post findings to blackboard** — `sigil_blackboard(action="post", key="task:{id}:{phase}", ...)`
+3. **Read blackboard after delegation** — `sigil_blackboard(action="query", project)` to get subagent findings
+4. **Use phase-appropriate agents** — `sigil_agents(action="list", phase="discover")` to see available templates
+
+```
+# Correct delegation pattern:
+sigil_agents(action="list", phase="discover")     # see available agents
+sigil_delegate(agent="researcher", project, task_id)  # get template prompt
+# → spawn Agent with the returned prompt
+# → subagent posts to blackboard automatically
+sigil_blackboard(action="query", project)          # read findings
+```
+
+Do NOT spawn anonymous agents with ad-hoc prompts. The templates include blackboard posting instructions, phase-specific skills, and proper tool scoping.
+
 ## Rules
 
 - No comments except `///` on public APIs.

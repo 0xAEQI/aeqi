@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # PreToolUse hook for Edit/Write: require sigil_recall before first edit.
 #
-# Event-driven gate — NO time-based expiry:
-#   Opens:  sigil_recall called (mark-recall.sh writes project name to gate file)
-#   Closes: session end (finalize clears it)
-#           project switch (edit targets different project than recalled)
-#           context compaction (compact event clears it via session-primer.sh)
+# Enforcement strategy: recall is required ONCE per project per session.
+# After that, edits flow freely. The gate re-closes on:
+#   - Session end (finalize clears it)
+#   - Project switch (edit targets different project than recalled)
+#   - Context compaction (compact event clears it via session-primer.sh)
 #
 # Gate file contains the project name that was recalled for.
 
@@ -68,7 +68,7 @@ if [ ! -f "$GATE" ]; then
         EXTRA="${EXTRA} Reload skills: ${LOST}."
     fi
     log_hook "check-recall" "deny" "no-gate: ${FILE_PATH:-unknown}"
-    echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Recall gate: call $HINT first.${EXTRA}\"}}"
+    echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Recall gate: call $HINT first (one-time per session, then all edits are free).${EXTRA}\"}}"
     exit 0
 fi
 
