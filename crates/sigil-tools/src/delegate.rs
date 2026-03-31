@@ -78,7 +78,7 @@ pub struct AgentHandle {
     pub description: String,
     pub status: AgentStatus,
     /// Set once notification is sent — prevents duplicate delivery.
-    notified: bool,
+    pub(crate) notified: bool,
 }
 
 // ---------------------------------------------------------------------------
