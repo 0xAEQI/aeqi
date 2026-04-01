@@ -67,6 +67,15 @@ pub struct PersistentAgent {
     pub last_active: Option<DateTime<Utc>>,
     pub session_count: u32,
     pub total_tokens: u64,
+    // --- Visual identity for TUI ---
+    /// TUI color (CSS hex like "#FFD700" or named like "gold", "crimson").
+    pub color: Option<String>,
+    /// ASCII avatar/emoji shown in response headers and status bar.
+    /// e.g., "⚕", "🔮", "⚔", or a kaomoji face like "(◕‿◕)".
+    pub avatar: Option<String>,
+    /// Emotional faces shown during different states.
+    /// Keys: "greeting", "thinking", "working", "error", "complete", "idle"
+    pub faces: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Frontmatter parsed from a template file.
@@ -82,6 +91,14 @@ pub struct AgentTemplateFrontmatter {
     pub parent: Option<String>,
     #[serde(default)]
     pub triggers: Vec<TemplateTrigger>,
+    // --- Visual identity for TUI ---
+    /// TUI color (CSS hex or named).
+    pub color: Option<String>,
+    /// ASCII avatar/emoji for response headers.
+    pub avatar: Option<String>,
+    /// Emotional faces by state: greeting, thinking, working, error, complete, idle.
+    #[serde(default)]
+    pub faces: std::collections::HashMap<String, String>,
 }
 
 /// A trigger definition within an agent template.
@@ -336,7 +353,7 @@ impl AgentRegistry {
             None
         };
 
-        let agent = self.spawn(
+        let mut agent = self.spawn(
             &name,
             fm.display_name.as_deref(),
             &template_name,
@@ -347,6 +364,27 @@ impl AgentRegistry {
             fm.model.as_deref(),
             &fm.capabilities,
         ).await?;
+
+        // Apply visual identity from template frontmatter.
+        if fm.color.is_some() || fm.avatar.is_some() || !fm.faces.is_empty() {
+            agent.color = fm.color;
+            agent.avatar = fm.avatar;
+            agent.faces = if fm.faces.is_empty() {
+                None
+            } else {
+                Some(fm.faces)
+            };
+            // Persist visual identity to DB.
+            let db = self.db.lock().await;
+            let faces_json = agent
+                .faces
+                .as_ref()
+                .map(|f| serde_json::to_string(f).unwrap_or_default());
+            let _ = db.execute(
+                "UPDATE agents SET color = ?1, avatar = ?2, faces = ?3 WHERE id = ?4",
+                rusqlite::params![agent.color, agent.avatar, faces_json, agent.id],
+            );
+        }
 
         // Create triggers from template.
         if !triggers.is_empty() {
@@ -407,6 +445,9 @@ impl AgentRegistry {
             last_active: None,
             session_count: 0,
             total_tokens: 0,
+            color: None,
+            avatar: None,
+            faces: None,
         };
 
         let db = self.db.lock().await;
@@ -656,8 +697,8 @@ impl AgentRegistry {
         let db = self.db.lock().await;
 
         // Try project-scoped first.
-        if let Some(p) = project {
-            if let Some(agent) = db
+        if let Some(p) = project
+            && let Some(agent) = db
                 .query_row(
                     "SELECT * FROM agents WHERE project = ?1 AND status = 'active' ORDER BY created_at ASC LIMIT 1",
                     params![p],
@@ -667,7 +708,6 @@ impl AgentRegistry {
             {
                 return Ok(Some(agent));
             }
-        }
 
         // Fall back to root-scoped.
         let agent = db
@@ -767,6 +807,13 @@ fn row_to_agent(row: &rusqlite::Row) -> PersistentAgent {
             .map(|d| d.with_timezone(&Utc)),
         session_count: row.get("session_count").unwrap_or(0),
         total_tokens: row.get::<_, i64>("total_tokens").unwrap_or(0) as u64,
+        // Visual identity — read from DB if columns exist, fallback to None.
+        color: row.get("color").ok(),
+        avatar: row.get("avatar").ok(),
+        faces: row
+            .get::<_, String>("faces")
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok()),
     }
 }
 
