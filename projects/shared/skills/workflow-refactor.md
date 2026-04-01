@@ -1,49 +1,129 @@
 ```toml
 [skill]
 name = "workflow-refactor"
-description = "Workflow for restructuring and refactoring existing code"
+description = "Use when restructuring, renaming, extracting, or reorganizing existing code. Not for new features or bug fixes."
 phase = "workflow"
 ```
 
 # Refactor Workflow
 
-Execute in order.
+A pipeline for restructuring code without changing behavior. Every refactor must be behavior-preserving — if tests fail, the refactor is wrong.
 
-## 1. Setup
 ```
-sigil_create_task(project, subject)
-sigil_recall(project, query)
-sigil_skills(action="list") → load architecture skills
+Analyze → Plan → Implement → Verify → Close
 ```
 
-## 2. Analyze Impact
-```
-sigil_graph(action="search", project, query) — find all symbols to change
-sigil_graph(action="impact", project, node_id) — blast radius for each
-sigil_graph(action="context", project, node_id) — all callers that need updating
-```
+---
 
-## 3. Plan
-```
-sigil_blackboard(action="post", project, key="task:<id>:plan", content=<refactoring plan with affected files>)
-sigil_delegate(agent="architect", project, task_id) — validate the approach
-```
+## Phase 1: Analyze
 
-## 4. Implement
-```
-sigil_graph(action="file", project, file_path) — before each file
-```
-Change all call sites. Run tests after each file.
+**Before ANY code changes.** Map the blast radius.
 
-## 5. Verify
-```
-sigil_graph(action="impact", project, node_id) — re-check blast radius post-change
-sigil_delegate(agent="reviewer", project, task_id) — verify consistency
-```
-Full test suite.
+1. **Recall context** — `sigil_recall` for prior decisions about this code area, architectural constraints
+2. **Find all targets** — `sigil_graph` search to locate every symbol that will change
+3. **Map dependencies** — for each target, `sigil_graph` impact to find all callers and dependents
+4. **Assess blast radius** — total files affected, cross-crate boundaries, public API changes
+5. **Load architecture knowledge** — `sigil_skills` list for relevant domain skills
 
-## 6. Close
-```
-sigil_remember(project, key, content, category)
-sigil_close_task(task_id)
-```
+<HARD-GATE>
+No refactoring until you've mapped every caller of every symbol you plan to change. Changing a function signature without updating all call sites is not a refactor — it's a breakage.
+</HARD-GATE>
+
+**Post analysis** — `sigil_blackboard` post with key `task:{id}:analysis` containing: symbols to change, blast radius, all affected files.
+
+**Terminal state:** Full blast radius mapped, proceed to Plan.
+
+---
+
+## Phase 2: Plan
+
+Break the refactor into atomic, independently-testable steps.
+
+1. **Create task** — `sigil_create_task` with the refactoring description
+2. **Order operations** — each step must leave the codebase compilable and tests passing:
+   - Renames before signature changes
+   - Add new before remove old (expand-contract pattern)
+   - Internal changes before public API changes
+3. **Decompose into tasks** — each task changes ONE thing. Include:
+   - Exact file paths and symbols affected
+   - What changes and the mechanical transformation
+   - Test command to verify behavior preservation
+4. **Validate with architect** — `sigil_delegate` with the architect agent to review the plan
+5. **Post plan** — `sigil_blackboard` post with key `task:{id}:plan`
+
+### Plan Quality Checklist
+- [ ] Every step compiles independently (no "fix compile errors in next step")
+- [ ] Every step has exact file paths and symbol names
+- [ ] No behavioral changes mixed with structural changes
+- [ ] Public API changes are last (internal first)
+- [ ] Plan includes all call site updates, not just the renamed symbol
+
+**Terminal state:** Plan validated and posted, proceed to Implement.
+
+---
+
+## Phase 3: Implement
+
+Execute the plan step by step. Tests must pass after EVERY step.
+
+### Per-Step Workflow
+
+1. **Delegate to implementer** — `sigil_delegate` with the implementer agent, full task context inline
+2. **Handle status:** DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED
+3. **Run tests immediately** — after each step, full test suite. Not "I'll test at the end."
+4. **If tests fail** — the refactor step is wrong. Revert and re-examine. Don't fix forward.
+
+### 3-Fix Escalation Rule
+If 3 attempts at the same step fail: **STOP.** The plan decomposition is wrong. Go back to Phase 2 and re-plan with smaller steps.
+
+### Refactor Discipline
+- Never mix refactoring with behavior changes. If you discover a bug, file it separately.
+- Never skip a test run between steps. Compound breakage is 10x harder to diagnose.
+- If a step touches more than 5 files, it's too big. Split it.
+
+**Terminal state:** All steps complete, tests pass after each, proceed to Verify.
+
+---
+
+## Phase 4: Verify
+
+Prove the refactor is behavior-preserving.
+
+1. **Full test suite** — `cargo test --workspace` / `npm test` — zero failures, zero new warnings
+2. **Delegate verification** — `sigil_delegate` with the reviewer agent to check ALL changes against the original plan
+3. **Read findings** — `sigil_blackboard` query for reviewer's posted findings
+4. **Impact re-check** — `sigil_graph` impact on every changed symbol to confirm no missed call sites
+
+### Verification Gate (MANDATORY)
+
+1. **COMPILE** — clean compile, zero warnings
+2. **TEST** — full suite passes
+3. **DIFF** — review the complete diff. Every change should be mechanical/structural, never behavioral.
+4. **SEARCH** — grep for old names/patterns to confirm nothing was missed
+
+<HARD-GATE>
+A refactor that changes behavior is not a refactor — it's a bug. If any test fails, the refactor is wrong. Do not update tests to match new behavior during a refactor.
+</HARD-GATE>
+
+**Terminal state:** Verified behavior-preserving, proceed to Close.
+
+---
+
+## Phase 5: Close
+
+1. **Store learnings** — `sigil_remember` any non-obvious discoveries (e.g., hidden coupling, circular dependencies)
+2. **Commit** with a message that describes the structural change and WHY it was done
+3. **Close task** — `sigil_close_task`
+
+---
+
+## Anti-Rationalization Table
+
+| Excuse | Reality |
+|--------|---------|
+| "I'll fix this bug while refactoring" | Refactors are behavior-preserving. Bug fixes change behavior. Do them separately. |
+| "Tests pass, I don't need to check every call site" | Tests may not cover every call site. Grep for the old name. |
+| "This step is too small to test separately" | If it's too small to test, it's too small to break. But it's not — test it. |
+| "I'll update the tests to match the new code" | If tests need behavioral updates during a refactor, the refactor changed behavior. |
+| "The blast radius is obvious" | Use `sigil_graph` impact. Your mental model of the codebase is incomplete. |
+| "I can do this in one big step" | Big steps compound errors. Small steps isolate them. |

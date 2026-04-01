@@ -1671,7 +1671,7 @@ impl Daemon {
                                 agent_id: None,
                             };
 
-                            // Try quick path first (intent detection).
+                            // Try command shortcuts first (create task, close task).
                             if let Some(response) = engine.handle_message(&msg).await {
                                 attach_chat_id(response.to_json(), chat_id)
                             } else {

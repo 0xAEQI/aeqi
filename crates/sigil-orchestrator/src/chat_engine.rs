@@ -1,8 +1,8 @@
 //! Unified Chat Engine — source-agnostic chat processing for Telegram, web, and future channels.
 //!
 //! Both Telegram and web chat are thin clients that delegate to this engine.
-//! The engine handles: intent detection, conversation history, agent routing,
-//! council invocation, task creation, and completion tracking.
+//! The engine handles: conversation history, agent routing, task creation,
+//! and completion tracking.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -458,24 +458,18 @@ impl ChatEngine {
         })
     }
 
-    /// Handle a chat message (quick path): intent detection + status queries.
-    /// Returns immediately. For messages that don't match an intent, returns None
-    /// to signal the caller should use `handle_message_full` instead.
-    ///
-    /// Uses keyword fast path first, then LLM classifier for ambiguous messages.
+    /// Handle explicit command shortcuts (no LLM call).
+    /// Returns None for normal messages — caller should use `handle_message_full`.
     pub async fn handle_message(&self, msg: &ChatMessage) -> Option<ChatResponse> {
         if msg.message.is_empty() {
             return Some(ChatResponse::error("message is required"));
         }
 
-        // Register channel.
         self.ensure_channel_registered(msg).await;
 
         let msg_lower = msg.message.to_lowercase();
 
-        // ── Fast path: keyword matching (no API call) ──
-
-        // Intent: create task (explicit prefix).
+        // Keyword shortcuts — explicit prefixes only, no guessing.
         if msg_lower.starts_with("create task")
             || msg_lower.starts_with("new task")
             || msg_lower.starts_with("add task")
@@ -486,7 +480,6 @@ impl ChatEngine {
             return Some(response);
         }
 
-        // Intent: close task (explicit prefix).
         if msg_lower.starts_with("close task") || msg_lower.starts_with("done with") {
             let response = self.handle_close_task(msg).await;
             self.record_exchange(msg, &response.context).await;
@@ -494,53 +487,7 @@ impl ChatEngine {
             return Some(response);
         }
 
-        // Intent: blackboard post (explicit prefix).
-        if msg_lower.starts_with("note:")
-            || msg_lower.starts_with("remember:")
-            || msg_lower.starts_with("blackboard:")
-        {
-            let response = self.handle_blackboard_post(msg).await;
-            self.record_exchange(msg, &response.context).await;
-            self.record_response_action_event(msg, &response).await;
-            return Some(response);
-        }
-
-        // ── Slow path: LLM classification for ambiguous messages ──
-
-        if let Some(ref classifier) = self.intent_classifier {
-            use crate::intent::ChatIntent;
-            let intent = classifier.classify(&msg.message).await;
-            match intent {
-                ChatIntent::CreateTask => {
-                    let response = self.handle_create_task(msg).await;
-                    self.record_exchange(msg, &response.context).await;
-                    self.record_response_action_event(msg, &response).await;
-                    return Some(response);
-                }
-                ChatIntent::CloseTask => {
-                    let response = self.handle_close_task(msg).await;
-                    self.record_exchange(msg, &response.context).await;
-                    self.record_response_action_event(msg, &response).await;
-                    return Some(response);
-                }
-                ChatIntent::BlackboardPost => {
-                    let response = self.handle_blackboard_post(msg).await;
-                    self.record_exchange(msg, &response.context).await;
-                    self.record_response_action_event(msg, &response).await;
-                    return Some(response);
-                }
-                ChatIntent::StatusQuery => {
-                    // Status queries go to full path for comprehensive response.
-                    return None;
-                }
-                ChatIntent::FullPath | ChatIntent::Unknown => {
-                    // Complex or ambiguous — proceed to full path.
-                    return None;
-                }
-            }
-        }
-
-        // No classifier available — fall through to full path.
+        // Everything else goes to the agent via full path.
         None
     }
 
@@ -1201,57 +1148,6 @@ impl ChatEngine {
         }
 
         ChatResponse::error(&format!("Couldn't find task {}.", task_id))
-    }
-
-    async fn handle_blackboard_post(&self, msg: &ChatMessage) -> ChatResponse {
-        let content = msg
-            .message
-            .split_once(':')
-            .map(|x| x.1)
-            .unwrap_or("")
-            .trim();
-        let project = msg.project_hint.as_deref().unwrap_or("*");
-        let key = format!("chat-note-{}", chrono::Utc::now().timestamp());
-
-        // Store to memory (permanent knowledge).
-        let memory_result = if project != "*" {
-            self.store_note(project, &key, content).await.ok()
-        } else {
-            None
-        };
-
-        // Also store to blackboard (shared ephemeral knowledge).
-        match &self.registry.blackboard {
-            Some(bb) => {
-                match bb.post(
-                    &key,
-                    content,
-                    &self.leader_name,
-                    project,
-                    &[],
-                    crate::blackboard::EntryDurability::Durable,
-                ) {
-                    Ok(_) => {
-                        let stored_where = if memory_result.is_some() {
-                            format!("Noted. Stored as knowledge in {}.", project)
-                        } else {
-                            format!("Noted. Saved to blackboard for {}.", project)
-                        };
-                        ChatResponse {
-                            ok: true,
-                            context: stored_where,
-                            action: Some("knowledge_stored".to_string()),
-                            task: None,
-                            projects: None,
-                            cost: None,
-                            workers: None,
-                        }
-                    }
-                    Err(e) => ChatResponse::error(&format!("Failed to save note: {}", e)),
-                }
-            }
-            None => ChatResponse::error("Blackboard not initialized."),
-        }
     }
 
     #[cfg(test)]

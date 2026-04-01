@@ -1,62 +1,134 @@
 ```toml
 [skill]
 name = "workflow-feature"
-description = "Full workflow for new features and multi-file changes"
+description = "Use when implementing a new feature, component, or multi-file change. Not for single-line fixes or research."
 phase = "workflow"
 ```
 
 # Feature Workflow
 
-Execute in order. Every step is a tool call.
+A structured pipeline for implementing features. Each phase has exactly ONE successor. No skipping phases.
 
-## 1. Setup
 ```
-sigil_create_task(project, subject)
-sigil_recall(project, query)
-sigil_skills(action="list") → pick relevant → sigil_skills(action="get", name="<match>")
+Brainstorm → Plan → Implement → Review → Finish
 ```
 
-## 2. Research
-```
-sigil_delegate(agent="researcher", project, task_id)
-```
-Spawn as a Claude Code Agent subagent with the returned prompt. Wait for it to finish.
-Then read its findings:
-```
-sigil_blackboard(action="read", project, prefix="task:<id>")
-```
+---
 
-## 3. Plan
-```
-sigil_graph(action="impact", project, node_id=<key symbol>) — blast radius
-sigil_blackboard(action="post", project, key="task:<id>:plan", content=<your plan>)
-```
-For complex changes, delegate planning:
-```
-sigil_delegate(agent="architect", project, task_id)
-```
-Read the architect's plan from blackboard.
+## Phase 1: Brainstorm
 
-## 4. Implement
-Before editing each file:
-```
-sigil_graph(action="file", project, file_path)
-```
-Write code. Run tests after each logical change.
+**Before ANY implementation.** Understand what you're building.
 
-## 5. Review
-```
-sigil_delegate(agent="reviewer", project, task_id)
-```
-Spawn as subagent. Wait for it to finish. Read verdict:
-```
-sigil_blackboard(action="read", project, prefix="task:<id>:review")
-```
-If FAIL: address issues and re-delegate review.
+1. **Recall context** — `sigil_recall` for prior decisions about this area
+2. **Explore codebase** — read relevant files, `sigil_graph` search/context for related symbols and impact
+3. **Ask clarifying questions** — ONE at a time, prefer concrete options over open-ended questions
+4. **Propose approach** — 2-3 options with trade-offs and your recommendation
+5. **Get approval** — do NOT proceed without explicit user agreement
 
-## 6. Close
-```
-sigil_graph(action="search", project, query="<new symbols>") — verify new code has callers
-sigil_remember(project, key, content, category)
-sigil_close_task(task_id)
-```
+<HARD-GATE>
+No implementation until the approach is approved. Not "probably fine." Not "seems reasonable." Explicitly approved.
+</HARD-GATE>
+
+**Terminal state:** Post approved approach to `sigil_blackboard`, proceed to Plan.
+
+---
+
+## Phase 2: Plan
+
+Break the approved approach into bite-sized tasks.
+
+1. **Create parent task** — `sigil_create_task` with the feature description
+2. **Map file structure** — `sigil_graph` context/impact to understand what files need changing and their relationships
+3. **Decompose into tasks** — each task is ONE action (2-5 minutes of work). Include:
+   - Exact file paths
+   - What to change and why
+   - Expected test command and output
+4. **Post plan to blackboard** — `sigil_blackboard` post with key `task:{id}:plan`
+
+### Plan Quality Checklist
+- [ ] Every task has exact file paths (no "the relevant files")
+- [ ] Every task has a verification step (test command + expected output)
+- [ ] No task depends on another task's uncommitted changes
+- [ ] No "TBD", "TODO", "as appropriate", or "similar to Task N"
+
+**Terminal state:** Plan posted to blackboard, proceed to Implement.
+
+---
+
+## Phase 3: Implement
+
+Execute the plan task by task.
+
+### Per-Task Workflow
+
+1. **Delegate to implementer** — `sigil_delegate` with the implementer agent, spawn subagent with FULL task context pasted inline (never file references)
+
+2. **Handle implementer status:**
+   - **DONE** → proceed to review
+   - **DONE_WITH_CONCERNS** → read concerns, decide if acceptable or needs rework
+   - **NEEDS_CONTEXT** → provide missing context, re-delegate
+   - **BLOCKED** → respect it. Break the task smaller or escalate to user.
+
+3. **Two-stage review** (NEVER reverse this order):
+   - **Stage 1: Spec review** — does the change match what was planned?
+   - **Stage 2: Quality review** — is the code well-written?
+
+   No point polishing code that doesn't meet spec. Spec first, always.
+
+4. **Mark task complete** — only after both review stages pass
+
+### 3-Fix Escalation Rule
+If 3 fix attempts for the same issue fail: **STOP.** Don't attempt fix #4. Question the architecture. The approach is wrong, not the execution.
+
+**Terminal state:** All tasks implemented and reviewed, proceed to Review.
+
+---
+
+## Phase 4: Final Review
+
+Full-scope review of the entire implementation.
+
+1. **Delegate final review** — `sigil_delegate` with the reviewer agent, checks ALL changes against the original plan
+2. **Read findings** — `sigil_blackboard` query for the reviewer's posted findings
+3. **Handle review result:**
+   - **Approved** → proceed to Finish
+   - **Issues found** → fix issues, re-review (but respect the 3-fix rule)
+
+### Verification Gate (MANDATORY before claiming complete)
+
+1. **IDENTIFY** — what command proves this works?
+2. **RUN** — execute it (full, fresh, no shortcuts)
+3. **READ** — check the FULL output and exit code
+4. **VERIFY** — does the output confirm success?
+5. **ONLY THEN** — claim completion
+
+<HARD-GATE>
+Claiming completion without running verification is dishonesty, not efficiency.
+If you're thinking "it should work" or "tests probably pass" — you haven't verified. Run it.
+</HARD-GATE>
+
+**Terminal state:** Verified and approved, proceed to Finish.
+
+---
+
+## Phase 5: Finish
+
+1. **Commit** with a clear message describing what and why
+2. **Store learnings** — `sigil_remember` anything non-obvious discovered during implementation
+3. **Close task** — `sigil_close_task`
+4. **Consider skill creation** — was this workflow complex enough to codify as a reusable skill?
+
+---
+
+## Anti-Rationalization Table
+
+| Excuse | Reality |
+|--------|---------|
+| "This is simple enough to skip brainstorming" | Simple changes don't need long brainstorming, but they still need a clear approach before implementation |
+| "I'll write tests after" | Write the test first. If you wrote code first, delete it and start with the test. |
+| "The plan is obvious, no need to write it down" | If it's obvious, writing it takes 30 seconds. If it's not, you need the plan. |
+| "One review stage is enough" | Spec review and quality review catch different problems. Skipping one means missing a class of issues. |
+| "I'll verify at the end" | Verify after EACH task. Bugs compound. Finding them early is 10x cheaper. |
+| "Tests pass so it works" | Tests passing means tests pass. Not that the feature works. Run it. |
+| "The subagent said it's done" | Don't trust the report. Verify independently. |
+| "I'm almost done, just one more thing" | "Almost done" is the most dangerous state. Stop. Verify what you have. |
