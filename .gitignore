@@ -4,6 +4,7 @@
 .DS_Store
 
 # Runtime state
+.sigil/sessions/
 .sigil/checkpoints/
 projects/*/.sigil/
 agents/*/.sigil/
@@ -35,3 +36,4 @@ projects/*/
 # Secrets
 .env
 .env.local
+.sigil/sessions/
