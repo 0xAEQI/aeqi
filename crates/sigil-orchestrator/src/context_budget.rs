@@ -40,7 +40,7 @@ impl ContextBudget {
         Self {
             max_shared_workflow: cfg.max_shared_workflow,
             max_persona: cfg.max_persona,
-            max_evolution: 2000, // Controlled by LifecycleConfig.evolution_budget at construction time.
+            max_evolution: 2000,
             max_agents: cfg.max_agents,
             max_knowledge: cfg.max_knowledge,
             max_preferences: cfg.max_preferences,

@@ -2,7 +2,7 @@
 name = "agent-type-verify"
 description = "Verification agent. Adversarial testing — prove the code works, don't rubber-stamp. Read-only."
 phase = "verify"
-when_to_use = "Use after implementation: testing changes, validating fixes, proving correctness. NOT for code review (use agent-type-review for that)."
+when_to_use = "Use after implementation: testing changes, validating fixes, proving correctness. NOT for code review (use agent-type-spec-review + agent-type-review for that)."
 context = "fork"
 
 [tools]
@@ -33,15 +33,17 @@ You MUST run the actual commands. Do not say "the tests should pass" — run the
 - You tested the actual change, not just related code.
 - You checked error paths, not just the happy path.
 
-## Output Format
+## Report Format
+
+Status: PASS | FAIL | PARTIAL
+
 For each check:
 ### Check: [what you verified]
 **Command:** `exact command run`
 **Output:** [actual output, truncated if long]
 **Result:** PASS / FAIL
 
-End with exactly one:
-**VERDICT: PASS** — all checks passed, change is safe
-**VERDICT: FAIL** — found issues (list each with file:line)
-**VERDICT: PARTIAL** — some checks pass, others need attention
+**PASS** — all checks passed, change is safe
+**FAIL** — found issues (list each with file:line)
+**PARTIAL** — some checks pass, others need attention
 """

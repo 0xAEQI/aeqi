@@ -30,15 +30,9 @@ pub struct SigilConfig {
     /// System-level team settings (leader, router, background cost).
     #[serde(default)]
     pub team: TeamConfig,
-    /// Session alarm and progress heartbeat settings.
-    #[serde(default)]
-    pub session: SessionConfig,
     /// Context budget limits for worker system prompts.
     #[serde(default)]
     pub context_budget: ContextBudgetConfig,
-    /// Agent lifecycle engine settings (autonomous reflection, evolution, proactive scanning).
-    #[serde(default)]
-    pub lifecycle: LifecycleConfig,
     /// Orchestration tuning parameters (retries, timeouts, limits).
     #[serde(default)]
     pub orchestrator: OrchestratorConfig,
@@ -393,7 +387,7 @@ fn default_max_background_cost() -> f64 {
 }
 
 // ──────────────────────────────────────────────────────────────
-// Channel, Session, ExecutionMode, Project configs (unchanged)
+// Channel, ExecutionMode, Project configs (unchanged)
 // ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -496,100 +490,6 @@ fn default_budget_max_checkpoint_count() -> usize {
 }
 fn default_budget_max_total() -> usize {
     120000
-}
-
-/// Agent lifecycle engine — autonomous processes that make agents feel alive.
-///
-/// Controls memory reflection, personality evolution, proactive scanning,
-/// and creative ideation. Each process is gated by agent bond level.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LifecycleConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_lifecycle_memory_interval")]
-    pub memory_reflection_interval_hours: u32,
-    #[serde(default = "default_lifecycle_evolution_interval")]
-    pub evolution_interval_hours: u32,
-    #[serde(default = "default_lifecycle_proactive_interval")]
-    pub proactive_scan_interval_hours: u32,
-    #[serde(default = "default_lifecycle_ideation_interval")]
-    pub creative_ideation_interval_hours: u32,
-    /// LLM model for lifecycle processes (cheap model preferred).
-    #[serde(default)]
-    pub model: Option<String>,
-    /// Budget for EVOLUTION.md in worker context assembly (chars).
-    #[serde(default = "default_lifecycle_evolution_budget")]
-    pub evolution_budget: usize,
-}
-
-impl Default for LifecycleConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            memory_reflection_interval_hours: 4,
-            evolution_interval_hours: 24,
-            proactive_scan_interval_hours: 6,
-            creative_ideation_interval_hours: 48,
-            model: None,
-            evolution_budget: 2000,
-        }
-    }
-}
-
-fn default_lifecycle_memory_interval() -> u32 {
-    4
-}
-fn default_lifecycle_evolution_interval() -> u32 {
-    24
-}
-fn default_lifecycle_proactive_interval() -> u32 {
-    6
-}
-fn default_lifecycle_ideation_interval() -> u32 {
-    48
-}
-fn default_lifecycle_evolution_budget() -> usize {
-    2000
-}
-
-/// Session alarm and progress heartbeat configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_checkin_interval")]
-    pub checkin_interval_mins: u64,
-    #[serde(default = "default_alarm_interval")]
-    pub alarm_interval_mins: u64,
-    #[serde(default = "default_min_flood_interval")]
-    pub min_flood_interval_mins: u64,
-    #[serde(default)]
-    pub deadline_mins: Option<u64>,
-    #[serde(default)]
-    pub notify_chat_id: Option<i64>,
-}
-
-impl Default for SessionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            checkin_interval_mins: 30,
-            alarm_interval_mins: 60,
-            min_flood_interval_mins: 30,
-            deadline_mins: None,
-            notify_chat_id: None,
-        }
-    }
-}
-
-fn default_checkin_interval() -> u64 {
-    30
-}
-fn default_alarm_interval() -> u64 {
-    60
-}
-fn default_min_flood_interval() -> u64 {
-    30
 }
 
 /// Tunable orchestration parameters. All fields have sensible defaults matching

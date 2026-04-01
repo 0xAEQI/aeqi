@@ -23,15 +23,6 @@ max_cost_per_day_usd = 10.0
 backend = "sqlite"
 temporal_decay_halflife_days = 30
 
-[heartbeat]
-enabled = false
-default_interval_minutes = 30
-
-# Agent lifecycle engine — autonomous reflection, evolution, proactive scanning
-[lifecycle]
-enabled = false
-model = "xiaomi/mimo-v2-pro"
-
 # Global repo pool — all agents can access all repos
 [repos]
 my-project = "/path/to/your/project"
@@ -80,15 +71,6 @@ max_background_cost_usd = 0.50
 # adaptive_retry = false        # enable LLM failure analysis for retries (v3)
 # preflight_enabled = false     # enable pre-flight assessment before workers (v3)
 # infer_deps_threshold = 0.0    # confidence threshold for auto-inferred deps (0=disabled)
-
-# Watchdog rules — event-driven automation (v3)
-# [[watchdogs]]
-# name = "failure-alert"
-# condition.event = "task_failed"
-# condition.count_threshold = 3
-# condition.window_secs = 3600
-# action.escalate.message = "3+ failures in 1 hour"
-# cooldown_secs = 3600
 
 # Projects (repos, tasks, knowledge)
 [[projects]]

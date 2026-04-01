@@ -110,25 +110,9 @@ Deep project-specific knowledge that workers need for context. This is the longe
 - ...
 ```
 
-#### HEARTBEAT.md -- Periodic Health Checks (optional)
-
-Instructions for the heartbeat system. Workers run these periodically and report issues.
-
-```markdown
-# Heartbeat Checks
-
-1. Check API health: `curl -s http://localhost:3000/api/health`
-2. Check database: `npx prisma db execute --stdin <<< "SELECT 1"`
-3. Check disk space: ensure > 10% free
-4. Check for error logs in the last hour
-
-If everything is OK, respond with "ALL OK".
-If there are issues, describe them clearly with severity.
-```
-
 #### PREFERENCES.md -- Learned Preferences (optional)
 
-Updated automatically by the reflection system. Contains preferences learned over time.
+Updated automatically. Contains preferences learned over time.
 
 ```markdown
 # Preferences
@@ -160,8 +144,7 @@ projects/myproject/
   IDENTITY.md              <- name, expertise, repos
   AGENTS.md                <- operating instructions
   KNOWLEDGE.md             <- project knowledge base
-  HEARTBEAT.md             <- heartbeat check instructions (optional)
-  PREFERENCES.md           <- learned preferences (reflection-updated)
+  PREFERENCES.md           <- learned preferences
   MEMORY.md                <- persistent notes (optional)
   skills/                  <- skill definitions (TOML)
     researcher.toml
@@ -176,7 +159,6 @@ projects/myproject/
     memory.db              <- per-project SQLite + FTS5
     checkpoints/           <- worker checkpoint JSONs
       mp-001.json
-    reflection-state.json  <- drift detection state
 ```
 
 ## Shared Templates

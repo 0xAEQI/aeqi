@@ -29,15 +29,6 @@ mmr_lambda = 0.7
 chunk_size_tokens = 400
 chunk_overlap_tokens = 80
 
-[heartbeat]
-enabled = false
-default_interval_minutes = 30
-
-# Agent lifecycle engine — autonomous reflection, evolution, proactive scanning
-[lifecycle]
-enabled = false
-model = "stepfun/step-3.5-flash:free"
-
 # Global repo pool — all agents can access all repos
 [repos]
 sigil = "/home/claudedev/sigil"
@@ -82,72 +73,6 @@ auto_redecompose = false
 infer_deps_threshold = 0.6
 blackboard_transient_ttl_hours = 48
 blackboard_durable_ttl_days = 14
-
-# Watchdog rules — event-driven automation
-[[watchdogs]]
-name = "sigil-self-failure"
-cooldown_secs = 7200
-enabled = false
-[watchdogs.condition]
-event = "task_failed"
-project_filter = "sigil"
-count_threshold = 2
-window_secs = 3600
-[watchdogs.action.escalate]
-message = "2+ task failures in sigil project — the orchestrator needs attention"
-
-# Algostaking cron jobs: service-heartbeat (5m), pnl-tracker (10m),
-# accuracy-watchdog (15m), health-monitor (30m), training-progress (1h),
-# improvement-cycle (2h), morning-report (8:57am), daily-pnl (midnight),
-# weekend-deep-review (Sat 10:17am)
-
-# Algostaking reactive watchdogs
-[[watchdogs]]
-name = "algostaking-task-failure"
-cooldown_secs = 1800
-enabled = false
-[watchdogs.condition]
-event = "task_failed"
-project_filter = "algostaking"
-count_threshold = 2
-window_secs = 3600
-[watchdogs.action.escalate]
-message = "2+ algostaking task failures in 1 hour — check services and ML pipeline"
-
-[[watchdogs]]
-name = "algostaking-worker-timeout"
-cooldown_secs = 3600
-enabled = false
-[watchdogs.condition]
-event = "worker_timeout"
-project_filter = "algostaking"
-count_threshold = 1
-window_secs = 1800
-[watchdogs.action.escalate]
-message = "Algostaking worker timed out — possible stuck inference or training loop"
-
-[[watchdogs]]
-name = "budget-warning"
-cooldown_secs = 14400
-enabled = false
-[watchdogs.condition]
-event = "budget_threshold_reached"
-count_threshold = 1
-window_secs = 86400
-budget_threshold = 0.8
-[watchdogs.action.escalate]
-message = "Budget usage exceeded 80%"
-
-[[watchdogs]]
-name = "general-timeout-alert"
-cooldown_secs = 3600
-enabled = false
-[watchdogs.condition]
-event = "worker_timeout"
-count_threshold = 3
-window_secs = 1800
-[watchdogs.action.escalate]
-message = "3+ worker timeouts across projects in 30 minutes"
 
 # Projects — each is a product you're building
 # Sigil manages itself — dogfooding is how we make it great

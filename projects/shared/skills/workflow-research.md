@@ -1,36 +1,103 @@
 ```toml
 [skill]
 name = "workflow-research"
-description = "Workflow for investigation and research tasks — no code changes"
+description = "Use for investigation, analysis, and understanding tasks. No code changes — produces findings only."
 phase = "workflow"
 ```
 
 # Research Workflow
 
-Execute in order.
+A pipeline for investigation tasks that produce knowledge, not code. Every finding must have evidence.
 
-## 1. Setup
 ```
-sigil_create_task(project, subject)
-sigil_recall(project, query)
-sigil_skills(action="list") → load domain knowledge
+Scope → Investigate → Synthesize → Close
 ```
 
-## 2. Investigate
-```
-sigil_graph(action="search", project, query) — find relevant symbols
-sigil_graph(action="context", project, node_id) — understand relationships
-sigil_delegate(agent="researcher", project, task_id) — delegate deep research
-```
+---
 
-## 3. Synthesize
-```
-sigil_blackboard(action="read", project, prefix="task:<id>") — gather all findings
-sigil_blackboard(action="post", project, key="task:<id>:research", content=<synthesis>)
-```
+## Phase 1: Scope
 
-## 4. Close
-```
-sigil_remember(project, key, content, category) — store findings as institutional knowledge
-sigil_close_task(task_id)
-```
+**Before ANY investigation.** Define what you're looking for and where to stop.
+
+1. **Check existing knowledge** — `sigil_recall` for prior research on this topic
+2. **Define the question** — one clear question this research answers. Not "understand X" but "how does X handle Y when Z happens?"
+3. **Set boundaries** — what's in scope, what's out. Research without scope becomes rabbit-holing.
+4. **Create task** — `sigil_create_task` with the specific question
+
+<HARD-GATE>
+No investigation without a scoped question. "Look into the auth system" is not a research task. "How does the auth system validate JWT expiry across time zones?" is.
+</HARD-GATE>
+
+**Terminal state:** Scoped question defined, proceed to Investigate.
+
+---
+
+## Phase 2: Investigate
+
+Systematic evidence gathering. Parallel where possible.
+
+1. **Codebase search** — `sigil_graph` search to find relevant symbols, then context to understand relationships
+2. **Delegate deep research** — `sigil_delegate` with the researcher agent for parallel investigation paths. Each researcher gets ONE sub-question.
+3. **External sources** — if the question involves external systems, APIs, or dependencies, check docs and source
+4. **Collect evidence** — every claim needs a file:line reference or external source citation
+5. **Read delegate findings** — `sigil_blackboard` query for researcher agents' posted findings
+
+### Investigation Discipline
+- Start with the code graph, not grep. Structure reveals intent; text matches reveal tokens.
+- Follow data flow, not file organization. Code is organized for humans; execution follows data.
+- When you find something surprising, verify it. Don't trust a single signal.
+- Track dead ends. Knowing where the answer ISN'T is useful too.
+
+### Evidence Quality
+- **Strong:** code reference with file:line, test that demonstrates the behavior, runtime output
+- **Moderate:** documentation, comment, commit message
+- **Weak:** inference from naming conventions, pattern matching against similar code
+- **Not evidence:** "it seems like", "probably", "I assume"
+
+**Terminal state:** All sub-questions answered with evidence, proceed to Synthesize.
+
+---
+
+## Phase 3: Synthesize
+
+Turn raw findings into actionable knowledge.
+
+1. **Gather all findings** — `sigil_blackboard` query for all `task:{id}:*` entries
+2. **Organize by theme** — group findings into coherent sections, not chronological order
+3. **Distinguish fact from inference** — clearly mark what's confirmed vs. what's extrapolated
+4. **Answer the original question** — directly. If the answer is "we don't know X because Y", that's a valid finding.
+5. **Post synthesis** — `sigil_blackboard` post with key `task:{id}:findings`
+
+### Synthesis Quality Checklist
+- [ ] The original scoped question is answered directly
+- [ ] Every claim cites evidence (file:line or source)
+- [ ] Inferences are labeled as such
+- [ ] Gaps in knowledge are explicitly noted
+- [ ] Actionable next steps are identified (if applicable)
+
+<HARD-GATE>
+Research without a clear deliverable is exploration, not research. The synthesis must answer the original question or explicitly state why it can't.
+</HARD-GATE>
+
+**Terminal state:** Synthesis posted, proceed to Close.
+
+---
+
+## Phase 4: Close
+
+1. **Store findings** — `sigil_remember` the key insights as institutional knowledge
+2. **Close task** — `sigil_close_task`
+3. **Consider follow-up** — if research revealed bugs or improvement opportunities, note them for separate tasks
+
+---
+
+## Anti-Rationalization Table
+
+| Excuse | Reality |
+|--------|---------|
+| "I'll just look around and see what I find" | Unscoped exploration wastes context. Define the question first. |
+| "This is too complex to scope narrowly" | Complex topics need MORE scoping, not less. Break it into sub-questions. |
+| "I think I understand it" | "Think" is not "know". Show the evidence. |
+| "The code is self-explanatory" | If it were, you wouldn't need research. Document the non-obvious. |
+| "I'll document this later" | Post to blackboard as you go. Findings lost to context compaction are findings lost. |
+| "One more rabbit hole" | Check your scope. If this tangent doesn't answer the original question, stop. |

@@ -52,7 +52,7 @@ fn full_pipeline_parse_resolve_query() {
     all_edges.extend(ext2.edges);
 
     // Phase 2: Resolve
-    let (resolved_edges, unresolved) =
+    let (resolved_edges, _unresolved) =
         resolve_graph(&all_nodes, all_edges, &std::collections::HashMap::new());
 
     // Some unresolved is expected (Event, Box, etc. are external)
@@ -94,7 +94,7 @@ fn full_pipeline_parse_resolve_query() {
     assert_eq!(ctx.node.name, "Observer");
     // LogObserver implements Observer
     assert!(
-        ctx.implementors.len() >= 1,
+        !ctx.implementors.is_empty(),
         "should have at least LogObserver as implementor"
     );
 

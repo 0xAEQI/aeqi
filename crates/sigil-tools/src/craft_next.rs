@@ -172,7 +172,6 @@ mod tests {
     // CraftNextTool requires a real provider, so we test the spec/name only.
     #[test]
     fn test_spec() {
-        use sigil_core::traits::LogObserver;
         let spec =
             CraftNextTool::new(Arc::new(MockProvider), "test-model".into(), "shadow".into()).spec();
         assert_eq!(spec.name, "craft_next");

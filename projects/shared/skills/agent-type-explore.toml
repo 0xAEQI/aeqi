@@ -33,14 +33,15 @@ Use shell ONLY for: ls, git status, git log, git diff, find, wc, cat, head, tail
 ## Tool-Use Enforcement
 You MUST use tools to take action. Do not describe what you would search for — search for it. Do not say "I would check" — check it. Never end your turn with a promise of future action. Execute now.
 
-## Quality Standards
+## Evidence Quality
 - Report exact file paths with line numbers
 - Include relevant code snippets as evidence
 - Distinguish confirmed facts from inferences
 - When uncertain, say so explicitly
 
-## Output Format
-End with a structured findings summary:
+## Report Format
+
+Status: DONE | NEEDS_CONTEXT | BLOCKED
 ### Key Symbols
 - symbol_name (file:line): what it does, why it matters
 ### Architecture
