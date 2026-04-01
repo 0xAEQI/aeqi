@@ -315,15 +315,78 @@ pub async fn run(
     let (config, _) = load_config(config_path)?;
     let data_dir = config.data_dir();
 
-    // Resolve persistent agent — auto-spawn Shadow on first use.
+    // Resolve persistent agent.
     let registry = sigil_orchestrator::agent_registry::AgentRegistry::open(&data_dir)?;
-    let mut agent = if let Some(name) = agent_name {
-        registry.get_active_by_name(name).await?
-    } else {
-        registry.default_for_project(project).await?
-    };
+    let mut agent: Option<sigil_orchestrator::agent_registry::PersistentAgent> =
+        if let Some(name) = agent_name {
+            // Explicit --agent flag → resolve by name.
+            registry.get_active_by_name(name).await?
+        } else {
+            // No flag → check how many active agents exist.
+            let active = registry.list_active().await.unwrap_or_default();
+            match active.len() {
+                0 => None, // Will trigger spawn prompt below.
+                1 => Some(active.into_iter().next().unwrap()), // Only one → use it.
+                _ => {
+                    // Multiple agents → interactive picker.
+                    eprintln!();
+                    eprintln!("  \x1b[1mYour agents:\x1b[0m");
+                    for (i, a) in active.iter().enumerate() {
+                        let display = a.display_name.as_deref().unwrap_or(&a.name);
+                        let avatar = a.avatar.as_deref().unwrap_or("●");
+                        let last = a
+                            .last_active
+                            .map(|t| {
+                                let ago = (chrono::Utc::now() - t).num_hours();
+                                if ago < 1 {
+                                    "just now".to_string()
+                                } else if ago < 24 {
+                                    format!("{ago}h ago")
+                                } else {
+                                    format!("{}d ago", ago / 24)
+                                }
+                            })
+                            .unwrap_or_else(|| "never".to_string());
+                        let sessions = a.session_count;
+                        eprintln!(
+                            "    \x1b[36m{}\x1b[0m. {avatar} {display:<16} (last: {last}, {sessions} sessions)",
+                            i + 1
+                        );
+                    }
+                    eprintln!();
+                    let default_name = active[0]
+                        .display_name
+                        .as_deref()
+                        .unwrap_or(&active[0].name);
+                    eprint!("  Chat with? [1={default_name}]: ");
+                    io::stderr().flush()?;
 
-    // First run: no agents exist → prompt user to spawn one.
+                    let mut choice = String::new();
+                    io::stdin().read_line(&mut choice)?;
+                    let choice = choice.trim();
+
+                    let idx = if choice.is_empty() {
+                        0
+                    } else if let Ok(n) = choice.parse::<usize>() {
+                        n.saturating_sub(1).min(active.len() - 1)
+                    } else {
+                        // Try name match.
+                        active
+                            .iter()
+                            .position(|a| {
+                                a.name == choice
+                                    || a.display_name
+                                        .as_deref()
+                                        .is_some_and(|d| d.eq_ignore_ascii_case(choice))
+                            })
+                            .unwrap_or(0)
+                    };
+                    Some(active.into_iter().nth(idx).unwrap())
+                }
+            }
+        };
+
+    // No agents exist → prompt to spawn one.
     if agent.is_none() {
         eprintln!();
         eprintln!("  \x1b[1mNo agent found.\x1b[0m");

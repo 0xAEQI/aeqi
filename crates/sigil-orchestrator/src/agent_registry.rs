@@ -692,6 +692,20 @@ impl AgentRegistry {
 
     /// Get the default agent for a project (first active agent scoped to that project,
     /// or the first root-scoped active agent).
+    /// List all active agents, sorted by most recently active first.
+    pub async fn list_active(&self) -> Result<Vec<PersistentAgent>> {
+        let db = self.db.lock().await;
+        let mut stmt = db.prepare(
+            "SELECT * FROM agents WHERE status = 'active' \
+             ORDER BY COALESCE(last_active, created_at) DESC",
+        )?;
+        let agents = stmt
+            .query_map([], |row| Ok(row_to_agent(row)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(agents)
+    }
+
     pub async fn default_for_project(
         &self,
         project: Option<&str>,
