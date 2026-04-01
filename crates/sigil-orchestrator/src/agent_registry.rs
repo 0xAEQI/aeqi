@@ -98,6 +98,12 @@ pub struct TemplateTrigger {
     pub event_project: Option<String>,
     /// Event tool filter (optional, for tool_call_completed).
     pub event_tool: Option<String>,
+    /// Event from_agent filter (optional, for dispatch_received/channel_message).
+    pub event_from: Option<String>,
+    /// Event kind filter (optional, for dispatch_received).
+    pub event_kind: Option<String>,
+    /// Event channel filter (optional, for channel_message).
+    pub event_channel: Option<String>,
     /// Cooldown in seconds for event triggers (required for event type).
     pub cooldown_secs: Option<u64>,
     /// Skill to run when triggered.
@@ -703,6 +709,14 @@ fn template_trigger_to_type(t: &TemplateTrigger) -> Result<crate::trigger::Trigg
             },
             "tool_call_completed" => crate::trigger::EventPattern::ToolCallCompleted {
                 tool: t.event_tool.clone(),
+            },
+            "dispatch_received" => crate::trigger::EventPattern::DispatchReceived {
+                from_agent: t.event_from.clone(),
+                kind: t.event_kind.clone(),
+            },
+            "channel_message" => crate::trigger::EventPattern::ChannelMessage {
+                channel_name: t.event_channel.clone(),
+                from_agent: t.event_from.clone(),
             },
             other => anyhow::bail!("unknown event pattern: {other}"),
         };
