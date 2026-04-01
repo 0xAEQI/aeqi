@@ -67,25 +67,28 @@ Every persistent agent gets `dispatch_read`, `dispatch_send`, and `channel_post`
 ## Architecture
 
 ```
-User / Telegram / Slack / Web
+User message (CLI / Telegram / Slack / Web)
     |
     v
-ChatEngine ------> Quick path (intent detection, immediate response)
+ChatEngine routes to agent's conversation
     |
     v
-Task created -----> Supervisor assigns to worker
+Task created --> Supervisor assigns to worker
     |
     v
 Worker loads: agent identity + skill + memory + org context + blackboard
     |
     v
-Agent loop: LLM -> tool calls -> LLM -> ... -> done
+Agent loop: LLM --> tool calls --> LLM --> ... --> done
     |
     v
 Outcome: DONE / BLOCKED (escalate) / FAILED (retry)
+    |
+    v
+Transcript saved to ConversationStore (FTS5 searchable)
 
 
-Trigger fires (schedule / event)
+Trigger fires (schedule / event / dispatch received / channel message)
     |
     v
 Same worker path as above
