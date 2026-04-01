@@ -102,7 +102,6 @@ ASYNC TASK (trigger fires / task assigned / dispatch received)
         v
     Transcript saved (FTS5 searchable)
 ```
-```
 
 ### Daemon Patrol Loop
 
@@ -122,15 +121,16 @@ Event triggers run separately via a background subscriber on the EventBroadcaste
 
 ### Middleware Chain
 
-Every agent session runs through 8 safety layers:
+Every agent session runs through 9 safety layers:
 
 | Layer | What it does |
 |-------|-------------|
 | Loop Detection | Kill after 5 repeated identical tool calls |
-| Guardrails | Block `rm -rf`, force push, `DROP TABLE` |
 | Cost Tracking | Enforce per-task budget ceiling |
-| Context Compression | Compact at 50% context window |
 | Context Budget | Cap enrichment at ~200 lines |
+| Graph Guardrails | Blast radius analysis on code changes |
+| Guardrails | Block `rm -rf`, force push, `DROP TABLE` |
+| Context Compression | Compact at 50% context window |
 | Memory Refresh | Re-search memory every N tool calls |
 | Clarification | Structured questions that halt execution |
 | Safety Net | Preserve partial work on failure |
@@ -215,6 +215,7 @@ All state lives in `~/.sigil/`:
 | File | What |
 |------|------|
 | `agents.db` | Persistent agent registry + triggers |
+| `conversations.db` | Chat history + session transcripts (FTS5) |
 | `memory.db` | Entity, domain, and system memories |
 | `blackboard.db` | Shared coordination entries |
 | `dispatches.db` | Agent-to-agent message queue |
@@ -226,7 +227,7 @@ All state lives in `~/.sigil/`:
 ## Development
 
 ```bash
-cargo test              # 619 tests
+cargo test              # ~600 tests
 cargo clippy -- -D warnings
 cargo fmt --check
 ```
