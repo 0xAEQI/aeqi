@@ -40,6 +40,16 @@ pub struct SkillMeta {
     /// Hint showing argument placeholders (e.g., "<pr_number> <target_branch>").
     #[serde(default)]
     pub argument_hint: Option<String>,
+    /// Model override for this skill. If set, the worker uses this model
+    /// instead of its default. Useful for using cheaper models on reflective
+    /// tasks or stronger models on complex analysis.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Allow shell command execution in prompt template (`!` backtick syntax).
+    /// Default: false. When true, `!`backtick`` blocks in the system prompt
+    /// are executed at load time and replaced with their stdout.
+    #[serde(default)]
+    pub allow_shell_in_prompt: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -124,15 +134,67 @@ impl Skill {
     }
 
     /// Build the full system prompt for this skill.
+    /// If `allow_shell_in_prompt` is true, executes `!` backtick blocks and
+    /// replaces them with their stdout.
     pub fn system_prompt(&self, base_identity: &str) -> String {
+        let mut prompt = self.prompt.system.clone();
+
+        // Expand shell commands in prompt if enabled.
+        if self.skill.allow_shell_in_prompt {
+            prompt = Self::expand_shell_commands(&prompt);
+        }
+
         if base_identity.is_empty() {
-            self.prompt.system.clone()
+            prompt
         } else {
             format!(
                 "{}\n\n---\n\n# Skill: {}\n\n{}",
-                base_identity, self.skill.name, self.prompt.system
+                base_identity, self.skill.name, prompt
             )
         }
+    }
+
+    /// Execute `!` backtick blocks in a prompt string and replace with stdout.
+    /// Format: !`command here` — the backtick content is passed to bash -c.
+    /// On error, the block is replaced with an error message.
+    fn expand_shell_commands(prompt: &str) -> String {
+        let mut result = String::with_capacity(prompt.len());
+        let mut remaining = prompt;
+
+        while let Some(start) = remaining.find("!`") {
+            result.push_str(&remaining[..start]);
+            let after_marker = &remaining[start + 2..];
+
+            if let Some(end) = after_marker.find('`') {
+                let command = &after_marker[..end];
+                let output = std::process::Command::new("bash")
+                    .arg("-c")
+                    .arg(command)
+                    .output();
+
+                match output {
+                    Ok(out) if out.status.success() => {
+                        let stdout = String::from_utf8_lossy(&out.stdout);
+                        result.push_str(stdout.trim_end());
+                    }
+                    Ok(out) => {
+                        let stderr = String::from_utf8_lossy(&out.stderr);
+                        result.push_str(&format!("[shell error: {}]", stderr.trim()));
+                    }
+                    Err(e) => {
+                        result.push_str(&format!("[shell exec failed: {e}]"));
+                    }
+                }
+
+                remaining = &after_marker[end + 1..];
+            } else {
+                // Unclosed backtick — keep as-is.
+                result.push_str("!`");
+                remaining = after_marker;
+            }
+        }
+        result.push_str(remaining);
+        result
     }
 
     /// Whether this skill should run as a forked subagent (separate context).
@@ -257,6 +319,58 @@ system = "Deploy $name to $target environment"
 
         let result = skill.substitute_args(&args);
         assert_eq!(result, "Deploy myapp to production environment");
+    }
+
+    #[test]
+    fn test_shell_expansion_in_prompt() {
+        let toml = r#"
+[skill]
+name = "test"
+description = "test"
+allow_shell_in_prompt = true
+
+[prompt]
+system = "Date: !`echo 2026-04-01` and host: !`echo testhost`"
+"#;
+        let skill: Skill = toml::from_str(toml).unwrap();
+        let prompt = skill.system_prompt("");
+        assert!(prompt.contains("2026-04-01"), "got: {prompt}");
+        assert!(prompt.contains("testhost"), "got: {prompt}");
+        assert!(!prompt.contains("!`"), "shell markers should be replaced");
+    }
+
+    #[test]
+    fn test_shell_expansion_disabled_by_default() {
+        let toml = r#"
+[skill]
+name = "test"
+description = "test"
+
+[prompt]
+system = "Should not expand: !`echo danger`"
+"#;
+        let skill: Skill = toml::from_str(toml).unwrap();
+        let prompt = skill.system_prompt("");
+        // Shell blocks NOT expanded when allow_shell_in_prompt is false.
+        assert!(prompt.contains("!`echo danger`"));
+    }
+
+    #[test]
+    fn test_model_override() {
+        let toml = r#"
+[skill]
+name = "cheap-task"
+description = "Uses a cheaper model"
+model = "anthropic/claude-haiku-4-5"
+
+[prompt]
+system = "Do something cheap"
+"#;
+        let skill: Skill = toml::from_str(toml).unwrap();
+        assert_eq!(
+            skill.skill.model.as_deref(),
+            Some("anthropic/claude-haiku-4-5")
+        );
     }
 
     #[test]
