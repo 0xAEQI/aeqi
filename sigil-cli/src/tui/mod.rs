@@ -317,74 +317,72 @@ pub async fn run(
 
     // Resolve persistent agent.
     let registry = sigil_orchestrator::agent_registry::AgentRegistry::open(&data_dir)?;
-    let mut agent: Option<sigil_orchestrator::agent_registry::PersistentAgent> =
-        if let Some(name) = agent_name {
-            // Explicit --agent flag → resolve by name.
-            registry.get_active_by_name(name).await?
-        } else {
-            // No flag → check how many active agents exist.
-            let active = registry.list_active().await.unwrap_or_default();
-            match active.len() {
-                0 => None, // Will trigger spawn prompt below.
-                1 => Some(active.into_iter().next().unwrap()), // Only one → use it.
-                _ => {
-                    // Multiple agents → interactive picker.
-                    eprintln!();
-                    eprintln!("  \x1b[1mYour agents:\x1b[0m");
-                    for (i, a) in active.iter().enumerate() {
-                        let display = a.display_name.as_deref().unwrap_or(&a.name);
-                        let avatar = a.avatar.as_deref().unwrap_or("●");
-                        let last = a
-                            .last_active
-                            .map(|t| {
-                                let ago = (chrono::Utc::now() - t).num_hours();
-                                if ago < 1 {
-                                    "just now".to_string()
-                                } else if ago < 24 {
-                                    format!("{ago}h ago")
-                                } else {
-                                    format!("{}d ago", ago / 24)
-                                }
-                            })
-                            .unwrap_or_else(|| "never".to_string());
-                        let sessions = a.session_count;
-                        eprintln!(
-                            "    \x1b[36m{}\x1b[0m. {avatar} {display:<16} (last: {last}, {sessions} sessions)",
-                            i + 1
-                        );
-                    }
-                    eprintln!();
-                    let default_name = active[0]
-                        .display_name
-                        .as_deref()
-                        .unwrap_or(&active[0].name);
-                    eprint!("  Chat with? [1={default_name}]: ");
-                    io::stderr().flush()?;
-
-                    let mut choice = String::new();
-                    io::stdin().read_line(&mut choice)?;
-                    let choice = choice.trim();
-
-                    let idx = if choice.is_empty() {
-                        0
-                    } else if let Ok(n) = choice.parse::<usize>() {
-                        n.saturating_sub(1).min(active.len() - 1)
-                    } else {
-                        // Try name match.
-                        active
-                            .iter()
-                            .position(|a| {
-                                a.name == choice
-                                    || a.display_name
-                                        .as_deref()
-                                        .is_some_and(|d| d.eq_ignore_ascii_case(choice))
-                            })
-                            .unwrap_or(0)
-                    };
-                    Some(active.into_iter().nth(idx).unwrap())
+    let mut agent: Option<sigil_orchestrator::agent_registry::PersistentAgent> = if let Some(name) =
+        agent_name
+    {
+        // Explicit --agent flag → resolve by name.
+        registry.get_active_by_name(name).await?
+    } else {
+        // No flag → check how many active agents exist.
+        let active = registry.list_active().await.unwrap_or_default();
+        match active.len() {
+            0 => None,                                     // Will trigger spawn prompt below.
+            1 => Some(active.into_iter().next().unwrap()), // Only one → use it.
+            _ => {
+                // Multiple agents → interactive picker.
+                eprintln!();
+                eprintln!("  \x1b[1mYour agents:\x1b[0m");
+                for (i, a) in active.iter().enumerate() {
+                    let display = a.display_name.as_deref().unwrap_or(&a.name);
+                    let avatar = a.avatar.as_deref().unwrap_or("●");
+                    let last = a
+                        .last_active
+                        .map(|t| {
+                            let ago = (chrono::Utc::now() - t).num_hours();
+                            if ago < 1 {
+                                "just now".to_string()
+                            } else if ago < 24 {
+                                format!("{ago}h ago")
+                            } else {
+                                format!("{}d ago", ago / 24)
+                            }
+                        })
+                        .unwrap_or_else(|| "never".to_string());
+                    let sessions = a.session_count;
+                    eprintln!(
+                        "    \x1b[36m{}\x1b[0m. {avatar} {display:<16} (last: {last}, {sessions} sessions)",
+                        i + 1
+                    );
                 }
+                eprintln!();
+                let default_name = active[0].display_name.as_deref().unwrap_or(&active[0].name);
+                eprint!("  Chat with? [1={default_name}]: ");
+                io::stderr().flush()?;
+
+                let mut choice = String::new();
+                io::stdin().read_line(&mut choice)?;
+                let choice = choice.trim();
+
+                let idx = if choice.is_empty() {
+                    0
+                } else if let Ok(n) = choice.parse::<usize>() {
+                    n.saturating_sub(1).min(active.len() - 1)
+                } else {
+                    // Try name match.
+                    active
+                        .iter()
+                        .position(|a| {
+                            a.name == choice
+                                || a.display_name
+                                    .as_deref()
+                                    .is_some_and(|d| d.eq_ignore_ascii_case(choice))
+                        })
+                        .unwrap_or(0)
+                };
+                Some(active.into_iter().nth(idx).unwrap())
             }
-        };
+        }
+    };
 
     // No agents exist → prompt to spawn one.
     if agent.is_none() {
@@ -405,7 +403,11 @@ pub async fn run(
 
         eprintln!("  \x1b[1mAvailable agent templates:\x1b[0m");
         for (i, (name, _path)) in templates.iter().enumerate() {
-            let marker = if name == "shadow" { " \x1b[33m(recommended)\x1b[0m" } else { "" };
+            let marker = if name == "shadow" {
+                " \x1b[33m(recommended)\x1b[0m"
+            } else {
+                ""
+            };
             eprintln!("    \x1b[36m{}\x1b[0m. {name}{marker}", i + 1);
         }
         eprintln!();
@@ -434,7 +436,10 @@ pub async fn run(
                 Ok(spawned) => {
                     let display = spawned.display_name.as_deref().unwrap_or(&spawned.name);
                     eprintln!();
-                    eprintln!("  \x1b[32m✓ Spawned {display}\x1b[0m (id: {})", &spawned.id[..8]);
+                    eprintln!(
+                        "  \x1b[32m✓ Spawned {display}\x1b[0m (id: {})",
+                        &spawned.id[..8]
+                    );
                     eprintln!("  Entity memory will accumulate across sessions.");
                     eprintln!();
                     agent = Some(spawned);
@@ -445,7 +450,10 @@ pub async fn run(
                 }
             }
         } else {
-            eprintln!("  \x1b[31m✗ Could not read template: {}\x1b[0m", path.display());
+            eprintln!(
+                "  \x1b[31m✗ Could not read template: {}\x1b[0m",
+                path.display()
+            );
             return Ok(());
         }
     }
