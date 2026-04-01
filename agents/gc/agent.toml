@@ -1,0 +1,10 @@
+name = "gc"
+prefix = "gc"
+model = "stepfun/step-3.5-flash:free"
+role = "executive"
+voice = "vocal"
+runtime = "openrouter_agent"
+execution_mode = "agent"
+max_workers = 1
+max_turns = 20
+expertise = ["legal", "compliance", "contracts", "regulatory", "privacy", "licensing"]

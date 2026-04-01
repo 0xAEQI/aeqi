@@ -23,10 +23,10 @@ apps/ui/*.tsbuildinfo
 apps/ui/.env
 apps/ui/.env*.local
 
-# Agent directories (personal — create your own)
-agents/*/
-!agents/shared/
-!agents/README.md
+# Agent runtime state (ignore), but track agent templates (ship with Sigil)
+agents/*/.sigil/
+!agents/*/agent.md
+!agents/*/agent.toml
 
 # Project directories (personal — create your own)
 projects/*/
