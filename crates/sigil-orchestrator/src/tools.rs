@@ -1619,3 +1619,87 @@ impl Tool for ChannelPostTool {
         false
     }
 }
+
+// ---------------------------------------------------------------------------
+// TranscriptSearchTool — FTS search across past session transcripts
+// ---------------------------------------------------------------------------
+
+/// Tool for agents to search past session transcripts via FTS5.
+pub struct TranscriptSearchTool {
+    conversation_store: Arc<crate::ConversationStore>,
+}
+
+impl TranscriptSearchTool {
+    pub fn new(conversation_store: Arc<crate::ConversationStore>) -> Self {
+        Self { conversation_store }
+    }
+}
+
+#[async_trait]
+impl Tool for TranscriptSearchTool {
+    async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
+        let query = args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("'query' is required"))?;
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10) as usize;
+
+        match self.conversation_store.search_transcripts(query, limit).await {
+            Ok(messages) => {
+                if messages.is_empty() {
+                    return Ok(ToolResult {
+                        output: "No transcript matches found.".to_string(),
+                        is_error: false,
+                    });
+                }
+                let results: Vec<String> = messages
+                    .iter()
+                    .map(|m| {
+                        let preview: String = m.content.chars().take(200).collect();
+                        format!("[{}] {}: {}", m.timestamp.format("%Y-%m-%d %H:%M"), m.role, preview)
+                    })
+                    .collect();
+                Ok(ToolResult {
+                    output: format!("{} matches:\n{}", results.len(), results.join("\n\n")),
+                    is_error: false,
+                })
+            }
+            Err(e) => Ok(ToolResult {
+                output: format!("Transcript search failed: {e}"),
+                is_error: true,
+            }),
+        }
+    }
+
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "transcript_search".to_string(),
+            description: "Search past session transcripts. Returns matching messages from previous agent sessions. Use when you need to recall HOW you solved something.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (FTS5 syntax: words, phrases in quotes, OR/AND/NOT)"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results (default 10)"
+                    }
+                },
+                "required": ["query"]
+            }),
+        }
+    }
+
+    fn name(&self) -> &str {
+        "transcript_search"
+    }
+
+    fn is_concurrent_safe(&self, _input: &serde_json::Value) -> bool {
+        true
+    }
+}

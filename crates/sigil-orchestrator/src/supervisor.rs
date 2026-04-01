@@ -481,6 +481,7 @@ impl Supervisor {
             )));
 
             // channel_post for department/project conversation channels.
+            // transcript_search for cross-session recall.
             if let (Some(convs), Some(broadcaster)) =
                 (&self.conversation_store, &self.event_broadcaster)
             {
@@ -488,6 +489,9 @@ impl Supervisor {
                     convs.clone(),
                     broadcaster.clone(),
                     agent_name.clone(),
+                )));
+                tools.push(Arc::new(crate::tools::TranscriptSearchTool::new(
+                    convs.clone(),
                 )));
             }
         }

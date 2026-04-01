@@ -216,6 +216,48 @@ impl ConversationStore {
         Ok(ctx)
     }
 
+    /// Full-text search across all transcript channels.
+    /// Returns matching messages with their channel and timestamp.
+    pub async fn search_transcripts(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ConversationMessage>> {
+        let db = self.db.lock().await;
+
+        // Search via FTS5 on transcript channels only.
+        let mut stmt = db.prepare(
+            "SELECT c.chat_id, c.role, c.content, c.timestamp, c.source
+             FROM conversations c
+             JOIN channels ch ON c.chat_id = ch.chat_id
+             WHERE ch.channel_type = 'transcript'
+               AND c.rowid IN (
+                   SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?1
+               )
+             ORDER BY c.timestamp DESC
+             LIMIT ?2",
+        )?;
+
+        let messages = stmt
+            .query_map(params![query, limit as i64], |row| {
+                Ok(ConversationMessage {
+                    chat_id: row.get(0)?,
+                    role: row.get(1)?,
+                    content: row.get(2)?,
+                    timestamp: row
+                        .get::<_, String>(3)
+                        .ok()
+                        .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+                        .map(|d| d.with_timezone(&chrono::Utc))
+                        .unwrap_or_default(),
+                    source: row.get(4).ok(),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(messages)
+    }
+
     /// Count unsummarized messages for a chat.
     pub async fn message_count(&self, chat_id: i64) -> Result<usize> {
         let db = self.db.lock().await;
