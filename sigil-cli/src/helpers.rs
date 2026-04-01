@@ -18,9 +18,9 @@ use sigil_orchestrator::ProjectRegistry;
 use sigil_providers::{AnthropicProvider, OllamaProvider, OpenRouterEmbedder, OpenRouterProvider};
 use sigil_tasks::TaskBoard;
 use sigil_tools::{
-    FileEditTool, FileReadTool, FileWriteTool, GitWorktreeTool, GlobTool, GrepTool, ListDirTool,
-    PorkbunTool, ShellTool, TaskCloseTool, TaskCreateTool, TaskDepTool, TaskReadyTool,
-    TaskShowTool, TaskUpdateTool,
+    ExecutePlanTool, FileEditTool, FileReadTool, FileWriteTool, GitWorktreeTool, GlobTool,
+    GrepTool, ListDirTool, PorkbunTool, SecretsTool, ShellTool, TaskCloseTool, TaskCreateTool,
+    TaskDepTool, TaskReadyTool, TaskShowTool, TaskUpdateTool,
 };
 
 use std::path::{Path, PathBuf};
@@ -231,7 +231,7 @@ pub(crate) fn build_provider_for_agent(
 }
 
 pub(crate) fn build_tools(workdir: &Path) -> Vec<Arc<dyn Tool>> {
-    vec![
+    let mut tools: Vec<Arc<dyn Tool>> = vec![
         Arc::new(ShellTool::new(workdir.to_path_buf())),
         Arc::new(FileReadTool::new(workdir.to_path_buf())),
         Arc::new(FileWriteTool::new(workdir.to_path_buf())),
@@ -239,7 +239,19 @@ pub(crate) fn build_tools(workdir: &Path) -> Vec<Arc<dyn Tool>> {
         Arc::new(ListDirTool::new(workdir.to_path_buf())),
         Arc::new(GrepTool::new(workdir.to_path_buf())),
         Arc::new(GlobTool::new(workdir.to_path_buf())),
-    ]
+    ];
+
+    // Execute plan — batch multiple tool calls in one turn (context compression).
+    tools.push(Arc::new(ExecutePlanTool::new(tools.clone())));
+
+    // Secrets management — encrypted credential store.
+    let secrets_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(".sigil")
+        .join("secrets");
+    tools.push(Arc::new(SecretsTool::new(secrets_path)));
+
+    tools
 }
 
 /// Build the full tool set for a project: basic tools + tasks + git worktree.
