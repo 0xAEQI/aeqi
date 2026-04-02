@@ -20,7 +20,7 @@ fi
 
 AEQI_DIR="$(dirname "$SCRIPT_DIR")"
 EVENT="${1:-startup}"
-SOCK="${AEQI_DATA_DIR:-$HOME/.sigil}/rm.sock"
+SOCK="${AEQI_DATA_DIR:-$HOME/.aeqi}/rm.sock"
 
 # --- Detect project from $PWD ---
 PROJECT=$(detect_project)

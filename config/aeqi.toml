@@ -1,6 +1,6 @@
 [aeqi]
 name = "emperor-system"
-data_dir = "~/.sigil"
+data_dir = "~/.aeqi"
 
 shared_primer = """
 # AEQI
