@@ -39,6 +39,7 @@ export default function App() {
         <Route path="agents" element={<AgentsPage />} />
         <Route path="agents/:name" element={<AgentDetailPage />} />
         <Route path="departments" element={<DepartmentsPage />} />
+        <Route path="departments/:id" element={<DepartmentsPage />} />
         <Route path="tasks" element={<TasksPage />} />
         <Route path="triggers" element={<TriggersPage />} />
         <Route path="memory" element={<MemoryPage />} />

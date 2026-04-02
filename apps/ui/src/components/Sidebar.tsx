@@ -65,7 +65,12 @@ export default function AgentNav() {
       {/* Department groups */}
       {deptGroups.map((group) => (
         <div key={group.dept.id} className="dept-group">
-          <div className="dept-name">{group.dept.name}</div>
+          <div
+            className={`dept-name${selectedAgent === `dept:${group.dept.id}` ? " active" : ""}`}
+            onClick={() => { setSelectedAgent(`dept:${group.dept.id}`); navigate(`/departments/${group.dept.id}`); }}
+          >
+            {group.dept.name}
+          </div>
           {group.agents.map((agent) => (
             <div
               key={agent.id}

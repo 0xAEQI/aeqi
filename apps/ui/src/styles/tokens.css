@@ -448,6 +448,56 @@ a:hover {
   background: rgba(255,255,255,0.03);
 }
 
+.dept-name.active {
+  color: rgba(255,255,255,0.9);
+  background: rgba(255,255,255,0.06);
+}
+
+/* Department detail page */
+.dept-detail {
+  max-width: 600px;
+}
+
+.dept-detail-name {
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: rgba(255,255,255,0.9);
+  margin-bottom: 4px;
+}
+
+.dept-detail-meta {
+  font-size: 13px;
+  color: rgba(255,255,255,0.3);
+  margin-bottom: 24px;
+}
+
+.dept-detail-members {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dept-detail-member {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.02);
+}
+
+.dept-detail-member-name {
+  font-size: 13px;
+  color: rgba(255,255,255,0.7);
+}
+
+.dept-detail-member-status {
+  font-size: 11px;
+  color: rgba(255,255,255,0.25);
+  text-transform: lowercase;
+}
+
 .agent-row.dept-agent {
   justify-content: flex-end;
   padding: 0 10px;
