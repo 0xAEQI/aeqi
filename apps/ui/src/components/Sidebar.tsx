@@ -37,7 +37,7 @@ export default function AgentNav() {
     <nav className="agent-nav">
       {/* Company/project — holistic unfiltered view */}
       <div
-        className={`agent-row${!selectedAgent ? " active" : ""}`}
+        className={`agent-row scope-header${!selectedAgent ? " active" : ""}`}
         onClick={() => { setSelectedAgent(null); navigate("/"); }}
       >
         {scopeName}

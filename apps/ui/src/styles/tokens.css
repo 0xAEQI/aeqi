@@ -414,6 +414,14 @@ a:hover {
   background: rgba(255,255,255,0.06);
 }
 
+.agent-row.scope-header {
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 .agent-nav-add {
   height: 40px;
   border-radius: 12px;
