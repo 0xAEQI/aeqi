@@ -240,12 +240,18 @@ impl TaskBoard {
 
         if all_closed {
             // Check if ALL children were cancelled — parent should be Cancelled, not Done.
-            let all_cancelled = children
-                .iter()
-                .all(|cid| self.tasks.get(cid).is_some_and(|b| b.status == TaskStatus::Cancelled));
+            let all_cancelled = children.iter().all(|cid| {
+                self.tasks
+                    .get(cid)
+                    .is_some_and(|b| b.status == TaskStatus::Cancelled)
+            });
 
             let (outcome_status, outcome_kind, verb) = if all_cancelled {
-                (TaskStatus::Cancelled, TaskOutcomeKind::Cancelled, "cancelled")
+                (
+                    TaskStatus::Cancelled,
+                    TaskOutcomeKind::Cancelled,
+                    "cancelled",
+                )
             } else {
                 (TaskStatus::Done, TaskOutcomeKind::Done, "completed")
             };

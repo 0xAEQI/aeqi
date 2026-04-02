@@ -488,7 +488,10 @@ impl Daemon {
                     let event = match rx.recv().await {
                         Ok(event) => event,
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            warn!(skipped = n, "event trigger listener lagged — events dropped");
+                            warn!(
+                                skipped = n,
+                                "event trigger listener lagged — events dropped"
+                            );
                             continue;
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -530,27 +533,47 @@ impl Daemon {
                             // For DispatchReceived events, read pending dispatches for
                             // the target agent and inject the prompt into the task.
                             let mut delegation_labels: Vec<String> = Vec::new();
-                            let dispatch_context = if let crate::execution_events::ExecutionEvent::DispatchReceived { ref to_agent, .. } = event {
-                                let dispatches = dispatch_bus.read(to_agent).await;
-                                let prompts: Vec<String> = dispatches.iter().filter_map(|d| {
-                                    if let DispatchKind::DelegateRequest { ref prompt, ref response_mode, .. } = d.kind {
-                                        // Store origin info so response can be routed back.
-                                        delegation_labels.push(format!("delegate_from:{}", d.from));
-                                        delegation_labels.push(format!("delegate_dispatch:{}", d.id));
-                                        delegation_labels.push(format!("delegate_response_mode:{response_mode}"));
-                                        Some(format!("From {}: {}", d.from, prompt))
+                            let dispatch_context =
+                                if let crate::execution_events::ExecutionEvent::DispatchReceived {
+                                    ref to_agent,
+                                    ..
+                                } = event
+                                {
+                                    let dispatches = dispatch_bus.read(to_agent).await;
+                                    let prompts: Vec<String> = dispatches
+                                        .iter()
+                                        .filter_map(|d| {
+                                            if let DispatchKind::DelegateRequest {
+                                                ref prompt,
+                                                ref response_mode,
+                                                ..
+                                            } = d.kind
+                                            {
+                                                // Store origin info so response can be routed back.
+                                                delegation_labels
+                                                    .push(format!("delegate_from:{}", d.from));
+                                                delegation_labels
+                                                    .push(format!("delegate_dispatch:{}", d.id));
+                                                delegation_labels.push(format!(
+                                                    "delegate_response_mode:{response_mode}"
+                                                ));
+                                                Some(format!("From {}: {}", d.from, prompt))
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect();
+                                    if prompts.is_empty() {
+                                        String::new()
                                     } else {
-                                        None
+                                        format!(
+                                            "\n\n## Pending Delegations\n{}",
+                                            prompts.join("\n\n")
+                                        )
                                     }
-                                }).collect();
-                                if prompts.is_empty() {
-                                    String::new()
                                 } else {
-                                    format!("\n\n## Pending Delegations\n{}", prompts.join("\n\n"))
-                                }
-                            } else {
-                                String::new()
-                            };
+                                    String::new()
+                                };
                             let desc = format!(
                                 "Event trigger '{}' fired. Run skill '{}'.{}",
                                 trigger.name, trigger.skill, dispatch_context
@@ -598,7 +621,10 @@ impl Daemon {
                             buffer.push(event);
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            warn!(skipped = n, "event buffer subscriber lagged — events dropped");
+                            warn!(
+                                skipped = n,
+                                "event buffer subscriber lagged — events dropped"
+                            );
                             continue;
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -1240,8 +1266,10 @@ impl Daemon {
                         .unwrap_or(false);
                     // Optional agent scoping: when agent_id is provided, use
                     // query_scoped() to enforce department-based visibility.
-                    let scope_agent_id =
-                        request.get("agent_id").and_then(|v| v.as_str()).map(String::from);
+                    let scope_agent_id = request
+                        .get("agent_id")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
                     let scope_department = request
                         .get("department")
                         .and_then(|v| v.as_str())
