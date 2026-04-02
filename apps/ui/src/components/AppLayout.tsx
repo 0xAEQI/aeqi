@@ -102,6 +102,10 @@ export default function AppLayout() {
           <div className="content-panel">
             <Outlet />
           </div>
+
+          <div className="content-footer">
+            aeqi.ai · v0.1.0
+          </div>
         </div>
       </div>
     </div>
