@@ -584,12 +584,12 @@ a:hover {
 .floating-nav {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   height: 40px;
   background: rgba(255,255,255,0.02);
   border: 1px solid rgba(255,255,255,0.04);
   border-radius: 12px;
   padding: 0 4px;
+  gap: 2px;
   margin-bottom: 20px;
   position: sticky;
   top: 0;
@@ -599,6 +599,7 @@ a:hover {
 }
 
 .floating-nav-items {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -626,27 +627,21 @@ a:hover {
   background: rgba(255,255,255,0.06);
 }
 
-.floating-nav-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-right: 4px;
-}
-
-.floating-nav-kbd {
+.floating-nav-btn {
   width: 32px;
   height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255,255,255,0.25);
+  color: rgba(255,255,255,0.2);
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.12s ease;
+  flex-shrink: 0;
 }
 
-.floating-nav-kbd:hover {
-  color: rgba(255,255,255,0.55);
+.floating-nav-btn:hover {
+  color: rgba(255,255,255,0.5);
   background: rgba(255,255,255,0.03);
 }
 
