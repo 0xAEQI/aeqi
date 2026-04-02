@@ -1,7 +1,7 @@
-use anyhow::Result;
-use async_trait::async_trait;
 use aeqi_core::traits::{LogObserver, Observer, Provider, Tool, ToolResult, ToolSpec};
 use aeqi_core::{Agent, AgentConfig, Identity, LoopNotification, NotificationSender, SessionType};
+use anyhow::Result;
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

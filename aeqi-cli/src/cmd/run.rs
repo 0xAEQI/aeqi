@@ -1,6 +1,6 @@
-use anyhow::Result;
 use aeqi_core::traits::{LogObserver, Memory, Observer};
 use aeqi_core::{Agent, AgentConfig, Identity};
+use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{info, warn};

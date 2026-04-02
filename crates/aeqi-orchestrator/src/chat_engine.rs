@@ -1479,13 +1479,13 @@ mod tests {
     use crate::message::DispatchBus;
     use crate::project::Project;
     use crate::registry::ProjectRegistry;
-    use anyhow::Result;
-    use async_trait::async_trait;
-    use chrono::Utc;
     use aeqi_core::config::{DepartmentConfig, ExecutionMode, PeerAgentConfig, ProjectConfig};
     use aeqi_core::traits::{
         ChatRequest, ChatResponse as ProviderChatResponse, Provider, StopReason, Usage,
     };
+    use anyhow::Result;
+    use async_trait::async_trait;
+    use chrono::Utc;
     use std::path::PathBuf;
     use tempfile::TempDir;
 

@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
 use aeqi_orchestrator::Daemon;
+use anyhow::{Context, Result};
 use std::path::PathBuf;
 
 use crate::cli::ConfigAction;

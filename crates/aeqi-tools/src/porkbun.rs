@@ -1,8 +1,8 @@
+use aeqi_core::traits::{ToolResult, ToolSpec};
 use anyhow::Result;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::{Value, json};
-use aeqi_core::traits::{ToolResult, ToolSpec};
 use tracing::debug;
 
 const BASE_URL: &str = "https://api.porkbun.com/api/json/v3";

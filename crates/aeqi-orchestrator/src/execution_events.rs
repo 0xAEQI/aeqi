@@ -1,3 +1,4 @@
+use aeqi_core::chat_stream::ChatStreamEvent;
 /// Real-time execution events streamed from workers to observers.
 ///
 /// Workers publish events through an [`EventBroadcaster`] during task execution.
@@ -5,7 +6,6 @@
 /// to receive events as they happen. This replaces polling-based progress tracking
 /// with push-based streaming.
 use serde::Serialize;
-use aeqi_core::chat_stream::ChatStreamEvent;
 use tokio::sync::broadcast;
 use tracing::debug;
 

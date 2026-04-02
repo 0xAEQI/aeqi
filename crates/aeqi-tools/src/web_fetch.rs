@@ -1,6 +1,6 @@
+use aeqi_core::traits::{ToolResult, ToolSpec};
 use anyhow::Result;
 use async_trait::async_trait;
-use aeqi_core::traits::{ToolResult, ToolSpec};
 use tracing::debug;
 
 use crate::html_utils::{self, USER_AGENT};

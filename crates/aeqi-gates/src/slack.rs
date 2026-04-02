@@ -1,8 +1,8 @@
+use aeqi_core::traits::{Channel, IncomingMessage, OutgoingMessage};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
-use aeqi_core::traits::{Channel, IncomingMessage, OutgoingMessage};
 use tokio::sync::mpsc;
 use tracing::{error, info};
 

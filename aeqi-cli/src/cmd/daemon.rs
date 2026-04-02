@@ -1,4 +1,3 @@
-use anyhow::{Context, Result};
 use aeqi_core::config::TelegramChatRouteConfig;
 use aeqi_core::traits::{Channel, Memory};
 use aeqi_core::{Identity, SecretStore};
@@ -8,6 +7,7 @@ use aeqi_orchestrator::{
     AgentRouter, AuditLog, Blackboard, ConversationStore, Daemon, DispatchBus, ExpertiseLedger,
     Project, ProjectRegistry, WorkerPool,
 };
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;

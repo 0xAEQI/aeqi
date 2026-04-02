@@ -1,8 +1,8 @@
+use aeqi_core::traits::Embedder;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use aeqi_core::traits::Embedder;
 use tracing::debug;
 
 const OPENROUTER_EMBED_URL: &str = "https://openrouter.ai/api/v1/embeddings";

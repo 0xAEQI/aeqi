@@ -1,5 +1,5 @@
-use anyhow::Result;
 use aeqi_core::SecretStore;
+use anyhow::Result;
 use std::path::PathBuf;
 
 use crate::cli::SecretsAction;

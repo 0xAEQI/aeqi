@@ -1,7 +1,7 @@
-use anyhow::{Context, Result};
 use aeqi_core::traits::{LogObserver, Observer, Tool};
 use aeqi_core::{Agent, AgentConfig, Identity};
 use aeqi_tools::Skill;
+use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

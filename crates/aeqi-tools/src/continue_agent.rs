@@ -1,6 +1,6 @@
+use aeqi_core::traits::{Tool, ToolResult, ToolSpec};
 use anyhow::Result;
 use async_trait::async_trait;
-use aeqi_core::traits::{Tool, ToolResult, ToolSpec};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;

@@ -11,9 +11,9 @@
 //! Inspired by Hermes Agent's execute_code PTC pattern, but implemented natively
 //! in Rust — no subprocess, no RPC, no Python dependency. Simpler and faster.
 
+use aeqi_core::traits::{Tool, ToolResult, ToolSpec};
 use anyhow::Result;
 use async_trait::async_trait;
-use aeqi_core::traits::{Tool, ToolResult, ToolSpec};
 use std::sync::Arc;
 use tracing::debug;
 

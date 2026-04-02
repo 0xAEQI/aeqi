@@ -1,12 +1,12 @@
+use aeqi_core::traits::{
+    ChatRequest, ChatResponse, ContentPart, Message, MessageContent, Provider, Role, StopReason,
+    StreamEvent, ToolCall, ToolSpec, Usage,
+};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use aeqi_core::traits::{
-    ChatRequest, ChatResponse, ContentPart, Message, MessageContent, Provider, Role, StopReason,
-    StreamEvent, ToolCall, ToolSpec, Usage,
-};
 use tokio::sync::mpsc;
 use tracing::debug;
 

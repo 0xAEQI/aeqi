@@ -3,9 +3,9 @@
 //! Automatically decomposes missions into a task DAG with dependencies and
 //! critical path identification. Tasks on the critical path get elevated priority.
 
+use aeqi_tasks::{Priority, TaskBoard, TaskId};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use aeqi_tasks::{Priority, TaskBoard, TaskId};
 
 /// A decomposed sub-task with dependency references.
 #[derive(Debug, Clone, Serialize, Deserialize)]

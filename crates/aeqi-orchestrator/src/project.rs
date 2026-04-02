@@ -1,7 +1,7 @@
-use anyhow::Result;
 use aeqi_core::config::ProjectConfig;
 use aeqi_core::identity::Identity;
 use aeqi_tasks::TaskBoard;
+use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};

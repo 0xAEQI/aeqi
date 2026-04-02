@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
 use aeqi_core::{ExecutionMode, ProviderKind, RuntimePresetConfig};
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 use crate::service::install_user_service;

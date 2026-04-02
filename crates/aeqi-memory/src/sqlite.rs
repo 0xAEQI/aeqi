@@ -1,9 +1,9 @@
 use crate::graph::{MemoryEdge, MemoryRelation};
+use aeqi_core::traits::{Embedder, Memory, MemoryCategory, MemoryEntry, MemoryQuery, MemoryScope};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
-use aeqi_core::traits::{Embedder, Memory, MemoryCategory, MemoryEntry, MemoryQuery, MemoryScope};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};

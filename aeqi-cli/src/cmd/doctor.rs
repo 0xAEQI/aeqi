@@ -1,6 +1,6 @@
-use anyhow::{Result, bail};
 use aeqi_core::SecretStore;
 use aeqi_tools::Skill;
+use anyhow::{Result, bail};
 use std::path::PathBuf;
 
 use crate::helpers::{

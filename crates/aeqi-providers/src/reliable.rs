@@ -1,7 +1,7 @@
+use aeqi_core::traits::{ChatRequest, ChatResponse, Provider};
 use anyhow::Result;
 use async_trait::async_trait;
 use rand::Rng;
-use aeqi_core::traits::{ChatRequest, ChatResponse, Provider};
 use std::sync::Arc;
 use tracing::{info, warn};
 

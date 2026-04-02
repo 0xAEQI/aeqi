@@ -1,6 +1,6 @@
-use anyhow::{Context, Result};
 use aeqi_core::traits::{Provider, Tool};
-use aeqi_core::{Identity, ProviderKind, SecretStore, AEQIConfig};
+use aeqi_core::{AEQIConfig, Identity, ProviderKind, SecretStore};
+use anyhow::{Context, Result};
 
 /// Resolve `${ENV_VAR}` patterns in a config value. Returns empty string if
 /// the value is a `${...}` pattern and the env var is not set.
@@ -325,10 +325,7 @@ pub(crate) fn open_tasks_for_project(project_name: &str) -> Result<TaskBoard> {
     TaskBoard::open(&tasks_dir)
 }
 
-pub(crate) fn open_memory(
-    config: &AEQIConfig,
-    project_name: Option<&str>,
-) -> Result<SqliteMemory> {
+pub(crate) fn open_memory(config: &AEQIConfig, project_name: Option<&str>) -> Result<SqliteMemory> {
     let db_path = if let Some(name) = project_name {
         let project_dir = find_project_dir(name)?;
         project_dir.join(".aeqi").join("memory.db")

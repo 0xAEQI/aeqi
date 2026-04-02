@@ -1,8 +1,8 @@
-use anyhow::Result;
 use aeqi_core::traits::{
     Channel, ChatRequest, Memory, Message, MessageContent, OutgoingMessage, Provider, Role, Tool,
 };
 use aeqi_tasks::{TaskBoard, TaskStatus};
+use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 use tracing::{debug, info, warn};

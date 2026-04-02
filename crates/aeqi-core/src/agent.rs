@@ -1791,9 +1791,11 @@ impl Agent {
             return Some(dir.clone());
         }
         let dir = self.config.persist_dir.clone().unwrap_or_else(|| {
-            std::env::temp_dir()
-                .join("aeqi-tool-results")
-                .join(format!("{}-{}", self.config.name, std::process::id()))
+            std::env::temp_dir().join("aeqi-tool-results").join(format!(
+                "{}-{}",
+                self.config.name,
+                std::process::id()
+            ))
         });
         if std::fs::create_dir_all(&dir).is_ok() {
             *created = Some(dir.clone());

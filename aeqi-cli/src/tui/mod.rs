@@ -16,10 +16,10 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use aeqi_core::ChatStreamEvent;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal;
-use aeqi_core::ChatStreamEvent;
 
 use crate::helpers::load_config;
 use state::{AgentState, AgentVisual, AppState};

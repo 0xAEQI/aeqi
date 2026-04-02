@@ -4,9 +4,9 @@
 //! Uses a cheap Gemini Flash call (~$0.001, ~100ms) to classify message intent,
 //! then maps to relevant advisor agents.
 
+use aeqi_core::config::PeerAgentConfig;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use aeqi_core::config::PeerAgentConfig;
 use std::collections::HashMap;
 use std::time::Instant;
 use tracing::{info, warn};

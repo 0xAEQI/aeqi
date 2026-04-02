@@ -1,11 +1,11 @@
-use anyhow::Result;
-use chrono::Utc;
 use aeqi_core::traits::{
     ChatRequest, Event, LogObserver, LoopAction, Memory, MemoryCategory, MemoryScope, Message,
     MessageContent, Observer, Provider, Role, Tool,
 };
 use aeqi_core::{Agent, AgentConfig, Identity};
 use aeqi_tasks::{Checkpoint, Task, TaskOutcomeKind, TaskOutcomeRecord, TaskStatus};
+use anyhow::Result;
+use chrono::Utc;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
@@ -1703,8 +1703,7 @@ impl Observer for MiddlewareObserver {
         completion_tokens: u32,
     ) -> LoopAction {
         let mut ctx = self.ctx.lock().await;
-        ctx.cost_usd +=
-            aeqi_providers::estimate_cost(&ctx.model, prompt_tokens, completion_tokens);
+        ctx.cost_usd += aeqi_providers::estimate_cost(&ctx.model, prompt_tokens, completion_tokens);
         Self::map_action(self.chain.run_after_model(&mut ctx).await)
     }
 

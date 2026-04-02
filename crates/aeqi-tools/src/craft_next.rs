@@ -12,11 +12,11 @@
 //! The generated prompt is returned as the tool result, and the agent loop
 //! treats it as the next instruction to follow.
 
-use anyhow::Result;
-use async_trait::async_trait;
 use aeqi_core::traits::{
     ChatRequest, Message, MessageContent, Provider, Role, Tool, ToolResult, ToolSpec,
 };
+use anyhow::Result;
+use async_trait::async_trait;
 use std::sync::Arc;
 use tracing::debug;
 

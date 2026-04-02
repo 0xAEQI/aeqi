@@ -1,11 +1,11 @@
-use anyhow::{Context, Result};
-use async_trait::async_trait;
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use aeqi_core::traits::{
     ChatRequest, ChatResponse, ContentPart, Message, MessageContent, Provider, Role, StopReason,
     ToolCall, ToolSpec, Usage,
 };
+use anyhow::{Context, Result};
+use async_trait::async_trait;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 /// Ollama local model provider (OpenAI-compatible API).

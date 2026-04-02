@@ -9,9 +9,9 @@
 //! - `department` — response posted to the department channel
 //! - `none` — no response expected
 
+use aeqi_core::traits::{Tool, ToolResult, ToolSpec};
 use anyhow::Result;
 use async_trait::async_trait;
-use aeqi_core::traits::{Tool, ToolResult, ToolSpec};
 use std::sync::Arc;
 use tracing::info;
 

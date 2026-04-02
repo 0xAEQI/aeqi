@@ -1,7 +1,7 @@
+use aeqi_tasks::{Priority, Task, TaskStatus};
 use anyhow::Result;
 use chrono::{Local, Utc};
 use serde::Serialize;
-use aeqi_tasks::{Priority, Task, TaskStatus};
 use std::io::Write;
 use std::path::PathBuf;
 

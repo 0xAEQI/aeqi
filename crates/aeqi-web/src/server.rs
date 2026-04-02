@@ -1,3 +1,4 @@
+use aeqi_core::config::{AEQIConfig, PeerAgentConfig};
 use anyhow::Result;
 use axum::{
     Router,
@@ -7,7 +8,6 @@ use axum::{
     middleware,
     response::{IntoResponse, Response},
 };
-use aeqi_core::config::{PeerAgentConfig, AEQIConfig};
 use std::{path::PathBuf, sync::Arc};
 use tower::ServiceExt;
 use tower_http::{

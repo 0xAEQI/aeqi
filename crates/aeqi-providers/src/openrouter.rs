@@ -1,11 +1,11 @@
+use aeqi_core::traits::{
+    ChatRequest, ChatResponse, Provider, StopReason, ToolCall, ToolSpec, Usage,
+};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use base64::Engine as _;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use aeqi_core::traits::{
-    ChatRequest, ChatResponse, Provider, StopReason, ToolCall, ToolSpec, Usage,
-};
 use tracing::debug;
 
 const OPENROUTER_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";

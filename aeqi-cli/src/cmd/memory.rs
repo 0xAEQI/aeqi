@@ -1,5 +1,5 @@
-use anyhow::Result;
 use aeqi_core::traits::Memory;
+use anyhow::Result;
 use std::path::PathBuf;
 
 use crate::helpers::{load_config, open_memory};

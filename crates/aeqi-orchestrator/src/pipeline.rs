@@ -1,6 +1,6 @@
+use aeqi_tasks::{TaskBoard, TaskId};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use aeqi_tasks::{TaskBoard, TaskId};
 use std::collections::HashMap;
 use std::path::Path;
 

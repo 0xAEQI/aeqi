@@ -1,8 +1,8 @@
+use aeqi_core::traits::Tool;
+use aeqi_core::traits::{Channel, ToolResult, ToolSpec};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::Client;
-use aeqi_core::traits::Tool;
-use aeqi_core::traits::{Channel, ToolResult, ToolSpec};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;

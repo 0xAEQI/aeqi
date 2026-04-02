@@ -4,9 +4,9 @@
 //! spawns a thread where each agent debates visibly before the leader agent
 //! synthesizes the final recommendation.
 
-use anyhow::{Result, anyhow};
 use aeqi_core::config::PeerAgentConfig;
 use aeqi_core::identity::Identity;
+use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::sync::Mutex;

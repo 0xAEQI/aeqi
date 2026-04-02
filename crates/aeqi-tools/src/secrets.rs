@@ -10,10 +10,10 @@
 //! The runtime reads secrets internally for provider init, gateway tokens, etc.
 //! The agent just manages the inventory without seeing raw values.
 
-use anyhow::Result;
-use async_trait::async_trait;
 use aeqi_core::SecretStore;
 use aeqi_core::traits::{Tool, ToolResult, ToolSpec};
+use anyhow::Result;
+use async_trait::async_trait;
 use std::path::PathBuf;
 use tracing::debug;
 
