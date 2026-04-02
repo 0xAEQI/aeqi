@@ -358,8 +358,13 @@ impl Daemon {
                 if id_dispatches.is_empty() {
                     continue;
                 }
-                self.process_agent_dispatches(&agent.id, &agent.name, &agent.project, &id_dispatches)
-                    .await;
+                self.process_agent_dispatches(
+                    &agent.id,
+                    &agent.name,
+                    &agent.project,
+                    &id_dispatches,
+                )
+                .await;
             } else {
                 self.process_agent_dispatches(&agent.id, &agent.name, &agent.project, &dispatches)
                     .await;
@@ -406,10 +411,7 @@ impl Daemon {
                         continue;
                     }
 
-                    let subject = format!(
-                        "Delegation from {}",
-                        dispatch.from
-                    );
+                    let subject = format!("Delegation from {}", dispatch.from);
                     let description = format!(
                         "## Delegated Work\n\n{}\n\n---\n*From: {} | Response mode: {}*",
                         prompt, dispatch.from, response_mode
@@ -454,7 +456,9 @@ impl Daemon {
                         }
                     }
                 }
-                DispatchKind::DelegateResponse { content, reply_to, .. } => {
+                DispatchKind::DelegateResponse {
+                    content, reply_to, ..
+                } => {
                     // DelegateResponses for non-leader agents: log for now.
                     // Future: inject into agent's perpetual session.
                     info!(

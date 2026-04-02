@@ -1081,10 +1081,8 @@ impl Supervisor {
 
                         match &outcome {
                             TaskOutcome::Done(summary) => {
-                                let response_content = format!(
-                                    "Task {} completed: {}",
-                                    task_id_clone, summary
-                                );
+                                let response_content =
+                                    format!("Task {} completed: {}", task_id_clone, summary);
                                 let reply_to_id = delegate_dispatch_id
                                     .clone()
                                     .unwrap_or_else(|| task_id_clone.clone());
@@ -1100,15 +1098,27 @@ impl Supervisor {
                                     "department" => {
                                         // Post to department channel via ConversationStore.
                                         if let Some(ref cs) = conversation_store {
-                                            let channel_name = format!("dept:{}", outcome_recipient);
-                                            let chat_id = crate::conversation_store::named_channel_chat_id(&channel_name);
-                                            let _ = cs.ensure_channel(chat_id, "department", &channel_name).await;
-                                            let _ = cs.record_with_source(
-                                                chat_id,
-                                                "assistant",
-                                                &response_content,
-                                                Some("delegation"),
-                                            ).await;
+                                            let channel_name =
+                                                format!("dept:{}", outcome_recipient);
+                                            let chat_id =
+                                                crate::conversation_store::named_channel_chat_id(
+                                                    &channel_name,
+                                                );
+                                            let _ = cs
+                                                .ensure_channel(
+                                                    chat_id,
+                                                    "department",
+                                                    &channel_name,
+                                                )
+                                                .await;
+                                            let _ = cs
+                                                .record_with_source(
+                                                    chat_id,
+                                                    "assistant",
+                                                    &response_content,
+                                                    Some("delegation"),
+                                                )
+                                                .await;
                                             debug!(
                                                 task = %task_id_clone,
                                                 channel = %channel_name,
