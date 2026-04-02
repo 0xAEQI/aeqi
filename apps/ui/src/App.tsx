@@ -35,6 +35,7 @@ export default function App() {
         <Route path="triggers" element={<TriggersPage />} />
         <Route path="skills" element={<SkillsPage />} />
         <Route path="memories" element={<MemoryPage />} />
+        <Route path="notes" element={<MemoryPage />} />
         <Route path="finance" element={<FinancePage />} />
         <Route path="departments/:id" element={<DepartmentsPage />} />
 

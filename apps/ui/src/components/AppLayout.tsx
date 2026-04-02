@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { to: "/triggers", label: "triggers" },
   { to: "/skills", label: "skills" },
   { to: "/memories", label: "memories" },
+  { to: "/notes", label: "notes" },
   { to: "/finance", label: "financials" },
 ];
 
