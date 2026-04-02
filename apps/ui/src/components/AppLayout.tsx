@@ -11,7 +11,6 @@ const NAV_ITEMS = [
   { to: "/skills", label: "skills" },
   { to: "/memories", label: "memories" },
   { to: "/notes", label: "notes" },
-  { to: "/finance", label: "financials" },
 ];
 
 export default function AppLayout() {
