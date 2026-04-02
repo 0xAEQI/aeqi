@@ -32,6 +32,7 @@ export default function AgentNav() {
 
   return (
     <nav className="agent-nav">
+      {/* Default agent — aligns vertically with Æ home icon */}
       <div
         className={`agent-row${!selectedAgent ? " active" : ""}`}
         onClick={() => { setSelectedAgent(null); navigate("/"); }}
@@ -39,6 +40,10 @@ export default function AgentNav() {
         AEQI Agent
       </div>
 
+      {/* Separator — matches rail separator */}
+      {filtered.length > 0 && <div className="agent-nav-sep" />}
+
+      {/* Other agents */}
       {filtered.map((agent) => (
         <div
           key={agent.id}
@@ -49,6 +54,7 @@ export default function AgentNav() {
         </div>
       ))}
 
+      {/* Add — right after the last agent */}
       <div className="agent-nav-add" onClick={() => navigate("/agents")}>+</div>
     </nav>
   );
