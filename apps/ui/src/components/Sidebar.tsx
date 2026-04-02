@@ -4,28 +4,6 @@ import { useChatStore } from "@/store/chat";
 import { api } from "@/lib/api";
 import type { PersistentAgent } from "@/lib/types";
 
-function AgentRow({
-  name,
-  isActive,
-  onClick,
-}: {
-  name: string;
-  isActive: boolean;
-  onClick: () => void;
-}) {
-  const initial = name.charAt(0).toUpperCase();
-
-  return (
-    <div
-      className={`agent-row${isActive ? " active" : ""}`}
-      onClick={onClick}
-    >
-      <div className="agent-row-avatar">{initial}</div>
-      <span className="agent-row-name">{name}</span>
-    </div>
-  );
-}
-
 export default function AgentNav() {
   const navigate = useNavigate();
   const channel = useChatStore((s) => s.channel);
@@ -54,27 +32,24 @@ export default function AgentNav() {
 
   return (
     <nav className="agent-nav">
-      <AgentRow
-        name="Executive Assistant"
-        isActive={!selectedAgent}
+      <div
+        className={`agent-row${!selectedAgent ? " active" : ""}`}
         onClick={() => { setSelectedAgent(null); navigate("/"); }}
-      />
+      >
+        AEQI Agent
+      </div>
 
       {filtered.map((agent) => (
-        <AgentRow
+        <div
           key={agent.id}
-          name={agent.display_name || agent.name}
-          isActive={selectedAgent === agent.name}
+          className={`agent-row${selectedAgent === agent.name ? " active" : ""}`}
           onClick={() => { setSelectedAgent(agent.name); navigate("/"); }}
-        />
+        >
+          {agent.display_name || agent.name}
+        </div>
       ))}
 
-      <div
-        className="agent-nav-add"
-        onClick={() => navigate("/agents")}
-      >
-        +
-      </div>
+      <div className="agent-nav-add" onClick={() => navigate("/agents")}>+</div>
     </nav>
   );
 }
