@@ -414,6 +414,7 @@ pub enum ConfigAction {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum TriggerAction {
     /// Create a new trigger for an agent.
     Create {
@@ -440,6 +441,12 @@ pub enum TriggerAction {
         /// Cooldown in seconds for event triggers.
         #[arg(long)]
         cooldown: Option<u64>,
+        /// Create a webhook trigger (externally fired via HTTP POST).
+        #[arg(long)]
+        webhook: bool,
+        /// HMAC-SHA256 signing secret for webhook payload verification.
+        #[arg(long)]
+        signing_secret: Option<String>,
         /// Skill to run when triggered.
         #[arg(long)]
         skill: String,

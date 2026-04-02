@@ -22,6 +22,8 @@ pub(crate) async fn cmd_trigger(
             event_project,
             event_tool,
             cooldown,
+            webhook,
+            signing_secret,
             skill,
             max_budget,
         } => {
@@ -63,8 +65,15 @@ pub(crate) async fn cmd_trigger(
                     pattern,
                     cooldown_secs,
                 }
+            } else if webhook {
+                let public_id =
+                    sigil_orchestrator::trigger::generate_webhook_public_id();
+                sigil_orchestrator::trigger::TriggerType::Webhook {
+                    public_id,
+                    signing_secret,
+                }
             } else {
-                anyhow::bail!("provide --schedule, --at, or --event");
+                anyhow::bail!("provide --schedule, --at, --event, or --webhook");
             };
 
             let trigger = trigger_store
@@ -83,6 +92,16 @@ pub(crate) async fn cmd_trigger(
             println!("  Agent:  {} ({})", pa.name, pa.id);
             println!("  Type:   {}", trigger.trigger_type.type_str());
             println!("  Skill:  {}", trigger.skill);
+            if let sigil_orchestrator::trigger::TriggerType::Webhook {
+                public_id,
+                signing_secret,
+            } = &trigger.trigger_type
+            {
+                println!("  URL:    POST /api/webhooks/{public_id}");
+                if signing_secret.is_some() {
+                    println!("  Auth:   HMAC-SHA256 (X-Signature-256 header)");
+                }
+            }
             if let Some(b) = trigger.max_budget_usd {
                 println!("  Budget: ${b:.2}/fire");
             }
@@ -137,6 +156,16 @@ pub(crate) async fn cmd_trigger(
             println!("  Fires:      {}", trigger.fire_count);
             println!("  Cost:       ${:.4}", trigger.total_cost_usd);
             println!("  Created:    {}", trigger.created_at);
+            if let sigil_orchestrator::trigger::TriggerType::Webhook {
+                public_id,
+                signing_secret,
+            } = &trigger.trigger_type
+            {
+                println!("  URL:        POST /api/webhooks/{public_id}");
+                if signing_secret.is_some() {
+                    println!("  Auth:       HMAC-SHA256 (X-Signature-256 header)");
+                }
+            }
             if let Some(lf) = trigger.last_fired {
                 println!("  Last fired: {lf}");
             }
