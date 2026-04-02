@@ -45,10 +45,21 @@ impl SqliteMemory {
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
              PRAGMA synchronous=NORMAL;
-             PRAGMA wal_autocheckpoint=1000;
+             PRAGMA wal_autocheckpoint=100;
              PRAGMA cache_size=-8000;
              PRAGMA temp_store=MEMORY;",
         )?;
+
+        // Jitter retry on lock contention: random 20-150ms sleep, up to 15 attempts.
+        // Breaks convoy effect from SQLite's deterministic backoff.
+        conn.busy_handler(Some(|attempt| {
+            if attempt >= 15 {
+                return false; // Give up after 15 retries.
+            }
+            let jitter_ms = 20 + (attempt as u64 * 9) % 131; // 20-150ms range
+            std::thread::sleep(std::time::Duration::from_millis(jitter_ms));
+            true
+        }))?;
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS memories (

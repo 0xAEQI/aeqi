@@ -4,6 +4,7 @@ use sigil_core::traits::{LogObserver, Observer, Provider, Tool, ToolResult, Tool
 use sigil_core::{Agent, AgentConfig, Identity, LoopNotification, NotificationSender, SessionType};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{Mutex, mpsc};
 
 // ---------------------------------------------------------------------------
@@ -68,13 +69,17 @@ pub enum AgentStatus {
 }
 
 /// Handle to a background agent for registry tracking.
-#[derive(Debug)]
 pub struct AgentHandle {
     pub id: String,
     pub description: String,
     pub status: AgentStatus,
     /// Set once notification is sent — prevents duplicate delivery.
     pub(crate) notified: bool,
+    /// Cancel token — set to true to stop this agent at next iteration boundary.
+    pub cancel_token: Arc<AtomicBool>,
+    /// Whether parent is blocking on this result (origin mode).
+    /// Only origin-mode children are cancelled on parent interrupt.
+    pub is_blocking: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +100,22 @@ pub struct AgentInfra {
 }
 
 impl AgentInfra {
+    /// Cancel all blocking (origin-mode) children. Called when parent is interrupted.
+    /// Non-blocking children (async mode) are left running.
+    pub async fn cancel_blocking_children(&self) {
+        let reg = self.registry.lock().await;
+        for handle in reg.values() {
+            if handle.is_blocking && handle.status == AgentStatus::Running {
+                handle.cancel_token.store(true, Ordering::Relaxed);
+                tracing::warn!(
+                    agent_id = %handle.id,
+                    description = %handle.description,
+                    "cancelling blocking child agent (parent interrupted)"
+                );
+            }
+        }
+    }
+
     /// Create infrastructure with a pre-existing loop notification sender.
     /// The receiver should be passed to `Agent::with_notification_rx()`.
     pub fn new(loop_tx: NotificationSender) -> (Self, mpsc::UnboundedReceiver<AgentNotification>) {
@@ -136,6 +157,9 @@ pub struct DelegateTool {
     depth: u32,
     /// Shared infrastructure for background agents. None = async mode unavailable.
     infra: Option<AgentInfra>,
+    /// Parent's remaining iteration budget. Subagents allocate from this pool.
+    /// Default 0 means no budget tracking (backward compat).
+    parent_remaining_budget: Arc<std::sync::atomic::AtomicU32>,
 }
 
 impl DelegateTool {
@@ -153,6 +177,7 @@ impl DelegateTool {
             session_type: SessionType::Async,
             depth: 0,
             infra: None,
+            parent_remaining_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         }
     }
 
@@ -170,6 +195,28 @@ impl DelegateTool {
     pub fn with_infra(mut self, infra: AgentInfra) -> Self {
         self.infra = Some(infra);
         self
+    }
+
+    /// Set parent's remaining budget for allocation-based budget sharing.
+    pub fn with_parent_budget(mut self, budget: Arc<std::sync::atomic::AtomicU32>) -> Self {
+        self.parent_remaining_budget = budget;
+        self
+    }
+
+    /// Allocate iteration budget for a child. If parent has budget tracking
+    /// enabled, deducts from parent's pool. Otherwise uses the requested amount.
+    fn allocate_budget(&self, requested: u32) -> u32 {
+        let parent_budget = self.parent_remaining_budget.load(Ordering::Relaxed);
+        if parent_budget == 0 {
+            return requested; // No budget tracking — use requested amount.
+        }
+        // Cap child at min(requested, remaining/2, remaining) to prevent starvation.
+        let max_allocation = parent_budget.min(requested);
+        let allocated = max_allocation.min(parent_budget / 2).max(1);
+        // Deduct from parent's pool.
+        self.parent_remaining_budget
+            .fetch_sub(allocated, Ordering::Relaxed);
+        allocated
     }
 
     fn build_tools(&self, args: &serde_json::Value) -> Vec<Arc<dyn Tool>> {
@@ -208,10 +255,11 @@ impl DelegateTool {
             .get("prompt")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing prompt"))?;
-        let max_iterations = args
+        let requested = args
             .get("max_iterations")
             .and_then(|v| v.as_u64())
             .unwrap_or(10) as u32;
+        let max_iterations = self.allocate_budget(requested);
         let agent_name = args
             .get("name")
             .and_then(|v| v.as_str())
@@ -252,10 +300,11 @@ impl DelegateTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing prompt"))?
             .to_string();
-        let max_iterations = args
+        let requested = args
             .get("max_iterations")
             .and_then(|v| v.as_u64())
             .unwrap_or(10) as u32;
+        let max_iterations = self.allocate_budget(requested);
         let description = args
             .get("description")
             .and_then(|v| v.as_str())
@@ -269,6 +318,8 @@ impl DelegateTool {
         let agent_id = Self::generate_agent_id();
         let tools = self.build_tools(args);
 
+        let cancel_token = Arc::new(AtomicBool::new(false));
+
         // Register in the shared registry.
         {
             let mut reg = infra.registry.lock().await;
@@ -279,6 +330,8 @@ impl DelegateTool {
                     description: description.clone(),
                     status: AgentStatus::Running,
                     notified: false,
+                    cancel_token: cancel_token.clone(),
+                    is_blocking: false, // Async mode = non-blocking.
                 },
             );
         }
@@ -292,6 +345,7 @@ impl DelegateTool {
         let loop_tx = infra.loop_tx.clone();
         let id = agent_id.clone();
         let desc = description.clone();
+        let _child_cancel = cancel_token.clone();
 
         tokio::spawn(async move {
             let start = std::time::Instant::now();
@@ -305,6 +359,13 @@ impl DelegateTool {
             };
 
             let agent = Agent::new(config, provider, tools, observer, identity);
+            // Store the agent's cancel token in the handle for interrupt propagation.
+            {
+                let mut reg = registry.lock().await;
+                if let Some(handle) = reg.get_mut(&id) {
+                    handle.cancel_token = agent.cancel_token();
+                }
+            }
             let result = agent.run(&prompt).await;
             let duration_ms = start.elapsed().as_millis() as u64;
 

@@ -313,6 +313,8 @@ pub enum AgentStopReason {
     ContextExhausted,
     /// Model switched to fallback due to consecutive errors.
     FallbackActivated,
+    /// Cancelled by parent agent (interrupt propagation).
+    Cancelled,
 }
 
 /// Result from an agent run.
@@ -558,6 +560,9 @@ pub struct Agent {
     /// Receiver for user input in perpetual session mode. The agent loop waits
     /// on this channel after each EndTurn instead of exiting.
     input_rx: Option<Arc<Mutex<mpsc::UnboundedReceiver<String>>>>,
+    /// Cancellation signal. When set to true, the agent loop exits at the next
+    /// iteration boundary. Used for interrupt propagation from parent agents.
+    cancel_token: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Agent {
@@ -578,7 +583,14 @@ impl Agent {
             chat_stream: None,
             notification_rx: None,
             input_rx: None,
+            cancel_token: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    /// Get the cancel token for external interrupt signaling.
+    /// Set to `true` to stop the agent at the next iteration boundary.
+    pub fn cancel_token(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        self.cancel_token.clone()
     }
 
     /// Attach a memory backend for context recall.
@@ -681,6 +693,13 @@ impl Agent {
         let mut replacement_state = ContentReplacementState::new();
 
         loop {
+            // Check cancellation signal (set by parent interrupt propagation).
+            if self.cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
+                warn!(agent = %self.config.name, "agent cancelled by parent");
+                stop_reason = AgentStopReason::Cancelled;
+                break;
+            }
+
             iterations += 1;
             if iterations > self.config.max_iterations {
                 warn!(

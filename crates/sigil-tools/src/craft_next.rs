@@ -192,6 +192,7 @@ mod tests {
                 usage: sigil_core::traits::Usage {
                     prompt_tokens: 100,
                     completion_tokens: 20,
+                    ..Default::default()
                 },
                 stop_reason: sigil_core::traits::StopReason::EndTurn,
             })

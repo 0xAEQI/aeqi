@@ -112,6 +112,7 @@ impl Tool for ContinueAgentTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicBool;
 
     #[tokio::test]
     async fn test_continue_unknown_agent() {
@@ -137,6 +138,8 @@ mod tests {
                     description: "Test agent".to_string(),
                     status: AgentStatus::Running,
                     notified: false,
+                    cancel_token: Arc::new(AtomicBool::new(false)),
+                    is_blocking: false,
                 },
             );
         }
@@ -161,6 +164,8 @@ mod tests {
                     description: "Done agent".to_string(),
                     status: AgentStatus::Completed,
                     notified: true,
+                    cancel_token: Arc::new(AtomicBool::new(false)),
+                    is_blocking: false,
                 },
             );
         }
@@ -185,6 +190,8 @@ mod tests {
                     description: "Failed agent".to_string(),
                     status: AgentStatus::Failed,
                     notified: true,
+                    cancel_token: Arc::new(AtomicBool::new(false)),
+                    is_blocking: false,
                 },
             );
         }

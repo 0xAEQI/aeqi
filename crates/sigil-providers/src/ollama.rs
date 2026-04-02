@@ -269,6 +269,7 @@ impl Provider for OllamaProvider {
             usage: Usage {
                 prompt_tokens: api_response.prompt_eval_count,
                 completion_tokens: api_response.eval_count,
+                ..Default::default()
             },
             stop_reason,
         })

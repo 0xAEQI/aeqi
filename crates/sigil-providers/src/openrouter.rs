@@ -469,6 +469,7 @@ impl Provider for OpenRouterProvider {
             .map(|u| Usage {
                 prompt_tokens: u.prompt_tokens,
                 completion_tokens: u.completion_tokens,
+                ..Default::default()
             })
             .unwrap_or_default();
 

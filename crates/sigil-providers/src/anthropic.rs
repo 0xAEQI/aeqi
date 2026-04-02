@@ -12,6 +12,7 @@ use tracing::debug;
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const API_VERSION: &str = "2023-06-01";
+const PROMPT_CACHING_BETA: &str = "prompt-caching-2024-07-31";
 
 /// Direct Anthropic API provider (Messages API).
 pub struct AnthropicProvider {
@@ -43,7 +44,7 @@ struct AnthropicRequest {
     messages: Vec<AnthropicMessage>,
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
+    system: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -89,6 +90,10 @@ enum AnthropicContent {
 struct AnthropicUsage {
     input_tokens: u32,
     output_tokens: u32,
+    #[serde(default)]
+    cache_creation_input_tokens: u32,
+    #[serde(default)]
+    cache_read_input_tokens: u32,
 }
 
 #[derive(Deserialize)]
@@ -101,15 +106,15 @@ struct AnthropicErrorDetail {
     message: String,
 }
 
-fn convert_messages(messages: &[Message]) -> (Option<String>, Vec<AnthropicMessage>) {
-    let mut system = None;
+fn convert_messages(messages: &[Message]) -> (Option<serde_json::Value>, Vec<AnthropicMessage>) {
+    let mut system_text = None;
     let mut converted = Vec::new();
 
     for msg in messages {
         match msg.role {
             Role::System => {
                 if let Some(text) = msg.content.as_text() {
-                    system = Some(text.to_string());
+                    system_text = Some(text.to_string());
                 }
             }
             Role::User => {
@@ -178,6 +183,42 @@ fn convert_messages(messages: &[Message]) -> (Option<String>, Vec<AnthropicMessa
                     });
                 }
             }
+        }
+    }
+
+    // Apply prompt caching: system as content block array with cache_control,
+    // plus cache_control on last 3 non-system messages.
+    let system = system_text.map(|text| {
+        serde_json::json!([{
+            "type": "text",
+            "text": text,
+            "cache_control": {"type": "ephemeral"}
+        }])
+    });
+
+    // Mark last 3 messages with cache_control breakpoints.
+    let len = converted.len();
+    let cache_start = len.saturating_sub(3);
+    for msg in converted[cache_start..].iter_mut() {
+        match &mut msg.content {
+            serde_json::Value::String(text) => {
+                msg.content = serde_json::json!([{
+                    "type": "text",
+                    "text": text.clone(),
+                    "cache_control": {"type": "ephemeral"}
+                }]);
+            }
+            serde_json::Value::Array(blocks) => {
+                if let Some(last) = blocks.last_mut()
+                    && let Some(obj) = last.as_object_mut()
+                {
+                    obj.insert(
+                        "cache_control".to_string(),
+                        serde_json::json!({"type": "ephemeral"}),
+                    );
+                }
+            }
+            _ => {}
         }
     }
 
@@ -302,6 +343,7 @@ impl Provider for AnthropicProvider {
             .post(ANTHROPIC_API_URL)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", API_VERSION)
+            .header("anthropic-beta", PROMPT_CACHING_BETA)
             .header("content-type", "application/json")
             .json(&api_request)
             .send()
@@ -353,6 +395,8 @@ impl Provider for AnthropicProvider {
             usage: Usage {
                 prompt_tokens: api_response.usage.input_tokens,
                 completion_tokens: api_response.usage.output_tokens,
+                cache_creation_input_tokens: api_response.usage.cache_creation_input_tokens,
+                cache_read_input_tokens: api_response.usage.cache_read_input_tokens,
             },
             stop_reason,
         })
@@ -393,6 +437,7 @@ impl Provider for AnthropicProvider {
             .post(ANTHROPIC_API_URL)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", API_VERSION)
+            .header("anthropic-beta", PROMPT_CACHING_BETA)
             .header("content-type", "application/json")
             .json(&api_request)
             .send()
@@ -410,10 +455,7 @@ impl Provider for AnthropicProvider {
 
         // State accumulators for building the final ChatResponse.
         let mut blocks: Vec<BlockAccum> = Vec::new();
-        let mut usage = Usage {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-        };
+        let mut usage = Usage::default();
         let mut stop_reason = StopReason::EndTurn;
 
         // Read the SSE byte stream and process line by line.

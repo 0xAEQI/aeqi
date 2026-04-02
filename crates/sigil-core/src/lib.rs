@@ -11,6 +11,7 @@ pub mod chat_stream;
 pub mod checkpoint;
 pub mod config;
 pub mod identity;
+pub mod sanitize;
 pub mod security;
 pub mod shell_hooks;
 pub mod streaming_executor;
