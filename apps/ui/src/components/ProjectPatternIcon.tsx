@@ -56,9 +56,11 @@ function makePatternDataUrl(seed: string, logicalSize = 22, cellSize = 2): strin
   if (!ctx) return "";
 
   const rand = mulberry32(hashString(seed));
-  const hue = Math.floor(rand() * 360);
-  const [offR, offG, offB] = hslToRgb(hue, 54 + Math.floor(rand() * 14), 36 + Math.floor(rand() * 12));
-  const [onR, onG, onB] = hslToRgb(hue + (rand() > 0.5 ? 10 : -10), 86 + Math.floor(rand() * 10), 82 + Math.floor(rand() * 10));
+  rand(); // consume hue slot for seed stability
+  const offL = 10 + Math.floor(rand() * 8);
+  const onL = 55 + Math.floor(rand() * 15);
+  const [offR, offG, offB] = [offL, offL, offL];
+  const [onR, onG, onB] = [onL, onL, onL];
 
   const center = (logicalSize - 1) / 2;
   const half = Math.max(center, 1);
