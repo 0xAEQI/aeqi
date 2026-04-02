@@ -165,8 +165,10 @@ IPC handlers use `try_lock()` on task boards — return partial data rather than
 
 ## Remaining Cleanup (Technical Debt)
 
-- Old DispatchKind variants (TaskDone, TaskBlocked, etc.) coexist with new DelegateRequest/DelegateResponse — should be consolidated once all callers migrate
-- Task.agent_id is Optional — should become required once all creation paths bind to agents
-- Supervisor still iterates per-project, not per-agent — to be refactored when agent worker pools replace project supervisors
+- **Dispatch consumption incomplete**: Only leader agent's mailbox is polled. Non-leader named agents and `dept:` dispatches have no consumer. Event triggers fire on DispatchReceived but can't extract dispatch content or filter by recipient. Response modes (perpetual, async, department) are accepted but not implemented — all responses hardcode "origin" and route to system_escalation_target.
+- Task.agent_id is Optional — should become required once all creation paths bind to agents (5+ paths still produce None)
+- Supervisor still iterates per-project, not per-agent — to be refactored when agent worker pools replace project supervisors (redesign spec Phase 4)
 - Old separate tools (dispatch_send, channel_post) coexist with unified delegate tool
 - Subagent spawning not yet wired through unified delegate tool (uses old DelegateTool)
+- IPC blackboard queries bypass `query_scoped()` — all entries visible to any IPC client regardless of department
+- No task state transition validation — `TaskBoard::update()` allows arbitrary status changes
