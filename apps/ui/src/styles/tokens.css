@@ -381,6 +381,7 @@ a:hover {
   gap: 4px;
   overflow-y: auto;
   flex-shrink: 0;
+  font-family: var(--font-mono);
 }
 
 .agent-nav-sep {
@@ -402,6 +403,7 @@ a:hover {
   border-radius: 12px;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
 }
 
 .agent-row:hover {
