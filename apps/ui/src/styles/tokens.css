@@ -552,13 +552,21 @@ a:hover {
   color: rgba(255,255,255,0.5);
 }
 
-.agent-nav-bottom-actions {
-  display: flex;
-  justify-content: center;
-  gap: 4px;
+.agent-nav-text-btn {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: rgba(255,255,255,0.12);
+  cursor: pointer;
+  padding: 4px 0;
+  transition: color 0.1s ease;
 }
 
-.agent-nav-action {
+.agent-nav-text-btn:hover {
+  color: rgba(255,255,255,0.35);
+}
+
+.rail-settings {
   width: 32px;
   height: 32px;
   display: flex;
@@ -570,7 +578,7 @@ a:hover {
   transition: all 0.12s ease;
 }
 
-.agent-nav-action:hover {
+.rail-settings:hover {
   color: rgba(255,255,255,0.45);
   background: rgba(255,255,255,0.04);
 }
