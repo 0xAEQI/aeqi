@@ -91,8 +91,8 @@ function FloatingTopBar() {
     : pathname.split("/").filter(Boolean);
 
   const label = isChatHome
-    ? (channel ? channel.split("/").pop() : "sigil")
-    : segments[segments.length - 1] || "sigil";
+    ? (channel ? channel.split("/").pop() : "aeqi")
+    : segments[segments.length - 1] || "aeqi";
 
   return (
     <div className="floating-topbar">
@@ -105,7 +105,7 @@ function FloatingTopBar() {
             </>
           ) : (
             <>
-              <Link to="/" className="floating-topbar-crumb">sigil</Link>
+              <Link to="/" className="floating-topbar-crumb">aeqi</Link>
               {segments.map((seg, i) => (
                 <span key={i} className="floating-topbar-crumb-seg">
                   <span className="floating-topbar-sep">/</span>

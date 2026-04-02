@@ -35,12 +35,12 @@ export default function ProjectRail() {
 
   return (
     <div className="project-rail">
-      {/* Sigil home icon */}
+      {/* AEQI home icon */}
       <div className="rail-home">
         <button
           className={`rail-home-btn ${!channel && pathname === "/" ? "rail-home-btn-active" : ""}`}
           onClick={() => { setChannel(null); navigate("/"); }}
-          title="Sigil"
+          title="AEQI"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M12 2L2 7l10 5 10-5-10-5z" />

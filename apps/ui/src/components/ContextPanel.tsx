@@ -9,7 +9,7 @@ function NotesTab({ channel }: { channel: string | null }) {
   const [directives, setDirectives] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const channelKey = channel || "sigil";
+  const channelKey = channel || "aeqi";
 
   // Load note on channel change
   useEffect(() => {

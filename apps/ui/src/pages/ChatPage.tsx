@@ -53,7 +53,7 @@ function parseChannelScope(channel: string | null): {
   channelName?: string;
 } {
   if (!channel) {
-    return { channelName: "sigil" };
+    return { channelName: "aeqi" };
   }
   const [project, department] = channel.split("/");
   if (!project) return {};

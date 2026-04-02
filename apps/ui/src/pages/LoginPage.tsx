@@ -24,7 +24,7 @@ export default function LoginPage() {
             <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none" />
           </svg>
         </div>
-        <h1 className="login-title">Sigil</h1>
+        <h1 className="login-title">AEQI</h1>
         <p className="login-subtitle">Your shadow awaits</p>
         <form className="login-form" onSubmit={handleSubmit}>
           <input

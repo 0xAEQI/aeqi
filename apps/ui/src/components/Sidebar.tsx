@@ -61,7 +61,7 @@ export default function Sidebar({ onCommandPalette }: { onCommandPalette: () => 
           </svg>
         </button>
         <span className="sidebar-context-label">
-          {channel || "sigil"}
+          {channel || "aeqi"}
         </span>
         <div className="sidebar-spacer" />
         <button className="sidebar-cmd" onClick={onCommandPalette} title="Cmd+K">
