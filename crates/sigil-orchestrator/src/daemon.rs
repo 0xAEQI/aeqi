@@ -12,7 +12,7 @@ use crate::conversation_store::{
     agency_chat_id, department_chat_id, named_channel_chat_id, project_chat_id,
 };
 use crate::execution_events::{EventBroadcaster, ExecutionEvent};
-use crate::message::{Dispatch, DispatchBus, DispatchHealth};
+use crate::message::{Dispatch, DispatchBus, DispatchHealth, DispatchKind};
 use crate::registry::ProjectRegistry;
 use crate::session_tracker::SessionTracker;
 use crate::trigger::TriggerStore;
@@ -479,6 +479,7 @@ impl Daemon {
             let ts = trigger_store.clone();
             let registry = self.registry.clone();
             let agent_reg = self.agent_registry.clone();
+            let dispatch_bus = self.dispatch_bus.clone();
             let mut rx = self.event_broadcaster.subscribe();
             tokio::spawn(async move {
                 let mut cooldowns: std::collections::HashMap<String, chrono::DateTime<Utc>> =
@@ -526,18 +527,43 @@ impl Daemon {
                         };
                         if let Some(project) = project {
                             let subject = format!("[trigger:{}] {}", trigger.name, trigger.skill);
+                            // For DispatchReceived events, read pending dispatches for
+                            // the target agent and inject the prompt into the task.
+                            let mut delegation_labels: Vec<String> = Vec::new();
+                            let dispatch_context = if let crate::execution_events::ExecutionEvent::DispatchReceived { ref to_agent, .. } = event {
+                                let dispatches = dispatch_bus.read(to_agent).await;
+                                let prompts: Vec<String> = dispatches.iter().filter_map(|d| {
+                                    if let DispatchKind::DelegateRequest { ref prompt, ref response_mode, .. } = d.kind {
+                                        // Store origin info so response can be routed back.
+                                        delegation_labels.push(format!("delegate_from:{}", d.from));
+                                        delegation_labels.push(format!("delegate_dispatch:{}", d.id));
+                                        delegation_labels.push(format!("delegate_response_mode:{response_mode}"));
+                                        Some(format!("From {}: {}", d.from, prompt))
+                                    } else {
+                                        None
+                                    }
+                                }).collect();
+                                if prompts.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!("\n\n## Pending Delegations\n{}", prompts.join("\n\n"))
+                                }
+                            } else {
+                                String::new()
+                            };
                             let desc = format!(
-                                "Event trigger '{}' fired. Run skill '{}'.",
-                                trigger.name, trigger.skill
+                                "Event trigger '{}' fired. Run skill '{}'.{}",
+                                trigger.name, trigger.skill, dispatch_context
                             );
                             let trigger_agent_id = trigger.agent_id.clone();
                             if let Err(e) = registry
-                                .assign_with_skill_and_agent(
+                                .assign_with_skill_agent_labels(
                                     &project,
                                     &subject,
                                     &desc,
                                     &trigger.skill,
                                     Some(&trigger_agent_id),
+                                    &delegation_labels,
                                 )
                                 .await
                             {
@@ -1212,10 +1238,27 @@ impl Daemon {
                         .get("cross_project")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
+                    // Optional agent scoping: when agent_id is provided, use
+                    // query_scoped() to enforce department-based visibility.
+                    let scope_agent_id =
+                        request.get("agent_id").and_then(|v| v.as_str()).map(String::from);
+                    let scope_department = request
+                        .get("department")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+
                     match &registry.blackboard {
                         Some(bb) => {
                             let entries = if cross_project {
                                 bb.query_cross_project(&tags, since, limit)
+                                    .unwrap_or_default()
+                            } else if scope_agent_id.is_some() || scope_department.is_some() {
+                                let vis = crate::blackboard::AgentVisibility {
+                                    agent_id: scope_agent_id,
+                                    project: Some(project_filter.to_string()),
+                                    department: scope_department,
+                                };
+                                bb.query_scoped(project_filter, &vis, &tags, limit as usize)
                                     .unwrap_or_default()
                             } else if !tags.is_empty() {
                                 if let Some(since_dt) = since {

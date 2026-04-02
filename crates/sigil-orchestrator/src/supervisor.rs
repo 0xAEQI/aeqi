@@ -960,7 +960,24 @@ impl Supervisor {
             let blackboard_worker = self.blackboard.clone();
             let audit_log_worker = self.audit_log.clone();
             let dispatch_bus_worker = self.dispatch_bus.clone();
-            let outcome_recipient = self.system_escalation_target.clone();
+            // Route response to the original delegating agent if present, else system leader.
+            let outcome_recipient = task
+                .labels
+                .iter()
+                .find_map(|l| l.strip_prefix("delegate_from:"))
+                .unwrap_or(&self.system_escalation_target)
+                .to_string();
+            let delegate_dispatch_id = task
+                .labels
+                .iter()
+                .find_map(|l| l.strip_prefix("delegate_dispatch:"))
+                .map(String::from);
+            let delegate_response_mode = task
+                .labels
+                .iter()
+                .find_map(|l| l.strip_prefix("delegate_response_mode:"))
+                .unwrap_or("origin")
+                .to_string();
             let task_labels = task.labels.clone();
             let task_subject = task.subject.clone();
             let agent_name_for_records = agent_name.clone();
@@ -1069,8 +1086,10 @@ impl Supervisor {
                                         &format!("supervisor-{project_name_task}"),
                                         &outcome_recipient,
                                         DispatchKind::DelegateResponse {
-                                            reply_to: task_id_clone.clone(),
-                                            response_mode: "origin".to_string(),
+                                            reply_to: delegate_dispatch_id
+                                                .clone()
+                                                .unwrap_or_else(|| task_id_clone.clone()),
+                                            response_mode: delegate_response_mode.clone(),
                                             content: format!(
                                                 "Task {} completed: {}",
                                                 task_id_clone, summary

@@ -182,6 +182,26 @@ impl ProjectRegistry {
         skill: &str,
         agent_id: Option<&str>,
     ) -> Result<sigil_tasks::Task> {
+        self.assign_with_skill_agent_labels(
+            project_name,
+            subject,
+            description,
+            skill,
+            agent_id,
+            &[],
+        )
+        .await
+    }
+
+    pub async fn assign_with_skill_agent_labels(
+        &self,
+        project_name: &str,
+        subject: &str,
+        description: &str,
+        skill: &str,
+        agent_id: Option<&str>,
+        labels: &[String],
+    ) -> Result<sigil_tasks::Task> {
         let projects = self.projects.read().await;
         let project = projects
             .get(project_name)
@@ -196,6 +216,9 @@ impl ProjectRegistry {
                     q.description = description.to_string();
                 }
                 q.skill = Some(skill.to_string());
+                for label in labels {
+                    q.labels.push(label.clone());
+                }
             })?;
         }
 

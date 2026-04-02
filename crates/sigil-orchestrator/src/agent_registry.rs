@@ -127,6 +127,8 @@ pub struct TemplateTrigger {
     pub event_tool: Option<String>,
     /// Event from_agent filter (optional, for dispatch_received/channel_message).
     pub event_from: Option<String>,
+    /// Event to_agent filter (optional, for dispatch_received).
+    pub event_to: Option<String>,
     /// Event kind filter (optional, for dispatch_received).
     pub event_kind: Option<String>,
     /// Event channel filter (optional, for channel_message).
@@ -863,6 +865,7 @@ fn template_trigger_to_type(t: &TemplateTrigger) -> Result<crate::trigger::Trigg
             },
             "dispatch_received" => crate::trigger::EventPattern::DispatchReceived {
                 from_agent: t.event_from.clone(),
+                to_agent: t.event_to.clone(),
                 kind: t.event_kind.clone(),
             },
             "channel_message" => crate::trigger::EventPattern::ChannelMessage {

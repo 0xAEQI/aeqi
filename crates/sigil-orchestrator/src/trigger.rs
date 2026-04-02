@@ -106,6 +106,8 @@ pub enum EventPattern {
         #[serde(skip_serializing_if = "Option::is_none")]
         from_agent: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        to_agent: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         kind: Option<String>,
     },
     /// Fire when a message is posted to a conversation channel.
@@ -407,15 +409,19 @@ impl EventPattern {
             (
                 EventPattern::DispatchReceived {
                     from_agent: pattern_from,
+                    to_agent: pattern_to,
                     kind: pattern_kind,
                 },
                 ExecutionEvent::DispatchReceived {
-                    from_agent, kind, ..
+                    from_agent,
+                    to_agent,
+                    kind,
                 },
             ) => {
                 let from_match = pattern_from.as_ref().is_none_or(|p| from_agent == p);
+                let to_match = pattern_to.as_ref().is_none_or(|p| to_agent == p);
                 let kind_match = pattern_kind.as_ref().is_none_or(|k| kind == k);
-                from_match && kind_match
+                from_match && to_match && kind_match
             }
             (
                 EventPattern::ChannelMessage {
