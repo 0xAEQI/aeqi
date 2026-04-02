@@ -36,6 +36,10 @@ pub struct SigilConfig {
     /// Orchestration tuning parameters (retries, timeouts, limits).
     #[serde(default)]
     pub orchestrator: OrchestratorConfig,
+    /// Model tier mapping — agents declare intent (capable/balanced/fast/cheapest),
+    /// this config resolves to actual model names.
+    #[serde(default)]
+    pub models: ModelTierConfig,
     /// Web API server settings.
     #[serde(default)]
     pub web: WebConfig,
@@ -261,15 +265,79 @@ pub enum AgentVoice {
     Silent,
 }
 
-/// Configuration for a single agent (peer entity) in sigil.toml.
+/// Model tier mapping. Agents declare capability intent, config resolves to model names.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelTierConfig {
+    /// Most capable model — architecture, security, complex decisions.
+    #[serde(default = "default_model_capable")]
+    pub capable: String,
+    /// Balanced model — standard implementation, review, testing.
+    #[serde(default = "default_model_balanced")]
+    pub balanced: String,
+    /// Fast/cheap model — simple queries, formatting, observation analysis.
+    #[serde(default = "default_model_fast")]
+    pub fast: String,
+    /// Cheapest available — health checks, memory consolidation, status.
+    #[serde(default = "default_model_cheapest")]
+    pub cheapest: String,
+}
+
+impl Default for ModelTierConfig {
+    fn default() -> Self {
+        Self {
+            capable: default_model_capable(),
+            balanced: default_model_balanced(),
+            fast: default_model_fast(),
+            cheapest: default_model_cheapest(),
+        }
+    }
+}
+
+impl ModelTierConfig {
+    /// Resolve a tier name to an actual model string.
+    /// Falls back to balanced if tier is unknown.
+    pub fn resolve(&self, tier: &str) -> &str {
+        match tier {
+            "capable" => &self.capable,
+            "balanced" => &self.balanced,
+            "fast" => &self.fast,
+            "cheapest" => &self.cheapest,
+            _ => {
+                warn!(tier = %tier, "unknown model tier, falling back to balanced");
+                &self.balanced
+            }
+        }
+    }
+}
+
+fn default_model_capable() -> String {
+    "anthropic/claude-sonnet-4-6".to_string()
+}
+fn default_model_balanced() -> String {
+    "anthropic/claude-sonnet-4-6".to_string()
+}
+fn default_model_fast() -> String {
+    "anthropic/claude-haiku-4-5".to_string()
+}
+fn default_model_cheapest() -> String {
+    "anthropic/claude-haiku-4-5".to_string()
+}
+
+/// Configuration for a single agent (peer entity).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerAgentConfig {
     pub name: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
     #[serde(default = "default_agent_prefix")]
     pub prefix: String,
     #[serde(default)]
     pub model: Option<String>,
-    /// Runtime preset name. If omitted, falls back to `[sigil].default_runtime`.
+    /// Model capability tier: capable, balanced, fast, cheapest.
+    /// Resolved to actual model name via [models] config section.
+    /// Takes priority over `model` when both are set.
+    #[serde(default)]
+    pub model_tier: Option<String>,
     #[serde(default, alias = "runtime_preset")]
     pub runtime: Option<String>,
     #[serde(default = "default_agent_role")]
@@ -284,18 +352,59 @@ pub struct PeerAgentConfig {
     pub max_turns: Option<u32>,
     #[serde(default)]
     pub max_budget_usd: Option<f64>,
-    /// Default repo key (from `[repos]`) this agent works in.
     #[serde(default)]
     pub default_repo: Option<String>,
-    /// Domains this agent specializes in (for routing classifier).
     #[serde(default)]
     pub expertise: Vec<String>,
-    /// Agent capabilities (e.g. "orchestration", "memory").
     #[serde(default)]
     pub capabilities: Vec<String>,
-    /// Secret store key for this agent's Telegram bot token.
     #[serde(default)]
     pub telegram_token_secret: Option<String>,
+    /// Visual identity.
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub avatar: Option<String>,
+    #[serde(default)]
+    pub faces: Option<HashMap<String, String>>,
+    /// Triggers defined in agent template.
+    #[serde(default)]
+    pub triggers: Vec<AgentTriggerConfig>,
+    /// System prompt — the agent's personality and instructions.
+    #[serde(default)]
+    pub prompt: Option<AgentPromptConfig>,
+}
+
+impl PeerAgentConfig {
+    /// Resolve the actual model name.
+    /// Priority: model_tier (via [models] config) > explicit model > balanced default.
+    pub fn resolve_model(&self, tiers: &ModelTierConfig) -> String {
+        if let Some(ref tier) = self.model_tier {
+            return tiers.resolve(tier).to_string();
+        }
+        if let Some(ref model) = self.model {
+            return model.clone();
+        }
+        tiers.balanced.clone()
+    }
+}
+
+/// Trigger defined in agent template.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentTriggerConfig {
+    pub name: String,
+    #[serde(default)]
+    pub schedule: Option<String>,
+    #[serde(default)]
+    pub event: Option<String>,
+    #[serde(default)]
+    pub skill: Option<String>,
+}
+
+/// Agent prompt configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentPromptConfig {
+    pub system: String,
 }
 
 fn default_agent_prefix() -> String {
@@ -1705,6 +1814,13 @@ role = "orchestrator"
             expertise: vec!["testing".to_string()],
             capabilities: vec!["memory".to_string()],
             telegram_token_secret: Some("TOKEN".to_string()),
+            model_tier: None,
+            display_name: None,
+            color: None,
+            avatar: None,
+            faces: None,
+            triggers: vec![],
+            prompt: None,
         };
         let toml_str = toml::to_string_pretty(&config).unwrap();
         std::fs::write(agent_dir.join("agent.toml"), &toml_str).unwrap();
