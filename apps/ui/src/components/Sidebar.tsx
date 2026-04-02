@@ -193,8 +193,6 @@ export default function AgentNav() {
         </div>
       ))}
 
-      <div className="agent-nav-sep" />
-
       {tree.map((node) => (
         <DeptGroupView
           key={node.dept.id}
