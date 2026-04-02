@@ -12,6 +12,15 @@ cd "$AEQI_ROOT"
 echo "[deploy] Building release binary..."
 cargo build --release -p aeqi 2>&1 | tail -3
 
+# Build and deploy landing page if changed.
+LANDING_DIR="$AEQI_ROOT/apps/landing"
+if [ -d "$LANDING_DIR" ] && [ -f "$LANDING_DIR/package.json" ]; then
+    echo "[deploy] Building landing page..."
+    (cd "$LANDING_DIR" && npm run build --silent 2>&1 | tail -3)
+    echo "[deploy] Deploying landing page to /var/www/aeqi-ai..."
+    sudo rsync -a --delete "$LANDING_DIR/dist/" /var/www/aeqi-ai/
+fi
+
 if [[ "${1:-}" == "--no-restart" ]]; then
     echo "[deploy] Build complete (restart skipped)."
     exit 0
