@@ -6,28 +6,28 @@
 
 set -euo pipefail
 
-SIGIL_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$SIGIL_ROOT"
+AEQI_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$AEQI_ROOT"
 
 echo "[deploy] Building release binary..."
-cargo build --release -p sigil 2>&1 | tail -3
+cargo build --release -p aeqi 2>&1 | tail -3
 
 if [[ "${1:-}" == "--no-restart" ]]; then
     echo "[deploy] Build complete (restart skipped)."
     exit 0
 fi
 
-echo "[deploy] Restarting sigil-daemon..."
-sudo systemctl restart sigil-daemon
+echo "[deploy] Restarting aeqi-daemon..."
+sudo systemctl restart aeqi-daemon
 sleep 3
 
-echo "[deploy] Restarting sigil-web..."
-sudo systemctl restart sigil-web
+echo "[deploy] Restarting aeqi-web..."
+sudo systemctl restart aeqi-web
 sleep 2
 
 # Verify
-DAEMON_STATUS=$(systemctl is-active sigil-daemon 2>/dev/null || echo "failed")
-WEB_STATUS=$(systemctl is-active sigil-web 2>/dev/null || echo "failed")
+DAEMON_STATUS=$(systemctl is-active aeqi-daemon 2>/dev/null || echo "failed")
+WEB_STATUS=$(systemctl is-active aeqi-web 2>/dev/null || echo "failed")
 
 echo "[deploy] daemon: $DAEMON_STATUS | web: $WEB_STATUS"
 
@@ -35,8 +35,8 @@ if [[ "$DAEMON_STATUS" == "active" && "$WEB_STATUS" == "active" ]]; then
     echo "[deploy] Deploy successful."
 
     # Reindex graph after deploy
-    if command -v sigil &>/dev/null; then
-        sigil graph index -r sigil 2>/dev/null &
+    if command -v aeqi &>/dev/null; then
+        aeqi graph index -r aeqi 2>/dev/null &
         echo "[deploy] Graph reindex started in background."
     fi
 else

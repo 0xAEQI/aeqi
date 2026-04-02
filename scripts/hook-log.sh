@@ -2,11 +2,11 @@
 # Telemetry helper — sourced by other hook scripts.
 # Provides log_hook() with elapsed-time tracking and error resilience.
 
-SIGIL_TELEMETRY_FILE="/tmp/.sigil_hook_telemetry"
-SIGIL_SESSION_DIR="${HOME}/.sigil/session"
-SIGIL_CONFIG="${SIGIL_CONFIG:-/home/claudedev/sigil/config/sigil.toml}"
+AEQI_TELEMETRY_FILE="/tmp/.aeqi_hook_telemetry"
+AEQI_SESSION_DIR="${HOME}/.aeqi/session"
+AEQI_CONFIG="${AEQI_CONFIG:-/home/claudedev/aeqi/config/aeqi.toml}"
 
-mkdir -p "$SIGIL_SESSION_DIR" 2>/dev/null || true
+mkdir -p "$AEQI_SESSION_DIR" 2>/dev/null || true
 
 # Capture start time (nanoseconds) at source time — every hook gets a timer.
 _HOOK_START_NS=$(date +%s%N 2>/dev/null || echo 0)
@@ -19,8 +19,8 @@ log_hook() {
         elapsed_ms=$(( (now_ns - _HOOK_START_NS) / 1000000 ))
     fi
     if [ -n "$elapsed_ms" ]; then
-        printf '%s %s %s %sms %s\n' "$(date -u +%Y-%m-%dT%H:%M:%S)" "$hook_name" "$decision" "$elapsed_ms" "$detail" >> "$SIGIL_TELEMETRY_FILE" 2>/dev/null || true
+        printf '%s %s %s %sms %s\n' "$(date -u +%Y-%m-%dT%H:%M:%S)" "$hook_name" "$decision" "$elapsed_ms" "$detail" >> "$AEQI_TELEMETRY_FILE" 2>/dev/null || true
     else
-        printf '%s %s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%S)" "$hook_name" "$decision" "$detail" >> "$SIGIL_TELEMETRY_FILE" 2>/dev/null || true
+        printf '%s %s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%S)" "$hook_name" "$decision" "$detail" >> "$AEQI_TELEMETRY_FILE" 2>/dev/null || true
     fi
 }

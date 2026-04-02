@@ -7,7 +7,7 @@ Web3-native legal entity formation service combining Marshall Islands DAO LLC ju
 ## Current State
 
 - **Landing page**: Live at https://entity.legal — Next.js 16, React 19, Tailwind, Framer Motion
-- **Source**: `projects/entity-legal/web/` (not a separate repo — lives inside sigil)
+- **Source**: `projects/entity-legal/web/` (not a separate repo — lives inside aeqi)
 - **Hosting**: Static export served via nginx on 5.9.83.245, Let's Encrypt SSL
 - **DNS**: Porkbun, managed via `scripts/porkbun-deploy.sh`
 - **SEO content**: 10+ article pages (DAO LLC banking, compliance, tax, Marshall Islands, etc.)

@@ -13,13 +13,13 @@ The goal is to answer:
 - what Supermemory actually is in code
 - where the important logic lives
 - what is in this repo versus what clearly lives behind hosted APIs
-- how to compare it fairly against Sigil
-- what Sigil should learn from it
-- what Sigil should not copy blindly
+- how to compare it fairly against AEQI
+- what AEQI should learn from it
+- what AEQI should not copy blindly
 
 ## Executive Read
 
-Supermemory is not a peer to Sigil in the same category.
+Supermemory is not a peer to AEQI in the same category.
 
 From the code, Supermemory is primarily:
 
@@ -32,9 +32,9 @@ It is not, from this repo, a deep local agent orchestrator with worker pools, ta
 That matters because the right comparison is not "which orchestrator is better?" The fair comparison is:
 
 - Supermemory as memory substrate and agent-memory product
-- Sigil as orchestration substrate and operator control plane
+- AEQI as orchestration substrate and operator control plane
 
-If Sigil wants to improve, the Supermemory lessons are mostly about packaging, integration ergonomics, and productized memory surfaces, not about replacing Sigil's orchestration architecture.
+If AEQI wants to improve, the Supermemory lessons are mostly about packaging, integration ergonomics, and productized memory surfaces, not about replacing AEQI's orchestration architecture.
 
 ## What Supermemory Is In Code
 
@@ -180,14 +180,14 @@ But underneath, it maps those commands onto Supermemory document operations and 
 
 ## What Supermemory Is Good At
 
-Based on code, Supermemory is stronger than Sigil in these areas:
+Based on code, Supermemory is stronger than AEQI in these areas:
 
-- Memory productization. It offers a cleaner developer-facing memory product than Sigil currently does.
+- Memory productization. It offers a cleaner developer-facing memory product than AEQI currently does.
 - Integration breadth. The same memory capability is packaged across multiple ecosystems instead of living only inside one runtime.
 - MCP polish. The MCP surface is clearly intentional and consumer-ready.
 - Hosted-service ergonomics. The repo assumes a clean API contract and builds around it consistently.
 - Conversation ingestion as a product concept. Treating conversations as structured memory input is useful.
-- User-facing memory affordances. Profile, recall, projects, graph, and file-like memory operations are all easier to consume than Sigil's current memory surfaces.
+- User-facing memory affordances. Profile, recall, projects, graph, and file-like memory operations are all easier to consume than AEQI's current memory surfaces.
 
 ## What Supermemory Is Not Trying To Do
 
@@ -203,11 +203,11 @@ Supermemory, from the code we can see, is not trying to provide:
 - org-level audit and budget control
 - long-lived operator intervention workflows
 
-Sigil is trying to do those things.
+AEQI is trying to do those things.
 
 So if Supermemory looks "cleaner," part of that is because it is solving a narrower problem.
 
-## Fair Comparison To Sigil
+## Fair Comparison To AEQI
 
 The right comparison boundary is:
 
@@ -220,7 +220,7 @@ The right comparison boundary is:
 - SDK and middleware ergonomics
 - MCP packaging
 
-### Sigil
+### AEQI
 
 - orchestration control plane
 - task routing and execution
@@ -228,11 +228,11 @@ The right comparison boundary is:
 - audit, budgets, checkpoints, dispatch
 - operator oversight
 
-If we compare Supermemory's clean memory middleware to Sigil's whole orchestrator, the result will be misleading.
+If we compare Supermemory's clean memory middleware to AEQI's whole orchestrator, the result will be misleading.
 
-If we compare Supermemory's memory product to Sigil's memory subsystem and operator-facing memory affordances, the comparison becomes useful.
+If we compare Supermemory's memory product to AEQI's memory subsystem and operator-facing memory affordances, the comparison becomes useful.
 
-## What Sigil Should Learn From Supermemory
+## What AEQI Should Learn From Supermemory
 
 ### 1. Separate Memory Product Surface From Internal Orchestration Plumbing
 
@@ -244,7 +244,7 @@ Supermemory exposes memory as a clean product:
 - graph
 - conversation ingestion
 
-Sigil should likely do the same. Right now Sigil has memory and blackboard primitives, but they do not yet present as a crisp, reusable product surface.
+AEQI should likely do the same. Right now AEQI has memory and blackboard primitives, but they do not yet present as a crisp, reusable product surface.
 
 ### 2. Provide Stable Integration Contracts
 
@@ -254,7 +254,7 @@ Supermemory has a clear contract style:
 - thin adapters for each ecosystem
 - similar semantics everywhere
 
-Sigil should consider doing something analogous for its own durable context and memory layers:
+AEQI should consider doing something analogous for its own durable context and memory layers:
 
 - one canonical runtime API for memory, task context, checkpoints, and audit lookup
 - adapters for CLI, web UI, external agents, and future runtimes
@@ -263,13 +263,13 @@ Sigil should consider doing something analogous for its own durable context and 
 
 The `/v4/conversations` pattern is strong.
 
-Sigil should probably support a canonical "ingest this conversation or run transcript into memory/audit/learning" path rather than relying on ad hoc note capture or tool-specific storage.
+AEQI should probably support a canonical "ingest this conversation or run transcript into memory/audit/learning" path rather than relying on ad hoc note capture or tool-specific storage.
 
 ### 4. Improve Namespacing And Memory Scope
 
 Supermemory's `containerTag` pattern is simple and effective.
 
-Sigil should likely sharpen its own scoping story for:
+AEQI should likely sharpen its own scoping story for:
 
 - project memory
 - agent memory
@@ -281,7 +281,7 @@ Sigil should likely sharpen its own scoping story for:
 
 Supermemory treats graph and profile inspection as product features, not backend leftovers.
 
-Sigil should do the same for:
+AEQI should do the same for:
 
 - agent memory
 - task-relevant recall
@@ -293,7 +293,7 @@ Sigil should do the same for:
 
 Supermemory's adapters are good because they assume the core capability should be consumed from many runtimes.
 
-Sigil should think more this way for:
+AEQI should think more this way for:
 
 - daemon APIs
 - memory APIs
@@ -301,7 +301,7 @@ Sigil should think more this way for:
 - intervention hooks
 - external agent attachment
 
-## What Sigil Should Not Copy Blindly
+## What AEQI Should Not Copy Blindly
 
 ### 1. Do Not Collapse Into "Memory Injection Equals Intelligence"
 
@@ -311,48 +311,48 @@ Supermemory's memory loop is useful, but it is still mostly:
 - inject into prompt
 - save new interaction
 
-Sigil's ambition is larger. Memory injection alone does not solve orchestration, delegation, verification, retries, or autonomous work quality.
+AEQI's ambition is larger. Memory injection alone does not solve orchestration, delegation, verification, retries, or autonomous work quality.
 
 ### 2. Do Not Outsource Core Differentiation Into An Opaque Backend
 
 Supermemory can hide complex behavior behind a hosted API because that is its product model.
 
-Sigil should be careful here. If Sigil wants to be a trustworthy orchestrator, too much of its core reasoning or coordination logic cannot disappear into opaque off-repo services.
+AEQI should be careful here. If AEQI wants to be a trustworthy orchestrator, too much of its core reasoning or coordination logic cannot disappear into opaque off-repo services.
 
 ### 3. Do Not Duplicate Near-Identical Logic Across Too Many Adapters
 
 One tradeoff in Supermemory's design is repeated middleware logic across TypeScript and Python surfaces.
 
-That may be acceptable for a memory platform. For Sigil, it would create drift if copied too aggressively. Better to centralize semantics and expose thinner adapters.
+That may be acceptable for a memory platform. For AEQI, it would create drift if copied too aggressively. Better to centralize semantics and expose thinner adapters.
 
 ### 4. Do Not Confuse UI Product With Backend Depth
 
 Supermemory's graph product is attractive, but the code suggests a lot of the hard backend graph logic is abstracted behind API endpoints, with some client-side shaping layered on top.
 
-Sigil should copy the inspectability, not the illusion that visualization itself equals robust backend intelligence.
+AEQI should copy the inspectability, not the illusion that visualization itself equals robust backend intelligence.
 
 ## Current Comparison Judgment
 
-If the question is "which repo has the better orchestrator?" the answer is still Sigil, because Supermemory is not really that kind of system from the visible code.
+If the question is "which repo has the better orchestrator?" the answer is still AEQI, because Supermemory is not really that kind of system from the visible code.
 
 If the question is "which repo has the better developer-facing memory product?" Supermemory is ahead.
 
 If the question is "which repo is better packaged as a consumable platform capability?" Supermemory is ahead in memory-related surfaces.
 
-If the question is "which repo has the stronger control-plane substrate for autonomous work?" Sigil still has the more ambitious and more relevant architecture.
+If the question is "which repo has the stronger control-plane substrate for autonomous work?" AEQI still has the more ambitious and more relevant architecture.
 
-## Practical Relevance For Improving Sigil
+## Practical Relevance For Improving AEQI
 
-The most valuable takeaways for Sigil are:
+The most valuable takeaways for AEQI are:
 
 - create a first-class memory API instead of memory being mostly an internal primitive
 - create a first-class conversation ingestion path
 - create a first-class memory inspection surface
 - standardize context scoping and namespaces
-- package Sigil capabilities behind stable APIs so multiple runtimes and surfaces can consume them
+- package AEQI capabilities behind stable APIs so multiple runtimes and surfaces can consume them
 - improve MCP and external-tool ergonomics
 
-The least valuable takeaway would be trying to turn Sigil into "another hosted memory wrapper." That would miss Sigil's actual opportunity.
+The least valuable takeaway would be trying to turn AEQI into "another hosted memory wrapper." That would miss AEQI's actual opportunity.
 
 ## Open Limits Of This Read
 
@@ -367,13 +367,13 @@ That means this baseline cannot fully judge:
 - document processing quality
 - conversation diffing quality
 
-What we can judge confidently is the architecture contract exposed by the codebase, and that contract is clear enough to compare against Sigil productively.
+What we can judge confidently is the architecture contract exposed by the codebase, and that contract is clear enough to compare against AEQI productively.
 
 ## Bottom Line
 
 Supermemory is best understood as a strong memory platform and integration product, not as a full autonomous orchestration system.
 
-Sigil should learn from Supermemory's:
+AEQI should learn from Supermemory's:
 
 - API clarity
 - framework adapters
@@ -381,11 +381,11 @@ Sigil should learn from Supermemory's:
 - memory UX
 - conversation ingestion model
 
-Sigil should not abandon its own differentiator:
+AEQI should not abandon its own differentiator:
 
 - durable orchestration
 - operator control
 - multi-agent execution
 - project and org coordination
 
-The right move is to make Sigil's memory and context layers as clean and consumable as Supermemory's product surfaces, while keeping Sigil's stronger orchestration architecture intact.
+The right move is to make AEQI's memory and context layers as clean and consumable as Supermemory's product surfaces, while keeping AEQI's stronger orchestration architecture intact.

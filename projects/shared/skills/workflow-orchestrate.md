@@ -42,8 +42,8 @@ If workers need shared state, the orchestrator mediates via blackboard between p
 
 ## Phase 3: Delegate
 
-1. **Fan out** — `sigil_delegate` with each worker in parallel (async mode)
-2. **Track** — post to `sigil_blackboard` key `task:{id}:workers` with worker IDs and status
+1. **Fan out** — `aeqi_delegate` with each worker in parallel (async mode)
+2. **Track** — post to `aeqi_blackboard` key `task:{id}:workers` with worker IDs and status
 3. **Monitor** — as workers complete, read their findings from blackboard
 
 ### Scaling Rules
@@ -59,7 +59,7 @@ Never overload a single orchestrator with 8+ parallel workers. Add hierarchy ins
 
 ## Phase 4: Aggregate
 
-1. **Collect results** — `sigil_blackboard` query for all `task:{id}:worker:*` entries
+1. **Collect results** — `aeqi_blackboard` query for all `task:{id}:worker:*` entries
 2. **Merge** — combine findings, deduplicate, resolve conflicts
 3. **Synthesize** — the orchestrator must UNDERSTAND and RESTATE findings, not pass through. Lazy delegation (forwarding without synthesis) is a failure.
 
@@ -70,7 +70,7 @@ Never overload a single orchestrator with 8+ parallel workers. Add hierarchy ins
 1. **Summary** — what was accomplished across all workers
 2. **Conflicts** — where workers disagreed, orchestrator's resolution and reasoning
 3. **Gaps** — what wasn't covered, what needs follow-up
-4. **Store** — `sigil_remember` key findings
+4. **Store** — `aeqi_remember` key findings
 
 ---
 

@@ -1,8 +1,8 @@
-# Sigil UI
+# AEQI UI
 
-React web control plane for Sigil.
+React web control plane for AEQI.
 
-Canonical source lives in the Sigil monorepo at `apps/ui`.
+Canonical source lives in the AEQI monorepo at `apps/ui`.
 
 ## Quick Start
 
@@ -25,8 +25,8 @@ The dev server runs on `http://127.0.0.1:5173`.
 
 ## API and Serving
 
-- In development, the Vite server proxies `/api/*` to `sigil-web` on `http://127.0.0.1:8400`.
-- In production, `sigil-web` can serve the compiled `dist/` directory directly when `[web].ui_dist_dir` is configured.
+- In development, the Vite server proxies `/api/*` to `aeqi-web` on `http://127.0.0.1:8400`.
+- In production, `aeqi-web` can serve the compiled `dist/` directory directly when `[web].ui_dist_dir` is configured.
 - `nginx` or `caddy` should sit in front only for TLS and host routing.
 
 ## Stack
@@ -37,4 +37,4 @@ The dev server runs on `http://127.0.0.1:5173`.
 - Zustand
 - React Router 7
 
-Main project: <https://github.com/0xAEQI/sigil>
+Main project: <https://github.com/0xAEQI/aeqi>

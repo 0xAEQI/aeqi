@@ -1,8 +1,8 @@
 # Skill System Synthesis
 
-Sources: Sigil, Deer Flow, Hermes, Superpowers, Everything-Claude-Code, Claude-Skills, Learn-Claude-Code, Open SWE
+Sources: AEQI, Deer Flow, Hermes, Superpowers, Everything-Claude-Code, Claude-Skills, Learn-Claude-Code, Open SWE
 
-## Current Sigil Skill Lifecycle
+## Current AEQI Skill Lifecycle
 
 ```
 TOML on disk → Task.skill field → WorkerPool loads prompt.system → Identity injection → Worker executes
@@ -67,20 +67,20 @@ deny = ["delegate"]
 system = """You are deploying a service to production..."""
 ```
 
-## What's New vs Current Sigil
+## What's New vs Current AEQI
 
 | Field | Current | New | Source |
 |-------|---------|-----|--------|
 | `conditions.requires_tools` | No | Filter skill visibility by available tools | Hermes |
-| `conditions.requires_expertise` | No | Route to capable agents only | Sigil-native |
+| `conditions.requires_expertise` | No | Route to capable agents only | AEQI-native |
 | `verification.commands` | No | Run actual checks before marking DONE | Superpowers |
 | `verification.evidence_required` | No | Workers must show output, not just claim | Superpowers |
 | `phases` | No | Multi-step with gates between phases | Superpowers |
 | `red_flags` | No | Detect rationalizations, halt or warn | Superpowers |
 | `composition.next_skill` | No | Skill A → Skill B chaining | Superpowers |
-| `composition.fallback_skill` | No | On failure, invoke fallback | Sigil-native |
+| `composition.fallback_skill` | No | On failure, invoke fallback | AEQI-native |
 | `version` | No | Track skill evolution | Hermes |
-| `estimated_cost_tokens` | No | Budget prediction | Sigil-native |
+| `estimated_cost_tokens` | No | Budget prediction | AEQI-native |
 | `platforms` | No | OS/environment filter | Hermes |
 
 ## The 5 Gaps to Close
@@ -107,7 +107,7 @@ If preflight gate fails, worker doesn't proceed to execute. This prevents
 
 ### 3. Project-Scoped Learning (from Everything-Claude-Code)
 
-Current Sigil: all pattern memories are per-project but skill promotion is global.
+Current AEQI: all pattern memories are per-project but skill promotion is global.
 ECC insight: scope instincts to projects, promote to global only when seen in 2+ projects.
 
 Implementation:
@@ -149,7 +149,7 @@ Long-term: feed compliance scores back into skill promotion confidence.
 ## The Workflow
 
 ```
-Synthesis: read competitor repos → extract patterns → compare to Sigil →
+Synthesis: read competitor repos → extract patterns → compare to AEQI →
 design superior solution → implement → test → document → repeat
 
 This workflow itself is a skill. It can be applied to any capability area:

@@ -49,7 +49,7 @@ needs = ["test"]
 ### Pour a template
 
 ```bash
-sigil pipelinepour feature-dev --rig myproject --var issue_id=mp-123
+aeqi pipelinepour feature-dev --rig myproject --var issue_id=mp-123
 ```
 
 Creates a parent task with child steps linked by dependencies:
@@ -68,14 +68,14 @@ Workers execute steps in order. When a step's task is closed, downstream steps b
 ### List available templates
 
 ```bash
-sigil pipelinelist                     # All projects
-sigil pipelinelist --rig myproject   # Specific project
+aeqi pipelinelist                     # All projects
+aeqi pipelinelist --rig myproject   # Specific project
 ```
 
 ### Check pipeline progress
 
 ```bash
-sigil pipelinestatus mp-042
+aeqi pipelinestatus mp-042
 ```
 
 Output:
@@ -107,7 +107,7 @@ instructions = "Read issue {{issue_id}} and understand the problem."
 Pass variables with `--var`:
 
 ```bash
-sigil pipelinepour template --rig myproject --var issue_id=mp-001 --var priority=high
+aeqi pipelinepour template --rig myproject --var issue_id=mp-001 --var priority=high
 ```
 
 Missing required variables cause an error. Missing optional variables are left as empty strings.

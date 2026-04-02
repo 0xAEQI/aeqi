@@ -1,6 +1,6 @@
-# Sigil Web Dashboard
+# AEQI Web Dashboard
 
-Frontend for the Sigil agent runtime and control plane. Vite + React 19 + Zustand + TypeScript.
+Frontend for the AEQI agent runtime and control plane. Vite + React 19 + Zustand + TypeScript.
 
 ## Stack
 
@@ -40,17 +40,17 @@ Messages persist to localStorage (last 100). Session ID persists for conversatio
 ## Deployment
 
 ```bash
-cd /home/claudedev/sigil/apps/ui
+cd /home/claudedev/aeqi/apps/ui
 npm run build
 ```
 
 Preferred production setup:
 - Build the UI in `apps/ui/dist`
-- Set `[web].ui_dist_dir` in `sigil.toml`
-- Run `sigil web start`
+- Set `[web].ui_dist_dir` in `aeqi.toml`
+- Run `aeqi web start`
 - Put a thin reverse proxy in front for TLS and host routing
 
-Services: `sigil.service` (daemon), `sigil-web.service` (API server)
+Services: `aeqi.service` (daemon), `aeqi-web.service` (API server)
 
 ## Dev
 

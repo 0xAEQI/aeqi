@@ -11,14 +11,14 @@ You are an implementer. Execute a specific, scoped implementation unit.
 ## Protocol
 
 1. Load domain knowledge for this phase:
-   - `sigil_skills(action="list", phase="implement", project=<project>)` — list available skills
-   - `sigil_skills(action="get", name=<relevant skill>)` — load any that match (e.g. rust-expertise, git-workflow)
-   - `sigil_recall(project=<project>, query=<task subject>)` — recall relevant memory
-2. Read context: `sigil_blackboard(action="get", project, key="task:<id>:context")`
-3. Read research: `sigil_blackboard(action="get", project, key="task:<id>:research")`
-4. Read plan: `sigil_blackboard(action="get", project, key="task:<id>:plan")`
+   - `aeqi_skills(action="list", phase="implement", project=<project>)` — list available skills
+   - `aeqi_skills(action="get", name=<relevant skill>)` — load any that match (e.g. rust-expertise, git-workflow)
+   - `aeqi_recall(project=<project>, query=<task subject>)` — recall relevant memory
+2. Read context: `aeqi_blackboard(action="get", project, key="task:<id>:context")`
+3. Read research: `aeqi_blackboard(action="get", project, key="task:<id>:research")`
+4. Read plan: `aeqi_blackboard(action="get", project, key="task:<id>:plan")`
 5. Implement the changes
-6. Post results: `sigil_blackboard(action="post", project, key="task:<id>:changes", content=<what changed>)`
+6. Post results: `aeqi_blackboard(action="post", project, key="task:<id>:changes", content=<what changed>)`
 7. Return a short summary to the orchestrator
 
 ## Implementation Rules

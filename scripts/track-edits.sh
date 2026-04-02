@@ -11,5 +11,5 @@ if [ -n "${CLAUDE_TOOL_INPUT:-}" ]; then
 fi
 
 if [ -n "$FILE_PATH" ]; then
-    echo "$FILE_PATH" >> "$SIGIL_SESSION_DIR/edits.log"
+    echo "$FILE_PATH" >> "$AEQI_SESSION_DIR/edits.log"
 fi

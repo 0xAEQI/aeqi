@@ -14,7 +14,7 @@ fi
 [ -z "$FILE_PATH" ] && exit 0
 
 # Only show graph context once per file per session (avoid redundant SQLite queries)
-CONTEXT_CACHE="$SIGIL_SESSION_DIR/graph-context.seen"
+CONTEXT_CACHE="$AEQI_SESSION_DIR/graph-context.seen"
 if grep -qxF "$FILE_PATH" "$CONTEXT_CACHE" 2>/dev/null; then
     exit 0
 fi
@@ -24,11 +24,11 @@ PROJECT=$(detect_project "$FILE_PATH")
 [ -z "$PROJECT" ] && exit 0
 
 # Check if graph DB exists
-GRAPH_DB="${SIGIL_DATA_DIR:-$HOME/.sigil}/codegraph/${PROJECT}.db"
+GRAPH_DB="${AEQI_DATA_DIR:-$HOME/.aeqi}/codegraph/${PROJECT}.db"
 [ -f "$GRAPH_DB" ] || exit 0
 
 # Get repo path for the matched project (reuse detect-project awk pattern with check on section transition)
-CONFIG="${SIGIL_CONFIG:-/home/claudedev/sigil/config/sigil.toml}"
+CONFIG="${AEQI_CONFIG:-/home/claudedev/aeqi/config/aeqi.toml}"
 REPO_PATH=$(awk -v proj="$PROJECT" -v home="$HOME" '
     function emit() { if (name==proj && repo) { gsub(/^~/,home,repo); print repo } }
     /^\[\[projects\]\]/ { if(in_proj) emit(); in_proj=1; name=""; repo=""; next }

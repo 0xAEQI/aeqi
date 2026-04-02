@@ -1,13 +1,13 @@
-# The Synthesis — Sigil v4 Final
+# The Synthesis — AEQI v4 Final
 
 What the best agent orchestrator in the world actually looks like, derived from
-deep code-level analysis of Sigil, Hermes, Supermemory, and Deer Flow.
+deep code-level analysis of AEQI, Hermes, Supermemory, and Deer Flow.
 
 ---
 
 ## The Critical Finding
 
-Sigil's v4 modules (middleware, verification, memory graph, retrieval, notes,
+AEQI's v4 modules (middleware, verification, memory graph, retrieval, notes,
 proactive engine, skill promotion) are **built but not wired**. The architecture
 exists in isolated modules. The integration doesn't.
 
@@ -29,7 +29,7 @@ what exists into a living system.
 **Lines of code:** ~150 to integrate. The middleware already works. Just connect it.
 
 **From Deer Flow:** Their 13-middleware chain is conditional per agent type.
-Sigil should do the same — engineer gets all middleware, researcher gets a
+AEQI should do the same — engineer gets all middleware, researcher gets a
 lighter chain. Build chain in worker_pool based on agent role config.
 
 ---
@@ -62,7 +62,7 @@ to Telegram delivery — edit the same message as worker progresses.
 **Status:** ContextCompressionMiddleware implemented. Triggers at 50% window, protects first/last messages.
 
 **What to do (from Hermes):**
-- Add ContextCompressor to sigil-orchestrator
+- Add ContextCompressor to aeqi-orchestrator
 - Trigger at 50% of context window
 - Protect: first 3 messages (system + first exchange) + last ~20K tokens
 - Summarize middle with cheap/fast model (structured template: Goal, Progress, Decisions, Files, Next Steps)
@@ -72,7 +72,7 @@ to Telegram delivery — edit the same message as worker progresses.
 
 **From Hermes:** Their context probing on error is clever — when API returns
 context length error, parse the actual limit, step down to next tier
-(200K → 128K → 64K → 32K), and retry with compression. Sigil should do this
+(200K → 128K → 64K → 32K), and retry with compression. AEQI should do this
 in the middleware chain (catch context errors in on_error, compress, retry).
 
 ---
@@ -108,11 +108,11 @@ If the LLM says "safe", auto-approve. If "dangerous", always ask. If
 - Inject fresh memory as context messages
 
 **From Deer Flow:** Their memory updater extracts facts with confidence
-scores (≥0.7 threshold) and limits to top-100 by score. Sigil's reflection
+scores (≥0.7 threshold) and limits to top-100 by score. AEQI's reflection
 should adopt the same confidence filtering.
 
 **From Supermemory:** Their 3-level model (Document → Chunk → Memory Entry)
-is worth adopting. Currently Sigil stores flat entries. Adding a "source"
+is worth adopting. Currently AEQI stores flat entries. Adding a "source"
 layer (which task/conversation produced this memory) would enable provenance
 tracking and confidence inheritance.
 
@@ -132,7 +132,7 @@ tracking and confidence inheritance.
   - Frontend renders with viewport-based queries
   - Show relationship edges (CausedBy, Contradicts, Supports, etc.)
 
-**From Supermemory:** Their `containerTag` pattern is what Sigil already
+**From Supermemory:** Their `containerTag` pattern is what AEQI already
 does with project-scoped memory. Just expose it properly as an API.
 Their `isStatic` boolean is simple but powerful — classify memories at
 storage time and surface them differently in retrieval.
@@ -160,17 +160,17 @@ agent-to-human handoff that preserves execution context.**
 ## What NOT to Copy
 
 **From Hermes:**
-- Single-agent worldview (Sigil is multi-agent by design)
-- Session-first thinking (Sigil is task/project/org-first)
+- Single-agent worldview (AEQI is multi-agent by design)
+- Session-first thinking (AEQI is task/project/org-first)
 - Monolithic runtime center of gravity
 
 **From Supermemory:**
-- Client-side-only deduplication (Sigil should dedup at write time)
+- Client-side-only deduplication (AEQI should dedup at write time)
 - Memory-as-intelligence reductionism (memory serves orchestration, not the other way)
-- Opaque backend classification (Sigil should be explicit about how decisions are made)
+- Opaque backend classification (AEQI should be explicit about how decisions are made)
 
 **From Deer Flow:**
-- Thread/run as the dominant abstraction (Sigil uses task/project/org)
+- Thread/run as the dominant abstraction (AEQI uses task/project/org)
 - Silent truncation of subagent calls (should warn, not silently drop)
 - Middleware composition replacing orchestration control logic
 
@@ -183,7 +183,7 @@ Week 1:  Wire middleware into worker execution (Priority 1)
          Connect what's built. Everything activates.
 
 Week 2:  Replace polling with broadcast streaming (Priority 2)
-         Sigil becomes alive. Real-time progress in the UI.
+         AEQI becomes alive. Real-time progress in the UI.
 
 Week 3:  Context compression + error recovery (Priority 3)
          Workers handle long tasks without crashing.
@@ -198,7 +198,7 @@ Week 6:  Clarification interruption (Priority 7)
          Clean agent-to-human handoff. The loop closes.
 ```
 
-After these six weeks, Sigil will be:
+After these six weeks, AEQI will be:
 - Deeper than Hermes (multi-agent orchestration, verification, notes)
 - More visible than Supermemory (profile API, graph viz, MCP tools)
 - More alive than Deer Flow (real-time streaming grounded in a real control plane)
@@ -208,10 +208,10 @@ After these six weeks, Sigil will be:
 
 ## The Test (Updated)
 
-Sigil v4 is done when:
+AEQI v4 is done when:
 
 1. You write "launch the new pricing page" in your notes
-2. Sigil decomposes it into tasks, routes to the right agents
+2. AEQI decomposes it into tasks, routes to the right agents
 3. You watch workers execute in real-time — tool calls streaming into the chat
 4. A worker encounters a dangerous operation — you tap [Allow Session] on your phone
 5. A worker needs clarification — it asks "Which pricing tier layout?" with options
@@ -224,4 +224,4 @@ Sigil v4 is done when:
 12. The profile API shows this project's tech stack updated automatically
 
 That is the best agent orchestrator in the world.
-That is Sigil.
+That is AEQI.

@@ -51,7 +51,7 @@ uptime
 ```
 
 ## Rig Status
-Also call `rig_status` to check all Sigil rigs (beads, workers, mail).
+Also call `rig_status` to check all AEQI rigs (beads, workers, mail).
 
 Provide a summary table:
 | Component | Status | Notes |

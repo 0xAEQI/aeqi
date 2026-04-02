@@ -17,7 +17,7 @@ projects/
     pipelines/*.toml
     rituals/*.toml
     .tasks/
-    .sigil/memory.db
+    .aeqi/memory.db
 ```
 
 ## Required and Optional Files
@@ -56,7 +56,7 @@ Examples:
 
 ```toml
 [[projects]]
-name = "sigil"
+name = "aeqi"
 prefix = "sg"
 repo = "/path/to/repo"
 model = "claude-sonnet-4-6"
@@ -67,8 +67,8 @@ worker_timeout_secs = 1800
 
 ## Useful Commands
 
-- `sigil assign "subject" --project sigil`
-- `sigil ready --project sigil`
-- `sigil tasks --project sigil`
-- `sigil pipeline list --project sigil`
-- `sigil skill list --project sigil`
+- `aeqi assign "subject" --project aeqi`
+- `aeqi ready --project aeqi`
+- `aeqi tasks --project aeqi`
+- `aeqi pipeline list --project aeqi`
+- `aeqi skill list --project aeqi`

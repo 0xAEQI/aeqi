@@ -1,19 +1,19 @@
-# Sigil — State & Direction
+# AEQI — State & Direction
 
 Date: 2026-03-25 (evening)
 Author: working session, human + Claude
 
-This document captures where Sigil actually is, what changed today, where it should go,
+This document captures where AEQI actually is, what changed today, where it should go,
 and the hard decisions that need to be made. It supersedes the earlier audit from this morning.
 
 ---
 
-## I. What Sigil Is Now
+## I. What AEQI Is Now
 
-Sigil is an AI company orchestrator. You tell it what you want. It routes to the right agents,
+AEQI is an AI company orchestrator. You tell it what you want. It routes to the right agents,
 executes via Claude Code, learns from results, and reports back.
 
-**Backend (sigil — Rust, 9 crates, 466 tests):**
+**Backend (aeqi — Rust, 9 crates, 466 tests):**
 - Long-running daemon with worker pool patrol loop
 - Task DAGs, missions, dependency inference
 - Expertise routing (right agent for right task)
@@ -27,7 +27,7 @@ executes via Claude Code, learns from results, and reports back.
 - MCP command support
 - Execution via Claude Code subprocess
 
-**Frontend (sigil-ui — Vite + React 19 + TypeScript + Zustand):**
+**Frontend (aeqi-ui — Vite + React 19 + TypeScript + Zustand):**
 - Chat-first UI: conversation is the home surface at /
 - Collapsible sidebar with channel hierarchy + compact navigation
 - Status bar: daemon health, active workers, budget, Cmd+K
@@ -38,21 +38,21 @@ executes via Claude Code, learns from results, and reports back.
 - Dark theme: black/ivory/bronze palette, Inter + JetBrains Mono
 
 **Brand:**
-- Name: Sigil
-- Domain: sigil.ceo
+- Name: AEQI
+- Domain: aeqi.ceo
 - Category: Proactive AI
 - Tagline: Wake up ahead.
 - One-liner: AI that works while you sleep.
 - Voice: calm, direct, zero fluff. Your shadow doesn't small-talk.
 
-**Live at:** Self-hosted Sigil UI (reverse proxy → `sigil-web` on `:8400`)
+**Live at:** Self-hosted AEQI UI (reverse proxy → `aeqi-web` on `:8400`)
 
 ---
 
 ## II. What Changed Today
 
 ### Backend
-- New `sigil-web` crate (Axum REST API + WebSocket + JWT auth)
+- New `aeqi-web` crate (Axum REST API + WebSocket + JWT auth)
 - New `ChatEngine` (1023 lines) — unified source-agnostic chat processing
 - 20+ new daemon IPC commands (tasks, missions, memories, skills, pipelines, knowledge, agent files, chat)
 - MCP command added to CLI
@@ -71,10 +71,10 @@ executes via Claude Code, learns from results, and reports back.
 - Chat rewritten: memoized bubbles, smart time grouping, copy-on-hover,
   auto-growing composer, scroll-to-bottom, empty state with suggestions,
   drag-and-drop zone, message status tracking
-- Sigil is the identity (not Rei) — "Your shadow awaits"
+- AEQI is the identity (not Rei) — "Your shadow awaits"
 - Body font switched from monospace to Inter (mono for code only)
 - 27 missing CSS classes defined for card components
-- Pushed to github.com/0xAEQI/sigil and github.com/0xAEQI/sigil-ui
+- Pushed to github.com/0xAEQI/aeqi and github.com/0xAEQI/aeqi-ui
 
 ---
 
@@ -88,7 +88,7 @@ executes via Claude Code, learns from results, and reports back.
    scope — this is the right information architecture for an orchestrator.
 
 3. **The brand is clear.** "Proactive AI" is an unclaimed category. "Wake up ahead" is a real
-   feeling people want. sigil.ceo is memorable and self-explanatory.
+   feeling people want. aeqi.ceo is memorable and self-explanatory.
 
 4. **The backend is production-quality.** 9 Rust crates, 466 tests, clippy clean. Not a prototype.
 
@@ -102,24 +102,24 @@ executes via Claude Code, learns from results, and reports back.
 
 ### 1. The system is not proven end-to-end
 
-The biggest risk. Sigil has all the pieces, but there is no evaluation harness that proves:
+The biggest risk. AEQI has all the pieces, but there is no evaluation harness that proves:
 - Routing quality: does the right agent get the right task?
 - Execution quality: do tasks complete correctly?
 - Learning quality: does the system get better over time?
 - Recovery quality: does BLOCKED/FAILED/HANDOFF work correctly?
 
-Without this, Sigil is a promising architecture, not a proven product.
+Without this, AEQI is a promising architecture, not a proven product.
 
 ### 2. The proactive promise is unfulfilled
 
-Sigil's entire brand is "proactive AI." But today:
+AEQI's entire brand is "proactive AI." But today:
 - The morning brief exists but is basic
 - No push notifications (Telegram/WhatsApp/email)
 - No "I noticed X, should I do Y?" behavior
 - No anomaly detection or drift alerts to the user
 - The user still initiates everything
 
-This is the highest-leverage gap. The moment Sigil messages YOU before you message it —
+This is the highest-leverage gap. The moment AEQI messages YOU before you message it —
 that's the product-market-fit moment.
 
 ### 3. Notes/directives don't exist yet
@@ -129,12 +129,12 @@ The core product insight — "your notes become reality" — has no implementati
 - KnowledgePage lets you browse/create knowledge entries
 - But there is no "living notepad" where you write what you want and it manifests
 
-This is the differentiator that makes Sigil a product, not just a tool.
+This is the differentiator that makes AEQI a product, not just a tool.
 
 ### 4. Hosted version doesn't exist
 
-Sigil requires self-hosting (VPS, Rust build, systemd). This limits the audience to
-exactly one person (the builder). For sigil.ceo to be a product people pay for:
+AEQI requires self-hosting (VPS, Rust build, systemd). This limits the audience to
+exactly one person (the builder). For aeqi.ceo to be a product people pay for:
 - Cloud-hosted daemon per user
 - Zero-setup onboarding ("What are you working on?")
 - WhatsApp/Telegram as entry point (no app download)
@@ -159,7 +159,7 @@ The system needs a first-class "prime bundle" that reconstructs:
 Every note-taking app has the same problem: notes are dead. You write "redesign the landing page"
 and it sits there, staring at you. Obsidian, Notion, Apple Notes — they're all graveyards of intent.
 
-Sigil's notes are alive. You write it, it manifests. The note IS the sigil.
+AEQI's notes are alive. You write it, it manifests. The note IS the aeqi.
 
 ### How It Fits
 
@@ -173,7 +173,7 @@ Back-and-forth           Living document that updates itself
 ```
 
 Chat and notes are complementary:
-- Chat is how you talk to Sigil in the moment
+- Chat is how you talk to AEQI in the moment
 - Notes are what you want to be true over time
 - Chat messages can become notes ("pin this")
 - Notes can trigger chat responses ("I started working on line 3")
@@ -193,7 +193,7 @@ Chat and notes are complementary:
 - One-click "activate" button to turn a note line into a task
 
 **Phase 3: Proactive notes**
-- Sigil suggests notes based on conversation ("You mentioned X — want me to track it?")
+- AEQI suggests notes based on conversation ("You mentioned X — want me to track it?")
 - Notes auto-update when tasks complete
 - Morning brief populates with overnight changes to note status
 - Telegram: "note: ship pricing by Friday" → appears in web notes panel
@@ -205,17 +205,17 @@ Chat and notes are complementary:
 
 ### How It Differs From Obsidian
 
-| Obsidian | Sigil Notes |
+| Obsidian | AEQI Notes |
 |----------|-------------|
 | Local markdown files | Per-project, channel-scoped |
 | Static graph | Living directives with status |
-| You organize | Sigil infers context from channel |
-| You link | Sigil connects to tasks/agents/knowledge automatically |
+| You organize | AEQI infers context from channel |
+| You link | AEQI connects to tasks/agents/knowledge automatically |
 | You act on notes | Notes act on themselves |
 | Plugin ecosystem | Agents ARE the plugins |
 
-The key difference: Obsidian is a vault. Sigil is a will. You write your will,
-Sigil executes it.
+The key difference: Obsidian is a vault. AEQI is a will. You write your will,
+AEQI executes it.
 
 ---
 
@@ -229,9 +229,9 @@ Sigil executes it.
 
 ### Next (months)
 5. **Directive detection** — notes become live with status indicators
-6. **Proactive behavior** — Sigil initiates conversations ("I noticed X")
+6. **Proactive behavior** — AEQI initiates conversations ("I noticed X")
 7. **WhatsApp integration** — meet users where they are
-8. **Landing page** — sigil.ceo with signup, waitlist, brand story
+8. **Landing page** — aeqi.ceo with signup, waitlist, brand story
 9. **Worker resumability** — first-class prime bundles
 
 ### Later (quarters)
@@ -239,7 +239,7 @@ Sigil executes it.
 11. **Free tier** — quick path only, 10 executions/month
 12. **Paid tiers** — $49 pro, $199 founder
 13. **Mobile PWA** — add to home screen
-14. **API access** — developers build on Sigil
+14. **API access** — developers build on AEQI
 
 ---
 
@@ -253,12 +253,12 @@ Options:
 - **B) New notes table per project** — `notes.db` alongside `memory.db`.
   Pro: proper document model (id, channel, content, updated_at).
   Con: another storage layer.
-- **C) Markdown files on disk** — `projects/{name}/.sigil/notes/`.
+- **C) Markdown files on disk** — `projects/{name}/.aeqi/notes/`.
   Pro: git-friendly, Obsidian-compatible. Con: no real-time sync.
 
 Recommendation: **B**. Notes are documents, not key-value pairs. They need proper
 document semantics (full content replacement, versioning, channel scoping).
-But store them in the existing project `.sigil/` directory for locality.
+But store them in the existing project `.aeqi/` directory for locality.
 
 ### 2. Note → task matching: how?
 
@@ -276,7 +276,7 @@ suggestion overlay in phase 2.
 
 ### 3. Hosted architecture: how?
 
-For sigil.ceo as a multi-tenant product:
+For aeqi.ceo as a multi-tenant product:
 - Each user gets an isolated daemon? (expensive but simple)
 - Shared daemon with tenant isolation? (complex but efficient)
 - Serverless execution with persistent state? (modern but unproven for long-running orchestration)
@@ -297,13 +297,13 @@ In priority order:
 
 2. **Build the notes panel.** Editable context panel, persisted per channel. No directive
    detection yet — just let people write. The "notes that become real" story starts with
-   "you can write notes in Sigil."
+   "you can write notes in AEQI."
 
 3. **Prove the orchestration works.** Build 5 real end-to-end scenarios and run them repeatedly.
    Does routing work? Does execution complete? Does retry work? Does memory help? If yes,
    you have a product. If no, fix it before adding features.
 
-4. **Ship the landing page.** sigil.ceo needs to exist. "Proactive AI. Wake up ahead."
+4. **Ship the landing page.** aeqi.ceo needs to exist. "Proactive AI. Wake up ahead."
    Email signup. The brand is ready. The product is usable. Start collecting interest.
 
 Everything else is a distraction until these four things are done.
@@ -312,7 +312,7 @@ Everything else is a distraction until these four things are done.
 
 ## IX. The Hard Truth
 
-Sigil has more architecture than proof. More ambition than validation. More backend than product.
+AEQI has more architecture than proof. More ambition than validation. More backend than product.
 
 That's normal for this stage. But the risk is clear: building more features on top of
 unproven orchestration is building on sand.

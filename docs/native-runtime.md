@@ -1,15 +1,15 @@
 # Native Runtime Design
 
-This document defines the target shape of Sigil's native runtime.
+This document defines the target shape of AEQI's native runtime.
 
 It is written against the current codebase, not against a hypothetical rewrite from scratch.
 
 ## Why This Matters
 
-Sigil's long-term product depends on owning the execution substrate.
+AEQI's long-term product depends on owning the execution substrate.
 
-If the runtime is weak, Sigil becomes a planner wrapped around external model products.
-If the runtime is strong, Sigil can become:
+If the runtime is weak, AEQI becomes a planner wrapped around external model products.
+If the runtime is strong, AEQI can become:
 
 - model-independent
 - enterprise-deployable
@@ -20,14 +20,14 @@ That is why the runtime is not just an implementation detail. It is the product 
 
 ## Current State
 
-Sigil already has important building blocks:
+AEQI already has important building blocks:
 
-- a native agent loop in [agent.rs](/home/claudedev/sigil/crates/sigil-core/src/agent.rs)
-- worker execution through [agent_worker.rs](/home/claudedev/sigil/crates/sigil-orchestrator/src/agent_worker.rs)
-- middleware, checkpoints, memory, verification, audit, and event broadcasting in `sigil-orchestrator`
-- task outcome parsing in [executor.rs](/home/claudedev/sigil/crates/sigil-orchestrator/src/executor.rs)
+- a native agent loop in [agent.rs](/home/claudedev/aeqi/crates/aeqi-core/src/agent.rs)
+- worker execution through [agent_worker.rs](/home/claudedev/aeqi/crates/aeqi-orchestrator/src/agent_worker.rs)
+- middleware, checkpoints, memory, verification, audit, and event broadcasting in `aeqi-orchestrator`
+- task outcome parsing in [executor.rs](/home/claudedev/aeqi/crates/aeqi-orchestrator/src/executor.rs)
 
-The current strength is that Sigil already owns real infrastructure around execution.
+The current strength is that AEQI already owns real infrastructure around execution.
 
 The main weakness is that execution semantics are still too thin:
 
@@ -38,7 +38,7 @@ The main weakness is that execution semantics are still too thin:
 
 ## Design Goal
 
-The target is a native runtime that is deeply coupled to Sigil's orchestration layer without collapsing the two into one giant loop.
+The target is a native runtime that is deeply coupled to AEQI's orchestration layer without collapsing the two into one giant loop.
 
 The runtime should be:
 
@@ -51,7 +51,7 @@ The runtime should be:
 
 ## Architectural Split
 
-Sigil should keep three layers distinct:
+AEQI should keep three layers distinct:
 
 ### 1. Kernel
 
@@ -92,7 +92,7 @@ The kernel owns truth. The runtime owns execution. The interfaces expose control
 
 ## Runtime Contract
 
-Sigil should converge on a first-class runtime session model rather than text-only worker outputs.
+AEQI should converge on a first-class runtime session model rather than text-only worker outputs.
 
 ### Core objects
 
@@ -209,7 +209,7 @@ Text summaries still matter for the operator, but they should sit on top of stru
 
 ## Integration With Orchestration
 
-The runtime should be designed for Sigil's current orchestration model:
+The runtime should be designed for AEQI's current orchestration model:
 
 - `ChatEngine` creates or continues work
 - `WorkerPool` assigns and schedules
@@ -226,7 +226,7 @@ The runtime and orchestrator should be deeply integrated, but they should not co
 
 The right model is:
 
-- hard-fused read access to Sigil context
+- hard-fused read access to AEQI context
 - structured write access for execution artifacts and state
 - mediated access to orchestration-side mutations
 
@@ -245,7 +245,7 @@ The native runtime should directly consume a structured context bundle containin
 - workflow and policy constraints
 - codebase context and future code-intelligence signals
 
-This is where Sigil should be opinionated. The runtime should not think of itself as "a prompt plus tools." It should think of itself as executing from a rich, Sigil-owned operating context.
+This is where AEQI should be opinionated. The runtime should not think of itself as "a prompt plus tools." It should think of itself as executing from a rich, AEQI-owned operating context.
 
 ### Structured write access
 
@@ -300,7 +300,7 @@ The orchestrator should own:
 
 ## Identity, Sessions, and Subagents
 
-Sigil should keep persistent identities separate from ephemeral executions.
+AEQI should keep persistent identities separate from ephemeral executions.
 
 ### Persistent identities
 
@@ -344,11 +344,11 @@ That means:
 - child returns artifacts, evidence, and structured outcome
 - parent integrates the result into its own runtime session
 
-This gives Sigil runtime-level orchestration inside a session without confusing it with system-level orchestration across the whole product.
+This gives AEQI runtime-level orchestration inside a session without confusing it with system-level orchestration across the whole product.
 
 ## Workflow and Environment Policy
 
-Sigil should increasingly move best practices out of prompt prose and into runtime policy.
+AEQI should increasingly move best practices out of prompt prose and into runtime policy.
 
 Important examples already latent in the codebase:
 
@@ -369,7 +369,7 @@ Examples of native policy:
 
 ## Code Intelligence Layer
 
-Sigil should eventually expose a codebase intelligence layer to the runtime.
+AEQI should eventually expose a codebase intelligence layer to the runtime.
 
 This is where GitNexus-style ideas fit best.
 

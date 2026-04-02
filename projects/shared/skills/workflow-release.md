@@ -65,8 +65,8 @@ Claiming "deployed" without verifying is the same as not deploying. Verify.
 
 1. **Changelog** — post to team channel
 2. **Tag** — `git tag vX.Y.Z` and push
-3. **Close task** — `sigil_close_task`
-4. **Store** — `sigil_remember` any deployment learnings
+3. **Close task** — `aeqi_close_task`
+4. **Store** — `aeqi_remember` any deployment learnings
 
 ---
 

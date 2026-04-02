@@ -1,16 +1,16 @@
 # Claude Code Integration
 
-Sigil uses Claude Code in the daemon worker path, not in the basic `sigil run` path.
+AEQI uses Claude Code in the daemon worker path, not in the basic `aeqi run` path.
 
 ## Where It Is Used
 
 - Project worker pools can run workers in `claude_code` mode
 - Advisor agents registered by the daemon also use Claude Code mode
-- `sigil run` and `sigil skill run` do not shell out to Claude Code; they use the internal agent loop
+- `aeqi run` and `aeqi skill run` do not shell out to Claude Code; they use the internal agent loop
 
 ## Executor Behavior
 
-`crates/sigil-orchestrator/src/executor.rs` launches an external `claude` process with:
+`crates/aeqi-orchestrator/src/executor.rs` launches an external `claude` process with:
 
 ```text
 claude -p "<task context>"
@@ -67,15 +67,15 @@ Claude Code progress is streamed as JSON events.
 
 When the daemon is running, the IPC socket is:
 
-- `~/.sigil/rm.sock`
+- `~/.aeqi/rm.sock`
 
 Use it through the CLI:
 
 ```bash
-sigil daemon query status
-sigil daemon query dispatches
-sigil daemon query cost
-sigil daemon query metrics
+aeqi daemon query status
+aeqi daemon query dispatches
+aeqi daemon query cost
+aeqi daemon query metrics
 ```
 
 ## Current Boundary

@@ -11,29 +11,29 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Resolve SIGIL_ROOT: if SCRIPT_DIR is inside a worktree (no config/ sibling),
+# Resolve AEQI_ROOT: if SCRIPT_DIR is inside a worktree (no config/ sibling),
 # walk up from the git common dir to find the real repo root.
-if [ -n "${SIGIL_ROOT:-}" ]; then
+if [ -n "${AEQI_ROOT:-}" ]; then
     : # already set
 elif [ -d "$SCRIPT_DIR/../config" ]; then
-    SIGIL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+    AEQI_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 else
     # We're likely running from a worktree's hooks dir or core.hooksPath.
     # git-common-dir gives the main .git dir (works in both worktrees & main repo).
     _git_common="$(git rev-parse --git-common-dir 2>/dev/null)" || true
     if [ -n "$_git_common" ]; then
-        SIGIL_ROOT="$(cd "$_git_common/.." && pwd)"
+        AEQI_ROOT="$(cd "$_git_common/.." && pwd)"
     else
-        SIGIL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+        AEQI_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
     fi
 fi
 
-# Re-point SCRIPT_DIR to the canonical scripts/ inside SIGIL_ROOT so that
+# Re-point SCRIPT_DIR to the canonical scripts/ inside AEQI_ROOT so that
 # detect-project.sh and other helpers are always found.
-SCRIPT_DIR="$SIGIL_ROOT/scripts"
+SCRIPT_DIR="$AEQI_ROOT/scripts"
 
-CONFIG="${SIGIL_CONFIG:-$SIGIL_ROOT/config/sigil.toml}"
-DATA_DIR="${SIGIL_DATA_DIR:-$HOME/.sigil}"
+CONFIG="${AEQI_CONFIG:-$AEQI_ROOT/config/aeqi.toml}"
+DATA_DIR="${AEQI_DATA_DIR:-$HOME/.aeqi}"
 
 # Resolve project name: from arg, from detect-project.sh, or from repo dirname.
 PROJECT="${1:-}"
@@ -54,13 +54,13 @@ DB_PATH="$GRAPH_DIR/$PROJECT.db"
 [ -f "$DB_PATH" ] || exit 0
 
 # Try the CLI first (preferred — uses config for repo path resolution).
-if command -v sigil &>/dev/null; then
-    sigil graph index -r "$PROJECT" 2>/dev/null &
+if command -v aeqi &>/dev/null; then
+    aeqi graph index -r "$PROJECT" 2>/dev/null &
     disown
     exit 0
 fi
 
-# Fallback: direct sigil-graph indexing via the MCP binary isn't available,
+# Fallback: direct aeqi-graph indexing via the MCP binary isn't available,
 # so just touch a marker file that the session primer can pick up.
 mkdir -p "$GRAPH_DIR"
 echo "$(date -u +%s)" > "$GRAPH_DIR/$PROJECT.stale"

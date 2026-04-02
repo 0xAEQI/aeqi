@@ -1,5 +1,5 @@
 name = "Feature: {{feature_name}}"
-description = "End-to-end feature development for {{feature_name}} using Sigil's adaptive execution pipeline"
+description = "End-to-end feature development for {{feature_name}} using AEQI's adaptive execution pipeline"
 
 [[variables]]
 name = "feature_name"

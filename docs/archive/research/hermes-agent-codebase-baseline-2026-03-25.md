@@ -7,16 +7,16 @@ Revision analyzed: `e4033b2baf68`
 ## Purpose
 
 This document is a code-level checkpoint for Hermes Agent so it can be compared
-against Sigil from a grounded baseline instead of repo marketing or vague memory.
+against AEQI from a grounded baseline instead of repo marketing or vague memory.
 
 It focuses on:
 
 - what Hermes actually does in code
 - where major responsibilities live
-- what design patterns are relevant to Sigil
+- what design patterns are relevant to AEQI
 - what Hermes is better at
 - what Hermes is not trying to do
-- how to compare Hermes and Sigil without collapsing the two systems into the same shape
+- how to compare Hermes and AEQI without collapsing the two systems into the same shape
 
 This is based on the local Hermes codebase, not on the website docs as the primary source.
 
@@ -35,7 +35,7 @@ Its center of gravity is:
 - cron-based unattended actions
 - skill/memory accumulation around a single persistent agent identity
 
-Sigil's center of gravity is different:
+AEQI's center of gravity is different:
 
 - project supervision
 - task DAGs
@@ -99,7 +99,7 @@ It is strong at:
 
 ### 3. Hermes is not a daemon-worker_pool-taskboard system
 
-Hermes does have gateway and cron background execution, but it does not look like Sigil's:
+Hermes does have gateway and cron background execution, but it does not look like AEQI's:
 
 - per-project worker pools
 - task DAG orchestration
@@ -127,14 +127,14 @@ Key observations:
 
 - The runtime is highly stateful.
 - Session behavior and tool loop behavior are deeply intertwined.
-- The provider/runtime path is more mature than Sigil's current abstraction layer.
+- The provider/runtime path is more mature than AEQI's current abstraction layer.
 - Retry and fallback handling are heavily built into the main runtime.
 - Memory and skills are part of the same agent lifecycle rather than separate orchestration subsystems.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
 - Hermes is stronger at rich single-agent runtime engineering.
-- Sigil is stronger conceptually at separating orchestration from worker execution.
+- AEQI is stronger conceptually at separating orchestration from worker execution.
 
 ### Session Persistence
 
@@ -152,10 +152,10 @@ Key observations:
 - Gateway session keys are thoughtfully constructed from platform/chat/thread/user dimensions.
 - Session reset logic is explicit and policy-driven.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
 - Hermes is much stronger at conversation continuity and operator/user session persistence.
-- Sigil has memory, audit, blackboard, and tasks, but not the same polished session substrate for a persistent personal agent.
+- AEQI has memory, audit, blackboard, and tasks, but not the same polished session substrate for a persistent personal agent.
 
 ### Delegation / Subagents
 
@@ -171,11 +171,11 @@ Key observations:
 - Parent only receives the summarized result, not the full child reasoning or intermediate tool noise.
 - This is essentially bounded in-session delegation, not durable worker orchestration.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
 - Hermes’s delegation is compact and usable.
-- Sigil's ambition is larger: durable worker ownership, task reassignment, retries, audit, patrol loops.
-- Sigil should borrow the simplicity and boundedness of Hermes delegation, not its whole architectural frame.
+- AEQI's ambition is larger: durable worker ownership, task reassignment, retries, audit, patrol loops.
+- AEQI should borrow the simplicity and boundedness of Hermes delegation, not its whole architectural frame.
 
 ### Memory and Skill Learning Loop
 
@@ -194,11 +194,11 @@ Key observations:
 - After enough turns or tool iterations, Hermes spawns a background review agent to decide whether to save memory or create/update skills.
 - This is real and useful, but it is still "post-session or post-turn self-review" rather than a higher-level orchestrator learning system.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
 - Hermes is better at lightweight personal memory and skill self-curation.
-- Sigil is stronger in organizational memory primitives like audit, blackboard, and task-linked project state.
-- Sigil could benefit from borrowing Hermes’s "background reflection worker" pattern for narrow post-task learning actions.
+- AEQI is stronger in organizational memory primitives like audit, blackboard, and task-linked project state.
+- AEQI could benefit from borrowing Hermes’s "background reflection worker" pattern for narrow post-task learning actions.
 
 ### Tool Packaging
 
@@ -214,10 +214,10 @@ Key observations:
 - There is a clear difference between core tools, scenario toolsets, and platform toolsets.
 - This gives Hermes a good capability-packaging layer.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
-- Sigil has skills and pipelines, but its capability packaging is less unified and less productized.
-- Sigil should likely adopt a clearer capability/toolset contract closer to Hermes.
+- AEQI has skills and pipelines, but its capability packaging is less unified and less productized.
+- AEQI should likely adopt a clearer capability/toolset contract closer to Hermes.
 
 ### Runtime / Provider Abstraction
 
@@ -227,15 +227,15 @@ Primary file:
 
 Key observations:
 
-- Hermes has a stronger runtime/provider resolution layer than Sigil currently does.
+- Hermes has a stronger runtime/provider resolution layer than AEQI currently does.
 - It explicitly resolves provider choice from config, env, explicit overrides, and custom providers.
 - It handles multiple API modes.
 - It treats runtime/provider choice as a shared concern across CLI, gateway, cron, and helpers.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
-- This is one of the strongest areas for Sigil to learn from directly.
-- Sigil still has a split feeling between "internal agent loop" and "Claude Code worker path".
+- This is one of the strongest areas for AEQI to learn from directly.
+- AEQI still has a split feeling between "internal agent loop" and "Claude Code worker path".
 - Hermes shows how to centralize runtime resolution cleanly.
 
 ### Execution Environments
@@ -257,10 +257,10 @@ Key observations:
 - The Docker backend is relatively hardened.
 - The local backend actively sanitizes subprocess env vars to avoid leaking Hermes-managed secrets.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
 - Hermes is significantly ahead in environment abstraction and execution backend engineering.
-- Sigil needs a more explicit runtime capability/backend model if it wants to compete at this layer.
+- AEQI needs a more explicit runtime capability/backend model if it wants to compete at this layer.
 
 ### Messaging Gateway and Cron
 
@@ -279,11 +279,11 @@ Key observations:
 - Gateway state is a major part of Hermes’s real-world usefulness.
 - Messaging channels are a first-class product layer, not a thin add-on.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
 - Hermes is ahead in user-facing messaging/gateway product polish.
-- Sigil has gateway-like pieces, but Hermes’s implementation is more unified as a persistent user product.
-- Sigil is still stronger conceptually at organization-level control plane behavior.
+- AEQI has gateway-like pieces, but Hermes’s implementation is more unified as a persistent user product.
+- AEQI is still stronger conceptually at organization-level control plane behavior.
 
 ### Checkpoints
 
@@ -297,10 +297,10 @@ Key observations:
 - Checkpoints happen automatically before file-mutating operations.
 - This is local filesystem rollback infrastructure, not task- or worker_pool-level resumption.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
 - Hermes has a clever local mutation safety pattern.
-- Sigil’s checkpoint story is more tied to task/worker state, but still not as strong as it should be.
+- AEQI’s checkpoint story is more tied to task/worker state, but still not as strong as it should be.
 - These ideas are related but not identical.
 
 ### Safety / Approval / Secret Hygiene
@@ -319,10 +319,10 @@ Key observations:
 - It strips Hermes-managed secrets from subprocess environments.
 - It scans memory content for injection or exfiltration patterns before allowing those entries into persistent prompt-injected memory.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
 - This is one of Hermes’s clearest practical strengths.
-- Sigil needs stronger execution policy and operator-facing trust rails.
+- AEQI needs stronger execution policy and operator-facing trust rails.
 
 ### Programmatic Tool Calling
 
@@ -336,14 +336,14 @@ Key observations:
 - This reduces context churn by moving multi-step procedural work into one execution turn.
 - The design is clever and pragmatic.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
-- This is a strong idea for Sigil to study.
-- It could be useful anywhere Sigil currently burns too many turns on repetitive deterministic tool chains.
+- This is a strong idea for AEQI to study.
+- It could be useful anywhere AEQI currently burns too many turns on repetitive deterministic tool chains.
 
-## What Hermes Is Better At Than Sigil
+## What Hermes Is Better At Than AEQI
 
-At the time of this checkpoint, Hermes appears better than Sigil at:
+At the time of this checkpoint, Hermes appears better than AEQI at:
 
 - persistent session UX
 - messaging-first product design
@@ -356,9 +356,9 @@ At the time of this checkpoint, Hermes appears better than Sigil at:
 
 These are serious strengths.
 
-## What Hermes Is Not Better At Than Sigil
+## What Hermes Is Not Better At Than AEQI
 
-Hermes is not obviously better than Sigil at:
+Hermes is not obviously better than AEQI at:
 
 - project-level supervision
 - explicit task DAG orchestration
@@ -368,7 +368,7 @@ Hermes is not obviously better than Sigil at:
 - blackboard-style shared org state
 - durable ownership of work across project teams
 
-Those are areas where Sigil is aiming at a different and potentially more ambitious system.
+Those are areas where AEQI is aiming at a different and potentially more ambitious system.
 
 ## The Most Important Difference
 
@@ -376,23 +376,23 @@ Hermes is mostly:
 
 "a powerful persistent agent product"
 
-Sigil is trying to be:
+AEQI is trying to be:
 
 "a persistent AI organization and project orchestration system"
 
 That distinction matters because:
 
 - Hermes optimizes for a single agent product shell with good persistence and lots of integrations.
-- Sigil should optimize for control-plane coherence, durable project state, team routing, and trustworthy operator oversight.
+- AEQI should optimize for control-plane coherence, durable project state, team routing, and trustworthy operator oversight.
 
-If Sigil copies Hermes too literally, it risks collapsing its orchestration architecture into a feature-heavy monolith.
+If AEQI copies Hermes too literally, it risks collapsing its orchestration architecture into a feature-heavy monolith.
 
-## What Sigil Should Learn From Hermes
+## What AEQI Should Learn From Hermes
 
 ### 1. Stronger runtime/provider abstraction
 
 Hermes’s runtime resolution is cleaner and more centralized.
-Sigil should improve:
+AEQI should improve:
 
 - runtime registry
 - provider/runtime capability metadata
@@ -401,7 +401,7 @@ Sigil should improve:
 ### 2. Better execution backend abstraction
 
 Hermes has a real backend interface for local, Docker, SSH, and more.
-Sigil should not remain implicitly split between only a few hardcoded execution modes.
+AEQI should not remain implicitly split between only a few hardcoded execution modes.
 
 ### 3. Stronger operator trust and safety rails
 
@@ -412,12 +412,12 @@ Hermes does better at:
 - sandbox/backend hardening
 - persistent operational defaults
 
-Sigil needs a stronger policy model and operator trust layer.
+AEQI needs a stronger policy model and operator trust layer.
 
 ### 4. Better capability packaging
 
 Hermes’s toolsets are simple and legible.
-Sigil should think more clearly about:
+AEQI should think more clearly about:
 
 - capability sets
 - runtime capabilities
@@ -426,7 +426,7 @@ Sigil should think more clearly about:
 
 ### 5. Better session continuity for human interaction surfaces
 
-Sigil should study Hermes’s session store and session recall patterns for:
+AEQI should study Hermes’s session store and session recall patterns for:
 
 - chat surface continuity
 - durable thread state
@@ -436,7 +436,7 @@ Sigil should study Hermes’s session store and session recall patterns for:
 ### 6. Narrow post-task reflection loops
 
 Hermes’s background review agent is a useful pattern.
-Sigil could apply this to:
+AEQI could apply this to:
 
 - post-task memory extraction
 - post-task skill updates
@@ -447,19 +447,19 @@ without bloating the main orchestrator.
 ### 7. Programmatic tool execution for deterministic workflows
 
 Hermes’s code-execution RPC model is a strong idea.
-Sigil may benefit from a comparable mechanism for deterministic tool chains.
+AEQI may benefit from a comparable mechanism for deterministic tool chains.
 
-## What Sigil Should Not Copy Blindly
+## What AEQI Should Not Copy Blindly
 
 ### 1. The monolith
 
 Hermes gets a huge amount done in `run_agent.py`, but this concentration is also a cost.
-Sigil should avoid merging orchestration, runtime, persistence, reflection, and execution control into one mega-loop.
+AEQI should avoid merging orchestration, runtime, persistence, reflection, and execution control into one mega-loop.
 
 ### 2. Single-agent mental model
 
 Hermes works because it is mostly about one persistent agent product.
-Sigil should not lose its stronger separation between:
+AEQI should not lose its stronger separation between:
 
 - orchestrator
 - worker
@@ -470,11 +470,11 @@ Sigil should not lose its stronger separation between:
 ### 3. Session-centric over task-centric thinking
 
 Hermes’s state model is session-first.
-Sigil should remain task-/project-/operation-first where appropriate.
+AEQI should remain task-/project-/operation-first where appropriate.
 
-## How To Compare Hermes to Newer Sigil
+## How To Compare Hermes to Newer AEQI
 
-When comparing the newer Sigil against Hermes, use these dimensions:
+When comparing the newer AEQI against Hermes, use these dimensions:
 
 ### 1. Runtime abstraction
 
@@ -534,12 +534,12 @@ Questions:
 
 ## Practical Comparison Hypothesis
 
-Before looking at the newer Sigil, the likely comparison hypothesis is:
+Before looking at the newer AEQI, the likely comparison hypothesis is:
 
 - Hermes will still be ahead on product polish, session continuity, execution backends, and safety hardening.
-- Sigil can still be ahead on true orchestration architecture if its control plane remains coherent and its worker/task/org model continues improving.
-- The best Sigil will not look like Hermes.
-- The best Sigil will borrow Hermes’s strongest runtime/product/safety patterns while keeping a stronger orchestration core.
+- AEQI can still be ahead on true orchestration architecture if its control plane remains coherent and its worker/task/org model continues improving.
+- The best AEQI will not look like Hermes.
+- The best AEQI will borrow Hermes’s strongest runtime/product/safety patterns while keeping a stronger orchestration core.
 
 ## Bottom Line
 
@@ -552,10 +552,10 @@ Hermes is a valuable reference implementation for:
 - memory/skill reflection loops
 - safety hardening
 
-Hermes is not the target shape for Sigil.
+Hermes is not the target shape for AEQI.
 
 The real opportunity is:
 
-- keep Sigil’s stronger orchestration/control-plane architecture
+- keep AEQI’s stronger orchestration/control-plane architecture
 - import Hermes’s stronger runtime, product, and safety patterns
 - avoid inheriting Hermes’s monolithic single-agent architecture

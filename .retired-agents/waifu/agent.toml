@@ -6,6 +6,6 @@ voice = "vocal"
 execution_mode = "claude_code"
 max_workers = 2
 max_turns = 25
-default_repo = "sigil"
+default_repo = "aeqi"
 telegram_token_secret = "TELEGRAM_BOT_TOKEN"
 capabilities = ["orchestration", "memory"]

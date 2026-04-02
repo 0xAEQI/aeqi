@@ -1,4 +1,4 @@
-# Hermes + Supermemory Synthesis For Sigil
+# Hermes + Supermemory Synthesis For AEQI
 
 Date: 2026-03-25
 
@@ -16,22 +16,22 @@ The real question is:
 - what Hermes contributes
 - what Supermemory contributes
 - what a smart combination of the two would look like
-- what Sigil should borrow from that combination
-- what Sigil should avoid copying
+- what AEQI should borrow from that combination
+- what AEQI should avoid copying
 
 ## Executive Thesis
 
-Hermes and Supermemory fit together cleanly, but they do not by themselves replace Sigil's reason to exist.
+Hermes and Supermemory fit together cleanly, but they do not by themselves replace AEQI's reason to exist.
 
 The clean mental model is:
 
 - Hermes = persistent agent runtime and product shell
 - Supermemory = memory platform and memory integration layer
-- Sigil = orchestration control plane
+- AEQI = orchestration control plane
 
 If you combine Hermes and Supermemory, you get a strong persistent personal or messaging-first agent product with better memory.
 
-If you combine Sigil with the best ideas from Hermes and Supermemory, you get something more ambitious and more valuable:
+If you combine AEQI with the best ideas from Hermes and Supermemory, you get something more ambitious and more valuable:
 
 - a real orchestration system
 - with a better runtime shell
@@ -59,7 +59,7 @@ Its most useful contributions are:
 
 Hermes solves "how do I make one persistent agent actually usable every day?"
 
-That is important because Sigil is still weaker at this layer than it should be.
+That is important because AEQI is still weaker at this layer than it should be.
 
 ## What Supermemory Contributes
 
@@ -78,7 +78,7 @@ Its most useful contributions are:
 
 Supermemory solves "how do I make memory easy to consume, inspect, and integrate?"
 
-That is important because Sigil has memory primitives, but they are not yet productized that cleanly.
+That is important because AEQI has memory primitives, but they are not yet productized that cleanly.
 
 ## What The Combination Actually Produces
 
@@ -105,13 +105,13 @@ It is not naturally:
 - task-DAG-centric
 - org-control-plane-centric
 
-So Hermes + Supermemory is not "Sigil but better." It is a different class of system.
+So Hermes + Supermemory is not "AEQI but better." It is a different class of system.
 
 ## Recommended Role Split
 
-If Sigil is the main system, the correct split is:
+If AEQI is the main system, the correct split is:
 
-### Sigil owns
+### AEQI owns
 
 - task substrate
 - project supervision
@@ -145,11 +145,11 @@ That is the cleanest synthesis.
 
 ## The Best Combined Architecture
 
-The best version of Sigil after learning from both systems would likely have four clear layers.
+The best version of AEQI after learning from both systems would likely have four clear layers.
 
 ### 1. Orchestration Layer
 
-This stays Sigil-native.
+This stays AEQI-native.
 
 Responsibilities:
 
@@ -176,7 +176,7 @@ Responsibilities:
 - channel/session bridging
 - per-runtime approvals and policy
 
-Sigil currently needs this badly.
+AEQI currently needs this badly.
 
 ### 3. Memory Layer
 
@@ -191,7 +191,7 @@ Responsibilities:
 - memory inspection and provenance
 - external adapters and MCP access
 
-Sigil currently has fragments of this, but not a clear product surface.
+AEQI currently has fragments of this, but not a clear product surface.
 
 ### 4. Product Surface Layer
 
@@ -210,17 +210,17 @@ From Supermemory:
 - easy recall tools
 - external integrations
 
-From Sigil:
+From AEQI:
 
 - operator oversight
 - intervention
 - project and org dashboards
 
-## What Sigil Should Copy From Hermes
+## What AEQI Should Copy From Hermes
 
 ### 1. Runtime Registry And Capability Metadata
 
-Sigil should have one explicit runtime registry with capability declarations such as:
+AEQI should have one explicit runtime registry with capability declarations such as:
 
 - tool use
 - streaming
@@ -234,7 +234,7 @@ Hermes is ahead here.
 
 ### 2. Execution Environment Abstraction
 
-Sigil should stop feeling narrowly bound to a few execution modes.
+AEQI should stop feeling narrowly bound to a few execution modes.
 
 It should have a clean environment contract for:
 
@@ -245,7 +245,7 @@ It should have a clean environment contract for:
 
 ### 3. Session And Gateway Product Thinking
 
-Sigil needs a better persistent human-facing shell:
+AEQI needs a better persistent human-facing shell:
 
 - thread continuity
 - stable session identity
@@ -255,7 +255,7 @@ Sigil needs a better persistent human-facing shell:
 
 ### 4. Trust Rails
 
-Sigil should adopt stronger:
+AEQI should adopt stronger:
 
 - command approval flows
 - secret scrubbing
@@ -276,18 +276,18 @@ Not as a monolith, but as small support loops.
 
 Hermes's code-execution RPC pattern is strong for repetitive deterministic workflows.
 
-Sigil should consider a safe equivalent for:
+AEQI should consider a safe equivalent for:
 
 - long tool chains
 - transformations
 - repetitive repo analysis
 - structured maintenance tasks
 
-## What Sigil Should Copy From Supermemory
+## What AEQI Should Copy From Supermemory
 
 ### 1. Memory As A Product, Not Just Storage
 
-Sigil should expose first-class memory concepts:
+AEQI should expose first-class memory concepts:
 
 - profile
 - recall
@@ -299,7 +299,7 @@ Sigil should expose first-class memory concepts:
 
 Supermemory's container-tag style is simple and effective.
 
-Sigil should have equally crisp scopes for:
+AEQI should have equally crisp scopes for:
 
 - operator memory
 - agent memory
@@ -309,7 +309,7 @@ Sigil should have equally crisp scopes for:
 
 ### 3. Structured Conversation Ingestion
 
-Sigil should support a canonical path for ingesting:
+AEQI should support a canonical path for ingesting:
 
 - conversations
 - channel history
@@ -320,7 +320,7 @@ without flattening everything into one generic note format.
 
 ### 4. Thin Adapters Across Surfaces
 
-Sigil should expose its memory layer through:
+AEQI should expose its memory layer through:
 
 - internal runtime APIs
 - MCP
@@ -330,7 +330,7 @@ Sigil should expose its memory layer through:
 
 ### 5. Better Memory Inspection UX
 
-Sigil needs better answers to:
+AEQI needs better answers to:
 
 - what is remembered
 - why it was remembered
@@ -338,19 +338,19 @@ Sigil needs better answers to:
 - when it was last used
 - what influenced this task
 
-Supermemory treats this as product surface. Sigil should too.
+Supermemory treats this as product surface. AEQI should too.
 
-## What Sigil Should Not Copy
+## What AEQI Should Not Copy
 
 ### 1. Hermes's Monolith
 
-Sigil should not fold orchestrator, runtime, gateway, memory, reflection, and execution into one giant loop.
+AEQI should not fold orchestrator, runtime, gateway, memory, reflection, and execution into one giant loop.
 
-That would destroy one of Sigil's main architectural advantages.
+That would destroy one of AEQI's main architectural advantages.
 
 ### 2. Hermes's Single-Agent Center Of Gravity
 
-Sigil should not degrade into "one agent with helpers."
+AEQI should not degrade into "one agent with helpers."
 
 It should remain:
 
@@ -364,7 +364,7 @@ where that matters.
 
 Supermemory can hide hard logic behind hosted APIs because that is its product model.
 
-Sigil should not make its core orchestration truth depend on opaque external behavior.
+AEQI should not make its core orchestration truth depend on opaque external behavior.
 
 ### 4. Memory-As-Intelligence Thinking
 
@@ -383,7 +383,7 @@ It should not be mistaken for verification or planning quality by itself.
 
 Both Hermes and Supermemory tolerate some duplication because they optimize for product breadth.
 
-Sigil should be more disciplined:
+AEQI should be more disciplined:
 
 - central semantics
 - thin adapters
@@ -391,20 +391,20 @@ Sigil should be more disciplined:
 
 ## Best Practical Recommendation
 
-If the goal is to make Sigil much better, the right move is not:
+If the goal is to make AEQI much better, the right move is not:
 
-- rewrite Sigil into Hermes
+- rewrite AEQI into Hermes
 - bolt Supermemory on top blindly
 - merge everything into one mega-agent
 
 The right move is:
 
-1. Keep Sigil as the orchestration kernel.
-2. Rebuild Sigil's runtime layer using Hermes-style discipline.
-3. Rebuild Sigil's memory layer using Supermemory-style productization.
+1. Keep AEQI as the orchestration kernel.
+2. Rebuild AEQI's runtime layer using Hermes-style discipline.
+3. Rebuild AEQI's memory layer using Supermemory-style productization.
 4. Expose both through a stronger operator and messaging surface.
 
-That gives Sigil a much stronger shape without losing what makes it distinct.
+That gives AEQI a much stronger shape without losing what makes it distinct.
 
 ## Recommended Build Order
 
@@ -445,7 +445,7 @@ Build:
 
 ### Phase 4. Operator Integration
 
-Keep this Sigil-native, but enriched by the new layers.
+Keep this AEQI-native, but enriched by the new layers.
 
 Build:
 
@@ -460,13 +460,13 @@ The ideal end state is not "Hermes plus Supermemory."
 
 The ideal end state is:
 
-- Sigil's control plane
+- AEQI's control plane
 - Hermes's runtime maturity
 - Supermemory's memory product clarity
 
 In plain terms:
 
-- Sigil decides and coordinates work
+- AEQI decides and coordinates work
 - Hermes-like infrastructure makes workers and human-facing surfaces reliable
 - Supermemory-like infrastructure makes context and memory usable, inspectable, and portable
 
@@ -476,15 +476,15 @@ That combination is much stronger than copying either project wholesale.
 
 Hermes and Supermemory are complementary.
 
-Hermes teaches Sigil how to become a better persistent agent runtime and product shell.
-Supermemory teaches Sigil how to become a better memory platform and memory product.
+Hermes teaches AEQI how to become a better persistent agent runtime and product shell.
+Supermemory teaches AEQI how to become a better memory platform and memory product.
 
-Neither should replace Sigil's orchestration core.
+Neither should replace AEQI's orchestration core.
 
 The right synthesis is:
 
-- keep Sigil's control-plane architecture
+- keep AEQI's control-plane architecture
 - import Hermes's runtime and safety discipline
 - import Supermemory's memory contracts and product surfaces
 
-That is the most logical combination and the best path to a much stronger Sigil.
+That is the most logical combination and the best path to a much stronger AEQI.

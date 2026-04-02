@@ -20,9 +20,9 @@ Standard worktree workflow applies (same as all projects).
 
 ## Key Paths
 
-- Binary: `sigil-cli/src/main.rs`
-- Traits: `crates/sigil-core/src/traits/`
-- Config: `config/sigil.toml`
+- Binary: `aeqi-cli/src/main.rs`
+- Traits: `crates/aeqi-core/src/traits/`
+- Config: `config/aeqi.toml`
 - Projects: `projects/<name>/`
 - Shared: `projects/shared/`
 
@@ -35,10 +35,10 @@ Standard worktree workflow applies (same as all projects).
 
 ## Adding Things
 
-- New tool: implement `Tool` trait in `sigil-tools`, export from lib.rs, add to `build_project_tools()`
-- New provider: implement `Provider` trait in `sigil-providers`, export, add factory
-- New channel: implement `Channel` trait in `sigil-gates`, export, wire into daemon
-- New project: create `projects/<name>/` with AGENTS.md + KNOWLEDGE.md, add to `config/sigil.toml`
+- New tool: implement `Tool` trait in `aeqi-tools`, export from lib.rs, add to `build_project_tools()`
+- New provider: implement `Provider` trait in `aeqi-providers`, export, add factory
+- New channel: implement `Channel` trait in `aeqi-gates`, export, wire into daemon
+- New project: create `projects/<name>/` with AGENTS.md + KNOWLEDGE.md, add to `config/aeqi.toml`
 
 ## Critical Rules
 

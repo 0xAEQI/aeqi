@@ -1,4 +1,4 @@
-# Sigil v4 — The Architecture
+# AEQI v4 — The Architecture
 
 One system. One loop. Everything connects.
 
@@ -48,7 +48,7 @@ These items are described in the architecture below but do not exist in code:
 
 ## The Core Abstraction
 
-A sigil is intent that manifests into reality. The entire system is one loop:
+A aeqi is intent that manifests into reality. The entire system is one loop:
 
 ```
 Intent → Understand → Orchestrate → Execute → Verify → Learn → Proact
@@ -56,7 +56,7 @@ Intent → Understand → Orchestrate → Execute → Verify → Learn → Proac
    └──────────────────────────────────────────────────────────────┘
 ```
 
-Every component in Sigil exists to serve one step of this loop.
+Every component in AEQI exists to serve one step of this loop.
 Nothing exists outside it.
 
 ---
@@ -68,7 +68,7 @@ Nothing exists outside it.
 Where intent enters the system. Multiple surfaces, one pipeline.
 
 ```
-Terminal (sigil)    ──┐
+Terminal (aeqi)    ──┐
 Chat (web)          ──┤
 Telegram/WhatsApp   ──┤
 Notes panel         ──┼──→ ChatEngine ──→ IntentStream
@@ -221,7 +221,7 @@ Task DAG
 **Key insight from DeerFlow:** Hard limit on delegation depth. Workers cannot
 recursively spawn sub-agents. The WorkerPool is the only entity that creates tasks.
 This prevents cascade failures. DeerFlow also limits parallel sub-agents to 3-4
-with a middleware clamping layer — Sigil should enforce similar limits.
+with a middleware clamping layer — AEQI should enforce similar limits.
 
 **Key insight from Superpowers:** Git worktrees for parallel execution. When two
 workers touch the same project, each gets an isolated worktree. Auto-setup
@@ -233,7 +233,7 @@ never share mutable state.
 
 ### Layer 3: Execute
 
-The middleware chain. This is where Sigil becomes composable.
+The middleware chain. This is where AEQI becomes composable.
 
 ```
 Task assigned to Worker
@@ -753,7 +753,7 @@ Query arrives (from Context Assembler or direct search)
 
 ### Layer 6: Proact
 
-The layer that makes Sigil a CEO, not a tool.
+The layer that makes AEQI a CEO, not a tool.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -865,7 +865,7 @@ Both feed into the same IntentStream.
 
 ### Storage
 
-Per-project SQLite in `.sigil/notes.db`:
+Per-project SQLite in `.aeqi/notes.db`:
 
 ```sql
 CREATE TABLE notes (
@@ -938,7 +938,7 @@ Context panel evolves to three tabs:
 ### Cross-Surface Sync
 
 ```
-Web notes panel  ←→  Telegram "note: ..."  ←→  Terminal "sigil note ..."  ←→  API
+Web notes panel  ←→  Telegram "note: ..."  ←→  Terminal "aeqi note ..."  ←→  API
 ```
 
 Write in any surface, visible everywhere. Agents see notes during execution
@@ -948,15 +948,15 @@ Write in any surface, visible everywhere. Agents see notes during execution
 
 ## The Terminal Experience
 
-`sigil` with no arguments = interactive chat connected to the full orchestration plane.
+`aeqi` with no arguments = interactive chat connected to the full orchestration plane.
 
 ```
-$ sigil
+$ aeqi
 
-  sigil v4.0 · 6 projects · 4 agents · daemon online
+  aeqi v4.0 · 6 projects · 4 agents · daemon online
   $4.23 / $100 today · 2 tasks active
 
-  sigil > fix the trading bot parameter overshoot
+  aeqi > fix the trading bot parameter overshoot
 
   Decomposing... 2 tasks created:
     as-3025  analyze recent PnL for parameter sensitivity
@@ -965,7 +965,7 @@ $ sigil
   as-3025 assigned to trader (expertise: 0.87)
   as-3025 executing...
 
-  sigil > status
+  aeqi > status
 
   Active:
     as-3025  analyze PnL sensitivity   trader   ⟳ 2m elapsed
@@ -974,10 +974,10 @@ $ sigil
   Blocked:
     as-3026  adjust threshold          (waiting on as-3025)
 
-  sigil >
+  aeqi >
 ```
 
-Implementation: `sigil-cli/src/cmd/chat.rs` connects to daemon IPC,
+Implementation: `aeqi-cli/src/cmd/chat.rs` connects to daemon IPC,
 sends intents through the same ChatEngine as web/Telegram, renders
 results with terminal colors/formatting.
 
@@ -986,11 +986,11 @@ results with terminal colors/formatting.
 ## Build Phases
 
 ### Phase 1: Middleware Foundation
-1. `Middleware` trait + `MiddlewareChain` in `sigil-orchestrator`
+1. `Middleware` trait + `MiddlewareChain` in `aeqi-orchestrator`
 2. Extract existing worker logic into middleware: ContextBudget, CostTracking, Checkpoint
 3. New middleware: LoopDetection, Guardrails, DanglingToolPatch
 4. Worker outcomes: add DONE_WITH_CONCERNS, NEEDS_CONTEXT + confidence field
-5. `sigil` interactive terminal chat (IPC to daemon ChatEngine)
+5. `aeqi` interactive terminal chat (IPC to daemon ChatEngine)
 
 ### Phase 2: Verification & Safety
 6. Verification pipeline: artifact check, test runner, spec compliance
@@ -1041,7 +1041,7 @@ results with terminal colors/formatting.
 
 ### Phase 8: Scale & Polish
 41. Hosted version: isolated daemon per user, zero-setup onboarding
-42. Landing page: sigil.ceo with brand, signup, pricing
+42. Landing page: aeqi.ceo with brand, signup, pricing
 43. WhatsApp integration
 44. Mobile PWA
 45. API access for developers
@@ -1051,11 +1051,11 @@ results with terminal colors/formatting.
 
 ## The Test
 
-Sigil v4 is done when:
+AEQI v4 is done when:
 
 1. You write "launch the new pricing page" in your notes on your phone
-2. It appears in Sigil instantly across all surfaces
-3. Sigil decomposes it into tasks, routes to the right agents
+2. It appears in AEQI instantly across all surfaces
+3. AEQI decomposes it into tasks, routes to the right agents
 4. Workers execute in isolated worktrees with middleware protection
 5. Verification confirms the work — tests pass, spec met, quality checked
 6. Memory extracts insights, deduplicates, links to related knowledge
@@ -1066,6 +1066,6 @@ Sigil v4 is done when:
 9. Your note shows: ✓ launch the new pricing page
 10. The system is measurably smarter for the next task
 
-That is a sigil manifesting into reality.
+That is a aeqi manifesting into reality.
 That is proactive AI.
 That is the product.

@@ -1,16 +1,16 @@
 # Contributing
 
-Sigil is a monorepo with a Rust backend and a React UI.
+AEQI is a monorepo with a Rust backend and a React UI.
 
 ## Development Setup
 
 ```bash
-cp config/sigil.example.toml config/sigil.toml
+cp config/aeqi.example.toml config/aeqi.toml
 npm run ui:install
 cargo build
 ```
 
-Use `config/sigil.toml` for local-only settings. It is intentionally not meant to be committed.
+Use `config/aeqi.toml` for local-only settings. It is intentionally not meant to be committed.
 
 ## Common Commands
 

@@ -1,40 +1,40 @@
-# Sigil Architecture
+# AEQI Architecture
 
 ## Summary
 
-Sigil is a Rust workspace with two practical execution planes:
+AEQI is a Rust workspace with two practical execution planes:
 
-- The internal agent plane, used by `sigil run` and `sigil skill run`
-- The orchestration plane, used by `sigil daemon start`
+- The internal agent plane, used by `aeqi run` and `aeqi skill run`
+- The orchestration plane, used by `aeqi daemon start`
 
-On top of those planes, the main native operator surface is now `sigil monitor`, which combines daemon IPC state with local task-board inspection.
+On top of those planes, the main native operator surface is now `aeqi monitor`, which combines daemon IPC state with local task-board inspection.
 
 The codebase already contains more orchestration primitives than the top-level CLI exposes directly. This document focuses on the runtime paths operators can use today.
 
 ## Crate Layers
 
 ```text
-sigil-cli
-  -> sigil-core
-  -> sigil-tasks
-  -> sigil-memory
-  -> sigil-providers
-  -> sigil-tools
-  -> sigil-orchestrator
-  -> sigil-gates
+aeqi-cli
+  -> aeqi-core
+  -> aeqi-tasks
+  -> aeqi-memory
+  -> aeqi-providers
+  -> aeqi-tools
+  -> aeqi-orchestrator
+  -> aeqi-gates
 ```
 
-- `sigil-core`: traits, config loading, identity assembly, internal agent loop, secret store
-- `sigil-tasks`: task DAG, missions, dependency inference, JSONL persistence
-- `sigil-memory`: SQLite memory with FTS5, embedding cache, hybrid ranking
-- `sigil-providers`: OpenRouter, Anthropic, Ollama clients plus model pricing
-- `sigil-tools`: shell, file, git, task, skill, and other agent tools
-- `sigil-orchestrator`: daemon, worker pools, workers, dispatch bus, cost ledger, audit log, blackboard, schedules
-- `sigil-gates`: channel adapters such as Telegram
+- `aeqi-core`: traits, config loading, identity assembly, internal agent loop, secret store
+- `aeqi-tasks`: task DAG, missions, dependency inference, JSONL persistence
+- `aeqi-memory`: SQLite memory with FTS5, embedding cache, hybrid ranking
+- `aeqi-providers`: OpenRouter, Anthropic, Ollama clients plus model pricing
+- `aeqi-tools`: shell, file, git, task, skill, and other agent tools
+- `aeqi-orchestrator`: daemon, worker pools, workers, dispatch bus, cost ledger, audit log, blackboard, schedules
+- `aeqi-gates`: channel adapters such as Telegram
 
 ## Runtime Path 1: One-Shot CLI Execution
 
-`sigil run` and `sigil skill run` both use the internal `sigil-core::Agent` loop.
+`aeqi run` and `aeqi skill run` both use the internal `aeqi-core::Agent` loop.
 
 ```text
 CLI command
@@ -49,13 +49,13 @@ CLI command
 Key properties:
 
 - Provider selection follows the project runtime for project-scoped one-shot runs, or the standalone leader/runtime when no project is selected
-- Tool execution happens inside Sigil, not through Claude Code
+- Tool execution happens inside AEQI, not through Claude Code
 - Memory recall is injected into the system prompt before the loop starts
 - This path is the simplest way to work on providers, tools, identity, and memory behavior
 
 ## Runtime Path 2: Daemon Orchestration
 
-`sigil daemon start` builds a long-running registry and patrol loop.
+`aeqi daemon start` builds a long-running registry and patrol loop.
 
 ```text
 daemon start
@@ -74,15 +74,15 @@ The daemon owns:
 - Advisor-agent registration
 - Audit log, blackboard, dispatch bus, cost ledger, schedule store
 - Telegram ingress and council routing
-- IPC queries on `~/.sigil/rm.sock`
+- IPC queries on `~/.aeqi/rm.sock`
 
 Useful daemon probes today:
 
-- `sigil monitor`: operator-focused summary plus recommended interventions
-- `sigil daemon query status`: broad inventory of projects, budgets, pulses, and dispatch state
-- `sigil daemon query readiness`: stricter control-plane readiness, including skipped registrations, worker capacity, and budget exhaustion
+- `aeqi monitor`: operator-focused summary plus recommended interventions
+- `aeqi daemon query status`: broad inventory of projects, budgets, pulses, and dispatch state
+- `aeqi daemon query readiness`: stricter control-plane readiness, including skipped registrations, worker capacity, and budget exhaustion
 
-`sigil monitor` is not a separate runtime. It is a CLI aggregation layer over:
+`aeqi monitor` is not a separate runtime. It is a CLI aggregation layer over:
 
 - daemon readiness / dispatch / budget state when the daemon is live
 - local project task boards and repo presence checks even when the daemon is down
@@ -116,7 +116,7 @@ Important details:
 
 ## Identity and Context Assembly
 
-Sigil separates agent identity from project context.
+AEQI separates agent identity from project context.
 
 Agent-side files:
 
@@ -134,7 +134,7 @@ Project-side files:
 - `KNOWLEDGE.md`
 - `HEARTBEAT.md`
 
-System prompt order from `sigil-core/src/identity.rs`:
+System prompt order from `aeqi-core/src/identity.rs`:
 
 1. Shared workflow
 2. Persona
@@ -150,7 +150,7 @@ Claude Code workers receive that identity plus the worker protocol that defines 
 
 ### Organization Kernel
 
-`sigil-core::SigilConfig` now also supports a first-class organization graph:
+`aeqi-core::AEQIConfig` now also supports a first-class organization graph:
 
 - `organizations`
 - `units`
@@ -158,21 +158,21 @@ Claude Code workers receive that identity plus the worker protocol that defines 
 - `relationships`
 - `rituals`
 
-This is deliberately more general than a corporate title tree. A Sigil organization can represent a company, open-source maintainer group, incident cell, research lab, or any other operating structure.
+This is deliberately more general than a corporate title tree. A AEQI organization can represent a company, open-source maintainer group, incident cell, research lab, or any other operating structure.
 
-At runtime, Sigil resolves:
+At runtime, AEQI resolves:
 
 - org-linked project teams through `team.org` and `team.unit`
 - per-agent org context through roles, unit membership, relationships, and ritual participation
 - hierarchy-aware prompt context via the identity `operational` section
 
-If an agent belongs to multiple organizations, Sigil now prefers the explicitly bound project org, otherwise the default organization when that agent is a member, and otherwise omits single-org context instead of picking an arbitrary first match.
+If an agent belongs to multiple organizations, AEQI now prefers the explicitly bound project org, otherwise the default organization when that agent is a member, and otherwise omits single-org context instead of picking an arbitrary first match.
 
 That gives the current runtime a native way to express leaders, peers, direct reports, advisors, reviewers, and escalation paths without hardcoding a specific org chart into the core.
 
 ## State and Persistence
 
-Global state under `~/.sigil/`:
+Global state under `~/.aeqi/`:
 
 - `rm.pid`: daemon PID
 - `rm.sock`: daemon IPC socket
@@ -188,7 +188,7 @@ Per-project or per-agent state:
 
 - `.tasks/<prefix>.jsonl`: task streams for each prefix
 - `.tasks/_missions.jsonl`: mission storage
-- `.sigil/memory.db`: project memory database
+- `.aeqi/memory.db`: project memory database
 
 ## Shared Assets
 
@@ -210,22 +210,22 @@ Some orchestration capabilities exist in code but are not yet first-class CLI co
 
 Examples:
 
-- Council mode exists in the daemon message path and Telegram flow, not as `sigil council`
-- Budget inspection exists through daemon IPC, not as `sigil cost`
-- `sigil monitor` is the current native operator summary, but not yet a full TUI or web console
+- Council mode exists in the daemon message path and Telegram flow, not as `aeqi council`
+- Budget inspection exists through daemon IPC, not as `aeqi cost`
+- `aeqi monitor` is the current native operator summary, but not yet a full TUI or web console
 - Worker/provider runtime presets now select OpenRouter, Anthropic, or Ollama per project or agent
 - Organization graphs are first-class config and identity input, but per-role chat surfaces are not a dedicated top-level CLI yet
 - Agent routing and usage-credit inspection still assume OpenRouter in a few control-plane paths
 
-When documenting or extending Sigil, treat the daemon and CLI entrypoints as the source of truth for what operators can use today.
+When documenting or extending AEQI, treat the daemon and CLI entrypoints as the source of truth for what operators can use today.
 
-For the proposed terminal operator shell that builds on these primitives, see [docs/chat-interface.md](/home/claudedev/sigil/docs/chat-interface.md).
+For the proposed terminal operator shell that builds on these primitives, see [docs/chat-interface.md](/home/claudedev/aeqi/docs/chat-interface.md).
 
 ## Best Places To Extend
 
-- Provider routing: `sigil-cli/src/helpers.rs`
-- New tools: `crates/sigil-tools/` plus the relevant tool builders
-- Worker behavior: `crates/sigil-orchestrator/src/agent_worker.rs` and `executor.rs`
-- Orchestration policy: `crates/sigil-orchestrator/src/worker_pool.rs` and `registry.rs`
-- Identity assembly: `crates/sigil-core/src/identity.rs`
-- CLI surface: `sigil-cli/src/cli.rs` and `sigil-cli/src/cmd/`
+- Provider routing: `aeqi-cli/src/helpers.rs`
+- New tools: `crates/aeqi-tools/` plus the relevant tool builders
+- Worker behavior: `crates/aeqi-orchestrator/src/agent_worker.rs` and `executor.rs`
+- Orchestration policy: `crates/aeqi-orchestrator/src/worker_pool.rs` and `registry.rs`
+- Identity assembly: `crates/aeqi-core/src/identity.rs`
+- CLI surface: `aeqi-cli/src/cli.rs` and `aeqi-cli/src/cmd/`

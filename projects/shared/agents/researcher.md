@@ -11,16 +11,16 @@ You are a research specialist. You do NOT write or modify code.
 ## Protocol
 
 1. Load domain knowledge:
-   - `sigil_skills(action="list", phase="discover", project=<project>)`
-   - `sigil_skills(action="get", name=<relevant skill>)`
-   - `sigil_recall(project=<project>, query=<task subject>)`
-2. Read task context: `sigil_blackboard(action="read", project, prefix="task:<id>")`
+   - `aeqi_skills(action="list", phase="discover", project=<project>)`
+   - `aeqi_skills(action="get", name=<relevant skill>)`
+   - `aeqi_recall(project=<project>, query=<task subject>)`
+2. Read task context: `aeqi_blackboard(action="read", project, prefix="task:<id>")`
 3. Use the code graph to understand structure:
-   - `sigil_graph(action="search", project, query=<key terms>)`
-   - `sigil_graph(action="context", project, node_id=<symbol>)` — callers, callees, implementors
-   - `sigil_graph(action="impact", project, node_id=<symbol>)` — what depends on this
+   - `aeqi_graph(action="search", project, query=<key terms>)`
+   - `aeqi_graph(action="context", project, node_id=<symbol>)` — callers, callees, implementors
+   - `aeqi_graph(action="impact", project, node_id=<symbol>)` — what depends on this
 4. Research the codebase using Read, Grep, Glob to fill gaps
-5. Post findings: `sigil_blackboard(action="post", project, key="task:<id>:research", content=<findings>)`
+5. Post findings: `aeqi_blackboard(action="post", project, key="task:<id>:research", content=<findings>)`
 6. Return a short summary to the orchestrator
 
 ## Findings Format

@@ -1,11 +1,11 @@
 # Competitive Analysis: OpenClaw and Gas Town
 
-This document compares Sigil against the latest local copies of:
+This document compares AEQI against the latest local copies of:
 
 - `openclaw@ef9597541`
 - `gastown@8da798be`
 
-The goal is not to copy either system wholesale. The goal is to identify what they already prove out in practice, where Sigil is weaker today, and where Sigil can win by staying simpler and more coherent.
+The goal is not to copy either system wholesale. The goal is to identify what they already prove out in practice, where AEQI is weaker today, and where AEQI can win by staying simpler and more coherent.
 
 ## What OpenClaw Is Really Good At
 
@@ -20,18 +20,18 @@ From the current codebase:
 - It has a large plugin SDK and channel/plugin abstraction surface in `src/plugin-sdk/index.ts` plus `extensions/*`.
 - It already treats context engines as a pluggable slot in `src/context-engine/`.
 
-### Lessons for Sigil
+### Lessons for AEQI
 
 OpenClaw's advantage is not "better orchestration theory". Its advantage is operator trust.
 
-What Sigil should learn:
+What AEQI should learn:
 
 1. Setup and repair are product features, not side chores.
 2. Health, readiness, and service state must be first-class, not implicit.
 3. Extensibility needs a supported contract, not just internal traits.
 4. Security posture needs explicit user-facing language and guardrails.
 
-### Specific Gaps Sigil Has Relative to OpenClaw
+### Specific Gaps AEQI Has Relative to OpenClaw
 
 - No guided setup or bootstrap wizard
 - No service install/manage flow for the daemon
@@ -42,7 +42,7 @@ What Sigil should learn:
 
 ## What Gas Town Is Really Good At
 
-Gas Town is much closer to Sigil's target shape than OpenClaw is.
+Gas Town is much closer to AEQI's target shape than OpenClaw is.
 
 From the current codebase and docs:
 
@@ -54,11 +54,11 @@ From the current codebase and docs:
 - Its daemon is explicitly recovery-focused in `internal/daemon/daemon.go`.
 - It treats work tracking as the core substrate rather than an add-on.
 
-### Lessons for Sigil
+### Lessons for AEQI
 
 Gas Town's advantage is durable operational state.
 
-What Sigil should learn:
+What AEQI should learn:
 
 1. Sessions should be cheap; identity and work state should survive them.
 2. Every worker needs a strong, resumable handoff path.
@@ -66,7 +66,7 @@ What Sigil should learn:
 4. Workflow templates should become more declarative and stateful.
 5. Recovery loops are a core subsystem, not just timeout handling.
 
-### Specific Gaps Sigil Has Relative to Gas Town
+### Specific Gaps AEQI Has Relative to Gas Town
 
 - No `prime`-style reconstruction step that unifies task, mail, checkpoint, and project state into a single restart contract
 - No worker preset registry for multiple runtimes beyond the current OpenRouter internal loop and Claude Code path
@@ -75,9 +75,9 @@ What Sigil should learn:
 - No equivalent to hooks as a universal, persistent inbox abstraction
 - No reputation or federation model
 
-## Where Sigil Already Has an Advantage
+## Where AEQI Already Has an Advantage
 
-Sigil should not become OpenClaw or Gas Town.
+AEQI should not become OpenClaw or Gas Town.
 
 It already has strong structural advantages:
 
@@ -88,19 +88,19 @@ It already has strong structural advantages:
 - A cleaner split between agent identity and project context
 - A thinner, more inspectable internal agent loop
 
-Sigil can win if it keeps those strengths while closing the most painful product gaps.
+AEQI can win if it keeps those strengths while closing the most painful product gaps.
 
-## Recommended Sigil Roadmap
+## Recommended AEQI Roadmap
 
 ### Priority 0: Operator Trust
 
 Build the things that make the system feel safe and usable every day.
 
-1. Add `sigil setup` as a guided bootstrap command.
+1. Add `aeqi setup` as a guided bootstrap command.
 2. Add daemon service install/manage commands for launchd/systemd.
 3. Promote readiness and health to a first-class interface:
-   - `sigil daemon query readiness`
-   - `sigil doctor --strict`
+   - `aeqi daemon query readiness`
+   - `aeqi doctor --strict`
    - hard checks for config, secrets, provider availability, Claude Code availability, project reachability
 4. Add a risk model to config and docs:
    - local trusted mode
@@ -147,7 +147,7 @@ Borrow OpenClaw's plugin discipline without dragging in its product surface.
    - memory backend
    - channel/gate
    - context assembler
-2. Add a versioned Sigil extension manifest.
+2. Add a versioned AEQI extension manifest.
 3. Turn `projects/shared/skills` and `projects/shared/pipelines` into the start of a broader reusable asset system.
 
 ### Priority 2: Better Control Plane UX
@@ -165,7 +165,7 @@ Borrow OpenClaw's plugin discipline without dragging in its product surface.
    - `readiness`
    - `blackboard`
    - `audit`
-3. Make `sigil status` and `sigil doctor` far more opinionated.
+3. Make `aeqi status` and `aeqi doctor` far more opinionated.
 
 ### Priority 2: Security and Policy
 
@@ -178,7 +178,7 @@ Borrow OpenClaw's plugin discipline without dragging in its product surface.
 
 ### Priority 3: Advanced Coordination
 
-This is where Sigil can evolve past its current state once the basics are solid.
+This is where AEQI can evolve past its current state once the basics are solid.
 
 1. Expand pipelines into formula-like long-running workflows with wait gates.
 2. Add richer convoy-style cross-project operations.
@@ -187,12 +187,12 @@ This is where Sigil can evolve past its current state once the basics are solid.
 
 ## Concrete Next Steps
 
-If the goal is to make Sigil materially better fast, the next three implementation passes should be:
+If the goal is to make AEQI materially better fast, the next three implementation passes should be:
 
 1. `setup + doctor + daemon install`
    - Make first-run and recovery obvious.
 2. runtime preset registry
-   - Make Sigil capable of orchestrating more than one execution backend cleanly.
+   - Make AEQI capable of orchestrating more than one execution backend cleanly.
 3. worker priming and resumability
    - Make crashes and handoffs feel routine instead of lossy.
 
@@ -208,7 +208,7 @@ OpenClaw proves that product polish, onboarding, diagnostics, and extensibility 
 
 Gas Town proves that durable roles, resumable work state, and persistent coordination primitives make multi-agent systems actually survive contact with reality.
 
-Sigil should take:
+AEQI should take:
 
 - OpenClaw's operator UX discipline
 - Gas Town's durability discipline

@@ -6,7 +6,7 @@ phase: implement
 
 # Rust Expertise — Shared Knowledge Base
 
-Domain knowledge for all Rust projects. Retrieved via `sigil_skills(action="get", name="rust-expertise")`.
+Domain knowledge for all Rust projects. Retrieved via `aeqi_skills(action="get", name="rust-expertise")`.
 
 ## Safety
 

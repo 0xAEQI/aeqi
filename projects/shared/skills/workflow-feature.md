@@ -19,8 +19,8 @@ Brainstorm → Plan → Implement → Review → Finish
 
 **Before ANY implementation.** Understand what you're building.
 
-1. **Recall context** — `sigil_recall` for prior decisions about this area
-2. **Explore codebase** — read relevant files, `sigil_graph` search/context for related symbols and impact
+1. **Recall context** — `aeqi_recall` for prior decisions about this area
+2. **Explore codebase** — read relevant files, `aeqi_graph` search/context for related symbols and impact
 3. **Ask clarifying questions** — ONE at a time, prefer concrete options over open-ended questions
 4. **Propose approach** — 2-3 options with trade-offs and your recommendation
 5. **Get approval** — do NOT proceed without explicit user agreement
@@ -29,7 +29,7 @@ Brainstorm → Plan → Implement → Review → Finish
 No implementation until the approach is approved. Not "probably fine." Not "seems reasonable." Explicitly approved.
 </HARD-GATE>
 
-**Terminal state:** Post approved approach to `sigil_blackboard`, proceed to Plan.
+**Terminal state:** Post approved approach to `aeqi_blackboard`, proceed to Plan.
 
 ---
 
@@ -37,13 +37,13 @@ No implementation until the approach is approved. Not "probably fine." Not "seem
 
 Break the approved approach into bite-sized tasks.
 
-1. **Create parent task** — `sigil_create_task` with the feature description
-2. **Map file structure** — `sigil_graph` context/impact to understand what files need changing and their relationships
+1. **Create parent task** — `aeqi_create_task` with the feature description
+2. **Map file structure** — `aeqi_graph` context/impact to understand what files need changing and their relationships
 3. **Decompose into tasks** — each task is ONE action (2-5 minutes of work). Include:
    - Exact file paths
    - What to change and why
    - Expected test command and output
-4. **Post plan to blackboard** — `sigil_blackboard` post with key `task:{id}:plan`
+4. **Post plan to blackboard** — `aeqi_blackboard` post with key `task:{id}:plan`
 
 ### Plan Quality Checklist
 - [ ] Every task has exact file paths (no "the relevant files")
@@ -61,7 +61,7 @@ Execute the plan task by task.
 
 ### Per-Task Workflow
 
-1. **Delegate to implementer** — `sigil_delegate` with the implementer agent, spawn subagent with FULL task context pasted inline (never file references)
+1. **Delegate to implementer** — `aeqi_delegate` with the implementer agent, spawn subagent with FULL task context pasted inline (never file references)
 
 2. **Handle implementer status:**
    - **DONE** → proceed to review
@@ -88,8 +88,8 @@ If 3 fix attempts for the same issue fail: **STOP.** Don't attempt fix #4. Quest
 
 Full-scope review of the entire implementation.
 
-1. **Delegate final review** — `sigil_delegate` with the reviewer agent, checks ALL changes against the original plan
-2. **Read findings** — `sigil_blackboard` query for the reviewer's posted findings
+1. **Delegate final review** — `aeqi_delegate` with the reviewer agent, checks ALL changes against the original plan
+2. **Read findings** — `aeqi_blackboard` query for the reviewer's posted findings
 3. **Handle review result:**
    - **Approved** → proceed to Finish
    - **Issues found** → fix issues, re-review (but respect the 3-fix rule)
@@ -114,8 +114,8 @@ If you're thinking "it should work" or "tests probably pass" — you haven't ver
 ## Phase 5: Finish
 
 1. **Commit** with a clear message describing what and why
-2. **Store learnings** — `sigil_remember` anything non-obvious discovered during implementation
-3. **Close task** — `sigil_close_task`
+2. **Store learnings** — `aeqi_remember` anything non-obvious discovered during implementation
+3. **Close task** — `aeqi_close_task`
 4. **Consider skill creation** — was this workflow complex enough to codify as a reusable skill?
 
 ---

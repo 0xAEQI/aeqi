@@ -1,12 +1,12 @@
 # UI Design
 
-This document defines the target shape of the Sigil UI as an operator product.
+This document defines the target shape of the AEQI UI as an operator product.
 
 It is grounded in the current frontend under `apps/ui`, which already exposes chat, dashboard, projects, agents, tasks, missions, knowledge, audit, cost, and settings.
 
 ## Product Goal
 
-The Sigil UI should become the most usable surface for operating AI-mediated work.
+The AEQI UI should become the most usable surface for operating AI-mediated work.
 
 It should not feel like:
 
@@ -20,7 +20,7 @@ It should feel like a control plane where a human can move fluidly between thoug
 
 The current UI has meaningful coverage:
 
-- chat is the root route in [App.tsx](/home/claudedev/sigil/apps/ui/src/App.tsx)
+- chat is the root route in [App.tsx](/home/claudedev/aeqi/apps/ui/src/App.tsx)
 - there are pages for projects, agents, tasks, missions, audit, knowledge, cost, and settings
 - the dashboard already surfaces brief, budget, tasks, projects, and audit activity
 
@@ -76,7 +76,7 @@ The UI should keep live context visible while the operator is reading or typing.
 
 ### 4. Notes and work must connect directly
 
-Sigil should eventually treat notes as durable directives. The UI must reflect that.
+AEQI should eventually treat notes as durable directives. The UI must reflect that.
 
 The flow should be:
 
@@ -195,7 +195,7 @@ Several current areas should become tighter or merge:
 
 ### 3. Remove vendor residue
 
-The product should speak in Sigil terms.
+The product should speak in AEQI terms.
 
 Examples:
 
@@ -208,7 +208,7 @@ Notes should become a top-level operator object, not just a backend capability.
 
 ### 5. Add org and mission clarity
 
-Sigil's differentiator is not a prettier task list. It is organization-aware execution. The UI must show that.
+AEQI's differentiator is not a prettier task list. It is organization-aware execution. The UI must show that.
 
 ## Runtime-Aware UI
 
@@ -224,7 +224,7 @@ That means it should eventually display:
 - cost and budget pressure
 - handoff or resume state
 
-The operator should be able to answer "what is Sigil doing right now?" without reading logs.
+The operator should be able to answer "what is AEQI doing right now?" without reading logs.
 
 ## Visual Direction
 

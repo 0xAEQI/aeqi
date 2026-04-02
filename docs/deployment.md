@@ -1,11 +1,11 @@
 # Deployment
 
-Sigil is best deployed as one product with a thin edge proxy.
+AEQI is best deployed as one product with a thin edge proxy.
 
 ## Recommended Topology
 
-- `sigil` daemon handles orchestration, workers, background logic, and persistence
-- `sigil-web` handles the HTTP API and can also serve the compiled UI
+- `aeqi` daemon handles orchestration, workers, background logic, and persistence
+- `aeqi-web` handles the HTTP API and can also serve the compiled UI
 - `nginx` or `caddy` sits in front only for TLS termination, host routing, and standard reverse-proxy concerns
 
 ## Why This Model
@@ -18,8 +18,8 @@ Sigil is best deployed as one product with a thin edge proxy.
 
 Use separate processes:
 
-- `sigil` daemon
-- `sigil-web`
+- `aeqi` daemon
+- `aeqi-web`
 - `apps/ui` Vite server
 
 That gives you fast frontend iteration without changing the production shape.
@@ -28,14 +28,14 @@ That gives you fast frontend iteration without changing the production shape.
 
 1. Build the UI with `npm run ui:build`
 2. Point `[web].ui_dist_dir` at `../apps/ui/dist` or an absolute path
-3. Run `sigil web start`
+3. Run `aeqi web start`
 4. Put `nginx` or `caddy` in front of it
 
 ## systemd
 
 The intended service model is:
 
-- `sigil.service` for the daemon
-- `sigil-web.service` for the API and UI surface
+- `aeqi.service` for the daemon
+- `aeqi-web.service` for the API and UI surface
 
-The reverse proxy should treat `sigil-web` as the single upstream for both `/api` and browser routes.
+The reverse proxy should treat `aeqi-web` as the single upstream for both `/api` and browser routes.

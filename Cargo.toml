@@ -1,26 +1,26 @@
 [workspace]
 resolver = "2"
 members = [
-    "sigil-cli",
-    "crates/sigil-core",
-    "crates/sigil-tasks",
-    "crates/sigil-providers",
-    "crates/sigil-tools",
-    "crates/sigil-orchestrator",
-    "crates/sigil-memory",
-    "crates/sigil-gates",
-    "crates/sigil-web",
-    "crates/sigil-graph",
+    "aeqi-cli",
+    "crates/aeqi-core",
+    "crates/aeqi-tasks",
+    "crates/aeqi-providers",
+    "crates/aeqi-tools",
+    "crates/aeqi-orchestrator",
+    "crates/aeqi-memory",
+    "crates/aeqi-gates",
+    "crates/aeqi-web",
+    "crates/aeqi-graph",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-authors = ["Sigil Contributors"]
+authors = ["AEQI Contributors"]
 description = "Agent runtime, multi-agent harness, orchestration engine, and web control plane"
-repository = "https://github.com/0xAEQI/sigil"
-homepage = "https://github.com/0xAEQI/sigil"
+repository = "https://github.com/0xAEQI/aeqi"
+homepage = "https://github.com/0xAEQI/aeqi"
 categories = ["development-tools", "command-line-utilities"]
 keywords = ["agents", "runtime", "orchestration", "automation", "control-plane"]
 
@@ -91,15 +91,15 @@ similar = "2"
 tempfile = "3"
 
 # Internal crates
-sigil-tasks = { path = "crates/sigil-tasks" }
-sigil-core = { path = "crates/sigil-core" }
-sigil-providers = { path = "crates/sigil-providers" }
-sigil-tools = { path = "crates/sigil-tools" }
-sigil-orchestrator = { path = "crates/sigil-orchestrator" }
-sigil-memory = { path = "crates/sigil-memory" }
-sigil-gates = { path = "crates/sigil-gates" }
-sigil-web = { path = "crates/sigil-web" }
-sigil-graph = { path = "crates/sigil-graph" }
+aeqi-tasks = { path = "crates/aeqi-tasks" }
+aeqi-core = { path = "crates/aeqi-core" }
+aeqi-providers = { path = "crates/aeqi-providers" }
+aeqi-tools = { path = "crates/aeqi-tools" }
+aeqi-orchestrator = { path = "crates/aeqi-orchestrator" }
+aeqi-memory = { path = "crates/aeqi-memory" }
+aeqi-gates = { path = "crates/aeqi-gates" }
+aeqi-web = { path = "crates/aeqi-web" }
+aeqi-graph = { path = "crates/aeqi-graph" }
 
 
 [profile.release]

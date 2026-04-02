@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SessionStart hook: injects Sigil primers into Claude Code context.
+# SessionStart hook: injects AEQI primers into Claude Code context.
 #
 # Event behavior:
 #   startup  — daemon health + full primer + reverse channel
@@ -10,17 +10,17 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/hook-log.sh"
 source "$SCRIPT_DIR/detect-project.sh"
 
-export SIGIL_CONFIG
-SIGIL_BIN="/home/claudedev/sigil/target/release/sigil"
-[ -x "$SIGIL_BIN" ] || SIGIL_BIN="/home/claudedev/sigil/target/debug/sigil"
-if [ ! -x "$SIGIL_BIN" ]; then
-    echo "# Sigil Primer: UNAVAILABLE (binary not found)" >&2
+export AEQI_CONFIG
+AEQI_BIN="/home/claudedev/aeqi/target/release/aeqi"
+[ -x "$AEQI_BIN" ] || AEQI_BIN="/home/claudedev/aeqi/target/debug/aeqi"
+if [ ! -x "$AEQI_BIN" ]; then
+    echo "# AEQI Primer: UNAVAILABLE (binary not found)" >&2
     exit 0
 fi
 
-SIGIL_DIR="$(dirname "$SCRIPT_DIR")"
+AEQI_DIR="$(dirname "$SCRIPT_DIR")"
 EVENT="${1:-startup}"
-SOCK="${SIGIL_DATA_DIR:-$HOME/.sigil}/rm.sock"
+SOCK="${AEQI_DATA_DIR:-$HOME/.aeqi}/rm.sock"
 
 # --- Detect project from $PWD ---
 PROJECT=$(detect_project)
@@ -28,13 +28,13 @@ PROJECT=$(detect_project)
 # --- Daemon health check ---
 emit_health() {
     if [ ! -S "$SOCK" ]; then
-        echo "# Sigil: daemon OFFLINE (socket missing)"
+        echo "# AEQI: daemon OFFLINE (socket missing)"
         return
     fi
     local resp
     resp=$(printf '{"cmd":"ping"}' | socat -t2 - UNIX-CONNECT:"$SOCK" 2>/dev/null) || true
     if [ -z "$resp" ]; then
-        echo "# Sigil: daemon OFFLINE (no response)"
+        echo "# AEQI: daemon OFFLINE (no response)"
         return
     fi
     # Get memory count and active claims for context
@@ -44,16 +44,16 @@ emit_health() {
         local uptime workers
         uptime=$(printf '%s' "$status_resp" | jq -r '.uptime // empty' 2>/dev/null)
         workers=$(printf '%s' "$status_resp" | jq -r '.active_workers // 0' 2>/dev/null)
-        echo "# Sigil: daemon UP | uptime: ${uptime:-?} | workers: ${workers:-0}"
+        echo "# AEQI: daemon UP | uptime: ${uptime:-?} | workers: ${workers:-0}"
     else
-        echo "# Sigil: daemon UP"
+        echo "# AEQI: daemon UP"
     fi
 }
 
 # --- Reverse blackboard channel: surface signals from previous sessions ---
 emit_reverse_channel() {
     [ -S "$SOCK" ] || return 0
-    local proj="${1:-sigil}"
+    local proj="${1:-aeqi}"
     # Query for recent nudges and findings
     local bb_resp
     bb_resp=$(printf '{"cmd":"blackboard","project":"%s","limit":10}' "$proj" | socat -t2 - UNIX-CONNECT:"$SOCK" 2>/dev/null) || true
@@ -78,12 +78,12 @@ emit_reverse_channel() {
 
 # --- Graph staleness check + auto-index ---
 emit_graph_status() {
-    local proj="${1:-sigil}"
-    local graph_dir="${SIGIL_DATA_DIR:-$HOME/.sigil}/codegraph"
+    local proj="${1:-aeqi}"
+    local graph_dir="${AEQI_DATA_DIR:-$HOME/.aeqi}/codegraph"
     local db_path="$graph_dir/${proj}.db"
 
     if [ ! -f "$db_path" ]; then
-        echo "# Graph: not indexed. Run sigil_graph(action='index', project='$proj') to build."
+        echo "# Graph: not indexed. Run aeqi_graph(action='index', project='$proj') to build."
         return
     fi
 
@@ -95,7 +95,7 @@ emit_graph_status() {
         in_proj && /^name[[:space:]]*=/ { val=$0; sub(/^[^=]*=[[:space:]]*"?/,"",val); sub(/".*/, "",val); if(!name) name=val }
         in_proj && /^repo[[:space:]]*=/ { val=$0; sub(/^[^=]*=[[:space:]]*"?/,"",val); sub(/".*/, "",val); repo=val }
         END { if (in_proj && name==proj) { gsub(/^~/,home,repo); print repo } }
-    ' "$SIGIL_CONFIG" 2>/dev/null)
+    ' "$AEQI_CONFIG" 2>/dev/null)
 
     local node_count edge_count
     node_count=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM code_nodes" 2>/dev/null || echo "0")
@@ -109,11 +109,11 @@ emit_graph_status() {
 
         if [ -n "$head_commit" ] && [ "$head_commit" != "$indexed_commit" ]; then
             # Auto-index if stale and binary available
-            if [ -x "$SIGIL_BIN" ]; then
+            if [ -x "$AEQI_BIN" ]; then
                 local INIT_CALL='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"hook","version":"0.2"}}}'
-                local INDEX_CALL="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"sigil_graph\",\"arguments\":{\"action\":\"incremental\",\"project\":\"$proj\"}}}"
+                local INDEX_CALL="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"aeqi_graph\",\"arguments\":{\"action\":\"incremental\",\"project\":\"$proj\"}}}"
                 local idx_resp
-                idx_resp=$(cd "$SIGIL_DIR" && printf '%s\n%s\n' "$INIT_CALL" "$INDEX_CALL" | "$SIGIL_BIN" mcp 2>/dev/null | tail -1) || true
+                idx_resp=$(cd "$AEQI_DIR" && printf '%s\n%s\n' "$INIT_CALL" "$INDEX_CALL" | "$AEQI_BIN" mcp 2>/dev/null | tail -1) || true
                 if [ -n "$idx_resp" ]; then
                     local new_nodes new_edges
                     new_nodes=$(printf '%s' "$idx_resp" | jq -r '.result.content[0].text' 2>/dev/null | jq -r '.nodes // 0' 2>/dev/null) || true
@@ -123,7 +123,7 @@ emit_graph_status() {
                     return
                 fi
             fi
-            echo "# Graph: STALE (indexed at ${indexed_commit:-?}, HEAD is ${head_commit}). Run sigil_graph(action='index', project='$proj')."
+            echo "# Graph: STALE (indexed at ${indexed_commit:-?}, HEAD is ${head_commit}). Run aeqi_graph(action='index', project='$proj')."
         else
             echo "# Graph: ${node_count:-?} nodes, ${edge_count:-?} edges (current)"
         fi
@@ -136,15 +136,15 @@ emit_graph_status() {
 # Clear the recall gate — model must recall again to get domain knowledge back.
 # Always inject the FULL primer (no short version — compaction means context is gone).
 if [ "$EVENT" = "compact" ]; then
-    rm -f "$SIGIL_SESSION_DIR/recall.gate" 2>/dev/null || true
+    rm -f "$AEQI_SESSION_DIR/recall.gate" 2>/dev/null || true
     log_hook "session-primer" "compact" "recall gate cleared — model must re-recall"
 
     # Surface previously loaded skills so the model knows to reload them
-    SKILLS_FILE="$SIGIL_SESSION_DIR/skills.loaded"
+    SKILLS_FILE="$AEQI_SESSION_DIR/skills.loaded"
     if [ -f "$SKILLS_FILE" ] && [ -s "$SKILLS_FILE" ]; then
         LOST_SKILLS=$(tr '\n' ', ' < "$SKILLS_FILE" | sed 's/, $//')
         echo "# Context compacted. Previously loaded skills: $LOST_SKILLS"
-        echo "# Re-load with: sigil_skills(action='get', name='<skill>')"
+        echo "# Re-load with: aeqi_skills(action='get', name='<skill>')"
         echo ""
     fi
 
@@ -155,21 +155,21 @@ fi
 
 # Emit health + graph status
 emit_health
-emit_graph_status "${PROJECT:-sigil}"
+emit_graph_status "${PROJECT:-aeqi}"
 
 # Build MCP calls
 INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"hook","version":"0.2"}}}'
-SHARED_CALL='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sigil_primer","arguments":{"project":"shared"}}}'
+SHARED_CALL='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"aeqi_primer","arguments":{"project":"shared"}}}'
 
-AGENTS_CALL='{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"sigil_agents","arguments":{"action":"list"}}}'
+AGENTS_CALL='{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"aeqi_agents","arguments":{"action":"list"}}}'
 
 if [ -n "$PROJECT" ] && [ "$PROJECT" != "shared" ]; then
-    PROJECT_CALL="{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"sigil_primer\",\"arguments\":{\"project\":\"$PROJECT\"}}}"
-    SKILLS_CALL='{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"sigil_skills","arguments":{"action":"list"}}}'
-    RESPONSES=$(cd "$SIGIL_DIR" && printf '%s\n%s\n%s\n%s\n%s\n' "$INIT" "$SHARED_CALL" "$PROJECT_CALL" "$SKILLS_CALL" "$AGENTS_CALL" | "$SIGIL_BIN" mcp 2>/dev/null) || true
+    PROJECT_CALL="{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"aeqi_primer\",\"arguments\":{\"project\":\"$PROJECT\"}}}"
+    SKILLS_CALL='{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"aeqi_skills","arguments":{"action":"list"}}}'
+    RESPONSES=$(cd "$AEQI_DIR" && printf '%s\n%s\n%s\n%s\n%s\n' "$INIT" "$SHARED_CALL" "$PROJECT_CALL" "$SKILLS_CALL" "$AGENTS_CALL" | "$AEQI_BIN" mcp 2>/dev/null) || true
 else
-    PROJECTS_CALL='{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"sigil_projects","arguments":{}}}'
-    RESPONSES=$(cd "$SIGIL_DIR" && printf '%s\n%s\n%s\n%s\n' "$INIT" "$SHARED_CALL" "$PROJECTS_CALL" "$AGENTS_CALL" | "$SIGIL_BIN" mcp 2>/dev/null) || true
+    PROJECTS_CALL='{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"aeqi_projects","arguments":{}}}'
+    RESPONSES=$(cd "$AEQI_DIR" && printf '%s\n%s\n%s\n%s\n' "$INIT" "$SHARED_CALL" "$PROJECTS_CALL" "$AGENTS_CALL" | "$AEQI_BIN" mcp 2>/dev/null) || true
 fi
 
 # Parse responses and emit formatted primer (jq — zero python dependency)
@@ -183,7 +183,7 @@ SHARED_RAW=$(_mcp_inner 2)
 if [ -n "$SHARED_RAW" ]; then
     SHARED_BODY=$(printf '%s' "$SHARED_RAW" | jq -r '.content // empty' 2>/dev/null)
     if [ -n "$SHARED_BODY" ]; then
-        printf '# Shared Workflow Primer (from Sigil)\n%s\n\n' "$SHARED_BODY"
+        printf '# Shared Workflow Primer (from AEQI)\n%s\n\n' "$SHARED_BODY"
     fi
 fi
 
@@ -194,7 +194,7 @@ if [ -n "$PROJECT_RAW" ]; then
     if [ -n "$PROJECT_BODY" ]; then
         PROJECT_BODY=$(printf '%s' "$PROJECT_BODY" | awk '/^---$/{exit} {print}')
         if [ -n "$PROJECT_BODY" ]; then
-            printf '# Project Primer: %s (from Sigil)\n%s\n\n' "$PROJECT" "$PROJECT_BODY"
+            printf '# Project Primer: %s (from AEQI)\n%s\n\n' "$PROJECT" "$PROJECT_BODY"
         fi
     fi
 fi
@@ -202,9 +202,9 @@ fi
 # Quick Reference (always)
 cat <<'QREF'
 ## Quick Reference — MCP Tool Names
-  mcp__sigil__sigil_recall, mcp__sigil__sigil_remember, mcp__sigil__sigil_primer
-  mcp__sigil__sigil_skills, mcp__sigil__sigil_agents, mcp__sigil__sigil_blackboard
-  mcp__sigil__sigil_create_task, mcp__sigil__sigil_close_task, mcp__sigil__sigil_status
+  mcp__aeqi__aeqi_recall, mcp__aeqi__aeqi_remember, mcp__aeqi__aeqi_primer
+  mcp__aeqi__aeqi_skills, mcp__aeqi__aeqi_agents, mcp__aeqi__aeqi_blackboard
+  mcp__aeqi__aeqi_create_task, mcp__aeqi__aeqi_close_task, mcp__aeqi__aeqi_status
 QREF
 
 # Skills list (id=4) — workflow skills first, then by phase
@@ -257,7 +257,7 @@ if [ -n "$AGENTS_RAW" ]; then
         .[] | "  \(.phase): \(.name) (\(.model))"
     ' 2>/dev/null)
     if [ -n "$AGENTS_FMT" ]; then
-        printf '\n## Agents (use sigil_agents to load templates)\n%s\n' "$AGENTS_FMT"
+        printf '\n## Agents (use aeqi_agents to load templates)\n%s\n' "$AGENTS_FMT"
     fi
 fi
 
@@ -267,7 +267,7 @@ if [ -z "$PROJECT" ] || [ "$PROJECT" = "shared" ]; then
     if [ -n "$PROJECTS_RAW" ]; then
         PROJECTS_FMT=$(printf '%s' "$PROJECTS_RAW" | jq -r '
             {
-                "sigil": "agent runtime + orchestration (Rust, 9 crates)",
+                "aeqi": "agent runtime + orchestration (Rust, 9 crates)",
                 "algostaking": "lunar-epoch market making (Rust, 15 services)",
                 "riftdecks-shop": "card e-commerce (Next.js)",
                 "entity-legal": "legal entity platform (Next.js)",
@@ -284,6 +284,6 @@ if [ -z "$PROJECT" ] || [ "$PROJECT" = "shared" ]; then
 fi
 
 # Reverse blackboard channel — surface signals from prior sessions
-emit_reverse_channel "${PROJECT:-sigil}"
+emit_reverse_channel "${PROJECT:-aeqi}"
 
 log_hook "session-primer" "injected" "event=$EVENT project=${PROJECT:-root}"

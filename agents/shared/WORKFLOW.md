@@ -73,7 +73,7 @@ Task triage is the orchestrator's job. If tasks have dependencies, sequence them
 
 ## Sub-Agent Orchestration
 
-Workers should use Sigil's delegation and tooling surfaces aggressively when available. Each worker IS an orchestrator.
+Workers should use AEQI's delegation and tooling surfaces aggressively when available. Each worker IS an orchestrator.
 
 ### Adaptive Pipeline
 

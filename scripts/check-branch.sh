@@ -11,11 +11,11 @@ PROTECTED_BRANCHES="main master dev develop"
 
 # Paths exempt from branch protection (operational tooling, edited in-place)
 EXEMPT_PATTERNS=(
-    "*/sigil/scripts/*"
-    "*/sigil/config/*"
-    "*/sigil/agents/*"
-    "*/sigil/projects/*/skills/*"
-    "*/sigil/projects/*/SIGIL.md"
+    "*/aeqi/scripts/*"
+    "*/aeqi/config/*"
+    "*/aeqi/agents/*"
+    "*/aeqi/projects/*/skills/*"
+    "*/aeqi/projects/*/AEQI.md"
     "*/.claude/*"
     "*/CLAUDE.md"
 )

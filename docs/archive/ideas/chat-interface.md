@@ -1,12 +1,12 @@
-# Sigil Chat Design
+# AEQI Chat Design
 
-This document defines the first serious `sigil chat` interface.
+This document defines the first serious `aeqi chat` interface.
 
-It is a design target, not a claim that the full surface exists today. The goal is to turn Sigil from a command set plus daemon into a daily-driver terminal shell for operating an AI organization.
+It is a design target, not a claim that the full surface exists today. The goal is to turn AEQI from a command set plus daemon into a daily-driver terminal shell for operating an AI organization.
 
 ## Product Goal
 
-`sigil chat` should not be "Sigil, but with a prettier prompt box."
+`aeqi chat` should not be "AEQI, but with a prettier prompt box."
 
 It should be the operator cockpit for:
 
@@ -19,7 +19,7 @@ It should be the operator cockpit for:
 The target is better operator leverage than a generic coding chat:
 
 - Claude Code and Codex are strong at a single foreground session
-- Sigil should be strong at persistent, multi-role, inspectable operations
+- AEQI should be strong at persistent, multi-role, inspectable operations
 
 ## Design Principles
 
@@ -58,7 +58,7 @@ Persistent status strip with:
 Example:
 
 ```text
-Sigil | online | ready | workspace: sigil | cost: $4.18 / $25.00 | alerts: 3
+AEQI | online | ready | workspace: aeqi | cost: $4.18 / $25.00 | alerts: 3
 ```
 
 ### Left Pane: Inbox
@@ -77,7 +77,7 @@ Sections:
 Thread types:
 
 - direct role thread: `@leader`, `@cto`, `@researcher`
-- project room: `#sigil`, `#gacha-agency`
+- project room: `#aeqi`, `#gacha-agency`
 - council room: `&product`, `&incident-review`
 - mission or incident thread: `!sg-m004`, `!incident-2026-03-16`
 
@@ -93,7 +93,7 @@ Examples:
 ```text
 @leader            waiting on approval
 @reviewer          delivered diff summary
-#sigil             2 critical tasks ready
+#aeqi             2 critical tasks ready
 &product           converged
 !sg-m004           blocked on repo access
 ```
@@ -118,7 +118,7 @@ This pane should support:
 - paging older history
 - retry or resend of failed messages
 
-Sigil should treat messages and control-plane events as part of the same thread timeline rather than hiding orchestration in a separate log.
+AEQI should treat messages and control-plane events as part of the same thread timeline rather than hiding orchestration in a separate log.
 
 ### Right Pane: Context
 
@@ -169,7 +169,7 @@ to @leader > review the current monitor alerts and tell me what needs operator a
 
 ## Primary Views
 
-`sigil chat` should support a small set of explicit views instead of many disconnected modes.
+`aeqi chat` should support a small set of explicit views instead of many disconnected modes.
 
 ### Inbox View
 
@@ -192,7 +192,7 @@ Purpose:
 
 ### Monitor View
 
-A richer version of `sigil monitor`.
+A richer version of `aeqi monitor`.
 
 Purpose:
 
@@ -220,7 +220,7 @@ Purpose:
 
 ## Command Model
 
-`sigil chat` should support both slash commands and keyboard shortcuts.
+`aeqi chat` should support both slash commands and keyboard shortcuts.
 
 ### Core Slash Commands
 
@@ -315,7 +315,7 @@ Use for:
 
 Examples:
 
-- `#sigil`
+- `#aeqi`
 - `#gacha-agency`
 
 Use for:
@@ -364,7 +364,7 @@ The center timeline should support these event kinds:
 - `watchdog`
 - `system_alert`
 
-That distinction matters because Sigil's advantage is not chat fluency. It is operational context.
+That distinction matters because AEQI's advantage is not chat fluency. It is operational context.
 
 ## Proactive Feed
 
@@ -384,15 +384,15 @@ Each alert should include a recommended action and a jump target.
 Examples:
 
 - `Dispatch backlog: 3 dead letters -> open Dispatch View`
-- `Budget pressure in #sigil -> open project room`
+- `Budget pressure in #aeqi -> open project room`
 - `@leader awaiting approval for sg-014 -> open thread`
 
 ## What Already Exists and Should Be Reused
 
-Sigil already has backend pieces that `sigil chat` should reuse instead of replacing:
+AEQI already has backend pieces that `aeqi chat` should reuse instead of replacing:
 
 - daemon IPC with `status`, `readiness`, `projects`, `dispatches`, `metrics`, and `cost`
-- `sigil monitor` aggregation logic
+- `aeqi monitor` aggregation logic
 - SQLite-backed `ConversationStore`
 - channel metadata via `ConversationStore::list_channels`
 - persistent audit log
@@ -405,7 +405,7 @@ This is enough to build a useful first version without inventing a separate back
 
 ## Backend Gaps To Close
 
-`sigil chat` still needs dedicated daemon surfaces.
+`aeqi chat` still needs dedicated daemon surfaces.
 
 ### Required for Phase 1
 
@@ -450,7 +450,7 @@ Ship:
 - role and project switching
 - slash commands for monitor, tasks, dispatches, blackboard, audit, cost
 
-This version should already replace `sigil monitor --watch` plus a pile of ad hoc daemon queries.
+This version should already replace `aeqi monitor --watch` plus a pile of ad hoc daemon queries.
 
 ### Phase 2: True Operator Console
 
@@ -462,7 +462,7 @@ Ship:
 - richer task and mission controls
 - better thread event rendering
 
-### Phase 3: Sigil-Native Advantage
+### Phase 3: AEQI-Native Advantage
 
 Ship:
 
@@ -471,7 +471,7 @@ Ship:
 - operator interventions inline
 - proactive summaries tied to org roles and budgets
 
-This is the point where Sigil stops competing as "another coding chat" and starts competing as an AI control plane.
+This is the point where AEQI stops competing as "another coding chat" and starts competing as an AI control plane.
 
 ## Non-Goals
 
@@ -487,7 +487,7 @@ The TUI should be opinionated and operational.
 
 ## Success Criteria
 
-`sigil chat` is successful when an operator can do the following without leaving the interface:
+`aeqi chat` is successful when an operator can do the following without leaving the interface:
 
 - understand whether the system is healthy
 - see what needs attention now

@@ -1,13 +1,13 @@
-# Sigil
+# AEQI
 
-[![CI](https://github.com/0xAEQI/sigil/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/0xAEQI/sigil/actions/workflows/ci.yml)
+[![CI](https://github.com/0xAEQI/aeqi/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/0xAEQI/aeqi/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-2024-black)](Cargo.toml)
 [![React 19](https://img.shields.io/badge/ui-React%2019-61dafb)](apps/ui)
 
 **Persistent agent orchestration in Rust.** Agents that remember, coordinate, and act autonomously.
 
-Sigil is a runtime for persistent AI agents -- not one-shot sessions that forget everything, but identities with memory, departments, and scheduled behaviors. Agents communicate through a unified delegate tool, coordinate through a department-scoped blackboard, and evolve through triggers and skills.
+AEQI is a runtime for persistent AI agents -- not one-shot sessions that forget everything, but identities with memory, departments, and scheduled behaviors. Agents communicate through a unified delegate tool, coordinate through a department-scoped blackboard, and evolve through triggers and skills.
 
 ## Four Primitives
 
@@ -21,7 +21,7 @@ Sigil is a runtime for persistent AI agents -- not one-shot sessions that forget
 
 ## Triggers + Skills
 
-Everything in Sigil flows through two primitives:
+Everything in AEQI flows through two primitives:
 
 **Triggers** define *when* -- a cron schedule (`0 9 * * *`), an interval (`every 1h`), a one-shot time, a runtime event (task completed, dispatch received, department message), or an external **webhook** (`POST /api/webhooks/:public_id` with optional HMAC-SHA256 signing).
 
@@ -51,11 +51,11 @@ An agent's "subconscious" -- health checks, memory consolidation, self-reflectio
 
 ## Departments
 
-Agents are organized into departments stored in SQLite (`~/.sigil/agents.db`). Each department has a UUID, a manager, and a parent department. Agents belong to a department via `department_id`.
+Agents are organized into departments stored in SQLite (`~/.aeqi/agents.db`). Each department has a UUID, a manager, and a parent department. Agents belong to a department via `department_id`.
 
 ```
 Root Department (manager: Shadow)
-  +-- "Sigil Core" (manager: CTO)
+  +-- "AEQI Core" (manager: CTO)
   |     +-- "Backend" (manager: BackendLead)
   |     |     members: API Engineer, DB Engineer
   |     +-- "Frontend" (manager: FrontendLead)
@@ -90,7 +90,7 @@ delegate(to, prompt, response, create_task, skill, tools)
 
 ## Agent Roster
 
-Sigil ships with a C-suite of persistent agent identities. Each declares a `model_tier` (resolved centrally) instead of hardcoding a model name.
+AEQI ships with a C-suite of persistent agent identities. Each declares a `model_tier` (resolved centrally) instead of hardcoding a model name.
 
 | Agent | Tier | Function |
 |-------|------|----------|
@@ -224,35 +224,35 @@ Types: `permission`, `clarification`, `budget`. Integrates with the clarificatio
 
 ```bash
 # Clone and configure
-git clone https://github.com/0xAEQI/sigil && cd sigil
-cp config/sigil.example.toml config/sigil.toml
-# Edit config/sigil.toml with your provider key
+git clone https://github.com/0xAEQI/aeqi && cd aeqi
+cp config/aeqi.example.toml config/aeqi.toml
+# Edit config/aeqi.toml with your provider key
 
 # Build
 cargo build
 npm --prefix apps/ui ci && npm --prefix apps/ui run build
 
 # Run
-cargo run --bin sigil -- daemon start   # orchestration plane
-cargo run --bin sigil -- web start      # API + UI on :8400
+cargo run --bin aeqi -- daemon start   # orchestration plane
+cargo run --bin aeqi -- web start      # API + UI on :8400
 ```
 
 ## CLI
 
 ```bash
-sigil daemon start              # start the orchestration daemon
-sigil web start                 # start the API + web UI
-sigil agent spawn template.md   # create a persistent agent from template
-sigil agent registry            # list all registered agents
-sigil trigger create ...        # create a trigger for an agent
-sigil trigger create --webhook  # create a webhook trigger (returns URL)
-sigil trigger list              # list all triggers
-sigil chat --agent shadow       # interactive TUI chat with an agent
-sigil assign -r myproject "do X" # create a task
-sigil monitor                   # live dashboard
+aeqi daemon start              # start the orchestration daemon
+aeqi web start                 # start the API + web UI
+aeqi agent spawn template.md   # create a persistent agent from template
+aeqi agent registry            # list all registered agents
+aeqi trigger create ...        # create a trigger for an agent
+aeqi trigger create --webhook  # create a webhook trigger (returns URL)
+aeqi trigger list              # list all triggers
+aeqi chat --agent shadow       # interactive TUI chat with an agent
+aeqi assign -r myproject "do X" # create a task
+aeqi monitor                   # live dashboard
 ```
 
-## Extending Sigil
+## Extending AEQI
 
 **Add a skill** -- drop a `.toml` file in `projects/shared/skills/` or `projects/{name}/skills/`:
 
@@ -283,20 +283,20 @@ system = """Your instructions here..."""
 
 | Crate | Purpose |
 |-------|---------|
-| `sigil-cli` | CLI binary, daemon process, TUI chat |
-| `sigil-orchestrator` | Worker pools, triggers, chat engine, dispatch, departments, blackboard, unified delegate, middleware, approvals, budget policies |
-| `sigil-core` | Agent loop, config, identity, traits |
-| `sigil-web` | Axum REST API + WebSocket + SPA serving |
-| `sigil-memory` | SQLite+FTS5, vector search, hybrid ranking, query planning |
-| `sigil-tasks` | Task DAG, missions, dependency inference |
-| `sigil-providers` | OpenRouter, Anthropic, Ollama + cost estimation |
-| `sigil-gates` | Telegram, Discord, Slack channels |
-| `sigil-tools` | Shell, file I/O, git, grep, glob, delegate, skills |
-| `sigil-graph` | Code intelligence: Rust/TS/Solidity parsing, impact analysis |
+| `aeqi-cli` | CLI binary, daemon process, TUI chat |
+| `aeqi-orchestrator` | Worker pools, triggers, chat engine, dispatch, departments, blackboard, unified delegate, middleware, approvals, budget policies |
+| `aeqi-core` | Agent loop, config, identity, traits |
+| `aeqi-web` | Axum REST API + WebSocket + SPA serving |
+| `aeqi-memory` | SQLite+FTS5, vector search, hybrid ranking, query planning |
+| `aeqi-tasks` | Task DAG, missions, dependency inference |
+| `aeqi-providers` | OpenRouter, Anthropic, Ollama + cost estimation |
+| `aeqi-gates` | Telegram, Discord, Slack channels |
+| `aeqi-tools` | Shell, file I/O, git, grep, glob, delegate, skills |
+| `aeqi-graph` | Code intelligence: Rust/TS/Solidity parsing, impact analysis |
 
 ## Storage
 
-All state lives in `~/.sigil/`:
+All state lives in `~/.aeqi/`:
 
 | File | What |
 |------|------|

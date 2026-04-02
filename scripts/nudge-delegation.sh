@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PostToolUse hook for mcp__sigil__sigil_blackboard: nudge delegation after plan posting.
+# PostToolUse hook for mcp__aeqi__aeqi_blackboard: nudge delegation after plan posting.
 # When a plan is posted to the blackboard, suggest delegating before implementing.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -21,4 +21,4 @@ TASK_ID=$(echo "$KEY" | sed 's/task:\([^:]*\):plan/\1/')
 PROJECT=$(printf '%s' "$CLAUDE_TOOL_INPUT" | jq -r '.project // empty' 2>/dev/null) || true
 
 log_hook "nudge-delegation" "plan-posted" "task=$TASK_ID"
-echo "Plan posted. Before implementing, consider: sigil_delegate(agent='reviewer', project='$PROJECT', task_id='$TASK_ID', prompt='Review this plan for correctness and completeness.')"
+echo "Plan posted. Before implementing, consider: aeqi_delegate(agent='reviewer', project='$PROJECT', task_id='$TASK_ID', prompt='Review this plan for correctness and completeness.')"

@@ -1,12 +1,12 @@
-# Sigil Docs
+# AEQI Docs
 
-This directory holds the active product and operator documentation for Sigil.
+This directory holds the active product and operator documentation for AEQI.
 
 ## Start Here
 
 - `vision.md` - product north star and non-negotiable design principles
-- `roadmap.md` - path from current Sigil to the long-term product
-- `native-runtime.md` - target architecture for Sigil's native execution core
+- `roadmap.md` - path from current AEQI to the long-term product
+- `native-runtime.md` - target architecture for AEQI's native execution core
 - `ui-design.md` - operator UI principles and information architecture
 - `quickstart.md` - local setup for the daemon, API, and UI
 - `deployment.md` - recommended production topology

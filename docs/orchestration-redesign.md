@@ -14,7 +14,7 @@
 
 ### The Daemon
 
-Sigil runs as a background daemon (`sigil daemon start`) with a 30-second patrol loop. The daemon owns all shared infrastructure:
+AEQI runs as a background daemon (`aeqi daemon start`) with a 30-second patrol loop. The daemon owns all shared infrastructure:
 
 - ****ProjectRegistry** — holds all projects and their worker pools
 - **DispatchBus** — SQLite-backed agent-to-agent message queue with ACK tracking
@@ -28,7 +28,7 @@ Sigil runs as a background daemon (`sigil daemon start`) with a 30-second patrol
 - **EventBroadcaster** — pub/sub for real-time execution events
 - **ChatEngine** — web/Telegram message routing
 
-IPC via Unix socket at `~/.sigil/rm.sock` (JSON-line protocol, 40+ commands).
+IPC via Unix socket at `~/.aeqi/rm.sock` (JSON-line protocol, 40+ commands).
 
 ### The Patrol Loop
 
@@ -99,7 +99,7 @@ worker.execute()
   └─ Return (TaskOutcome, RuntimeExecution, cost_usd, turns)
 ```
 
-### The Agent Loop (crates/sigil-core/src/agent.rs)
+### The Agent Loop (crates/aeqi-core/src/agent.rs)
 
 The core LLM conversation engine (~2,200 lines). Runs inside AgentWorker.
 
@@ -108,10 +108,10 @@ The core LLM conversation engine (~2,200 lines). Runs inside AgentWorker.
 - **Microcompact** (semi-free): clear old tool results (keep 5 most recent), replace with placeholder
 - **Full compact** (1 API call): LLM-based structured summary, post-compact file/skill restoration
 - **Tool execution**: before_tool hook → execute → after_tool hook, concurrent when safe
-- **Content replacement**: large outputs persisted to `.sigil/persist/{worker}/{id}.txt`, replaced with preview
+- **Content replacement**: large outputs persisted to `.aeqi/persist/{worker}/{id}.txt`, replaced with preview
 - **Notification drain**: between turns, drain `notification_rx` for background subagent results, inject as User messages
 - **Perpetual mode**: after EndTurn, wait for next input via `input_rx` instead of breaking
-- **Session files**: checkpoint at `.sigil/sessions/{task_id}.json` for resume after compaction/crash
+- **Session files**: checkpoint at `.aeqi/sessions/{task_id}.json` for resume after compaction/crash
 - **Constants**: max 20 iterations, max 3 compactions per run, diminishing returns at 500 tokens/turn × 3
 
 ### Subagent Delegation (DelegateTool)
@@ -131,11 +131,11 @@ An agent tool (not a daemon feature) that spawns ephemeral subagents within an a
 - `AgentHandle` tracks: id, description, status (Running/Completed/Failed), `notified` dedup flag
 - Atomic notification delivery: update handle status + send notification while holding registry lock
 
-**Current gap**: `agent_worker.rs execute_agent()` does NOT wire `notification_rx` or create `AgentInfra`. The DelegateTool infrastructure exists but is not connected in the worker pool path. It only works when `sigil chat` or `sigil run` sets it up manually.
+**Current gap**: `agent_worker.rs execute_agent()` does NOT wire `notification_rx` or create `AgentInfra`. The DelegateTool infrastructure exists but is not connected in the worker pool path. It only works when `aeqi chat` or `aeqi run` sets it up manually.
 
 ### Persistent Agents (AgentRegistry)
 
-SQLite registry at `~/.sigil/agents.db`. Each agent has:
+SQLite registry at `~/.aeqi/agents.db`. Each agent has:
 
 ```
 id (UUID) — stable identity, entity memory scope
@@ -241,7 +241,7 @@ SQLite-backed chat history with FTS5 search. Deterministic chat IDs via hashing 
 ### Config Model
 
 ```toml
-[sigil]           # name, data_dir, default_runtime
+[aeqi]           # name, data_dir, default_runtime
 [providers.*]     # OpenRouter, Anthropic, Ollama + API keys
 [security]        # autonomy, budget limits
 [memory]          # SQLite backend, embedding config
@@ -252,7 +252,7 @@ SQLite-backed chat history with FTS5 search. Deterministic chat IDs via hashing 
 [[projects]]      # name, prefix, repo, model, team, departments, missions
 ```
 
-**PeerAgentConfig** (in sigil.toml `[[agents]]` or `agents/*/agent.toml`):
+**PeerAgentConfig** (in aeqi.toml `[[agents]]` or `agents/*/agent.toml`):
 ```
 name, prefix, model, runtime, role (AgentRole enum), voice
 execution_mode, max_workers, max_turns, max_budget_usd
@@ -697,10 +697,10 @@ Shadow is the only agent at the root level. It's the user's proxy in the system.
 ```
 Root Department (project: null, manager: Shadow, parent: null)
 │
-├── "Sigil Core" (project: sigil, manager: CTO, parent: Root)
-│   ├── "Backend" (project: sigil, manager: BackendLead, parent: Sigil Core)
+├── "AEQI Core" (project: aeqi, manager: CTO, parent: Root)
+│   ├── "Backend" (project: aeqi, manager: BackendLead, parent: AEQI Core)
 │   │   └── members: API Engineer, DB Engineer
-│   └── "Frontend" (project: sigil, manager: FrontendLead, parent: Sigil Core)
+│   └── "Frontend" (project: aeqi, manager: FrontendLead, parent: AEQI Core)
 │       └── members: UI Engineer
 │
 └── "Trading" (project: algostaking, manager: TradingLead, parent: Root)
@@ -761,7 +761,7 @@ Remove: TaskDone, TaskBlocked, TaskFailed, Resolution, PatrolReport, CouncilTopi
 | ConversationStore as "channel" primitive | Kept as message log for department broadcast + audit only |
 | `escalation_target` / `system_escalation_target` | Department hierarchy (dept.parent_id → manager_id chain) |
 | 9 unused DispatchKind variants | Removed |
-| `PeerAgentConfig` in sigil.toml `[[agents]]` | Agents defined in `agents/*/agent.toml` + agent.md only |
+| `PeerAgentConfig` in aeqi.toml `[[agents]]` | Agents defined in `agents/*/agent.toml` + agent.md only |
 | `TeamConfig.agents[]` | Removed — org tree defines relationships |
 | `TeamConfig.router_model` | Removed — intent classifier already deleted |
 

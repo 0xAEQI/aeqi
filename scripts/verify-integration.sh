@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PostToolUse hook for mcp__sigil__sigil_close_task: verify new code is integrated.
+# PostToolUse hook for mcp__aeqi__aeqi_close_task: verify new code is integrated.
 # Checks graph for symbols in edited files that have zero incoming edges.
 # Advisory — warns but doesn't block task closure.
 
@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/hook-log.sh"
 source "$SCRIPT_DIR/detect-project.sh"
 
-EDITS_LOG="$SIGIL_SESSION_DIR/edits.log"
+EDITS_LOG="$AEQI_SESSION_DIR/edits.log"
 
 # Only run if edits were tracked this session
 [ -f "$EDITS_LOG" ] && [ -s "$EDITS_LOG" ] || exit 0
@@ -15,11 +15,11 @@ EDITS_LOG="$SIGIL_SESSION_DIR/edits.log"
 PROJECT=$(detect_project)
 [ -z "$PROJECT" ] && exit 0
 
-GRAPH_DB="${SIGIL_DATA_DIR:-$HOME/.sigil}/codegraph/${PROJECT}.db"
+GRAPH_DB="${AEQI_DATA_DIR:-$HOME/.aeqi}/codegraph/${PROJECT}.db"
 [ -f "$GRAPH_DB" ] || exit 0
 
 # Get repo path for relative path computation
-CONFIG="${SIGIL_CONFIG:-/home/claudedev/sigil/config/sigil.toml}"
+CONFIG="${AEQI_CONFIG:-/home/claudedev/aeqi/config/aeqi.toml}"
 REPO_PATH=$(awk -v proj="$PROJECT" -v home="$HOME" '
     function emit() { if (name==proj && repo) { gsub(/^~/,home,repo); print repo } }
     /^\[\[projects\]\]/ { if(in_proj) emit(); in_proj=1; name=""; repo=""; next }

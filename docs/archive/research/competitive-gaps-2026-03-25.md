@@ -7,7 +7,7 @@ Sources: Local clones of hermes-agent, supermemory, deer-flow
 
 ### Gap 1: Live Streaming (beat Deer Flow)
 
-**Current Sigil:** Polling-based. `chat_poll` every 5 seconds. No real-time feedback.
+**Current AEQI:** Polling-based. `chat_poll` every 5 seconds. No real-time feedback.
 
 **Deer Flow pattern:** WebSocket streaming with 4 event channels:
 - `messages-tuple`: incremental AI message deltas
@@ -16,18 +16,18 @@ Sources: Local clones of hermes-agent, supermemory, deer-flow
 - Subagent message capture during `astream()` — not after
 
 **What to build:**
-1. WebSocket event stream from daemon → web (sigil-web already has WebSocket infra)
+1. WebSocket event stream from daemon → web (aeqi-web already has WebSocket infra)
 2. Event protocol: `WorkerEvent` enum with task lifecycle events
 3. Worker emits events during execution (between tool calls)
 4. Frontend subscribes via WebSocket, renders live progress
 5. Replace chat_poll with push-based completion notification
 6. Subtask cards showing live AI messages from workers
 
-**Impact:** Transforms Sigil from "check back later" to "watch it work in real-time."
+**Impact:** Transforms AEQI from "check back later" to "watch it work in real-time."
 
 ### Gap 2: Trust & Approval Rails (beat Hermes)
 
-**Current Sigil:** Guardrails middleware blocks dangerous patterns, but no user approval flow.
+**Current AEQI:** Guardrails middleware blocks dangerous patterns, but no user approval flow.
 
 **Hermes pattern:** 3-level approval system:
 - `once`: execute immediately, no record
@@ -38,18 +38,18 @@ Sources: Local clones of hermes-agent, supermemory, deer-flow
 - Per-session approval state with thread-safe tracking
 
 **What to build:**
-1. `ApprovalPolicy` in sigil-orchestrator: dangerous patterns + approval state
+1. `ApprovalPolicy` in aeqi-orchestrator: dangerous patterns + approval state
 2. `ApprovalState`: session-scoped + permanent allowlists (DashMap)
 3. When guardrails middleware detects dangerous op → emit approval request event
 4. UI shows approval dialog: [Allow Once] [Allow Session] [Allow Always] [Deny]
 5. Daemon IPC commands: `approve`, `deny` with scope
 6. Permanent approvals persisted to config
 
-**Impact:** Sigil becomes trustworthy for autonomous operation. Users can confidently let it run overnight.
+**Impact:** AEQI becomes trustworthy for autonomous operation. Users can confidently let it run overnight.
 
 ### Gap 3: Memory as Product (beat Supermemory)
 
-**Current Sigil:** Deep memory internals (graph, dedup, hotness, hierarchy, retrieval scoring). But invisible externally.
+**Current AEQI:** Deep memory internals (graph, dedup, hotness, hierarchy, retrieval scoring). But invisible externally.
 
 **Supermemory pattern:**
 - Profile API: `GET /v3/profile` returns `{static: [...], dynamic: [...]}`
@@ -67,7 +67,7 @@ Sources: Local clones of hermes-agent, supermemory, deer-flow
 5. Memory graph UI component: D3 force-directed layout in the dashboard
 6. Container tags: use project name as container, support cross-project queries
 
-**Impact:** Sigil's memory goes from "internal strength" to "visible, consumable, inspectable product feature."
+**Impact:** AEQI's memory goes from "internal strength" to "visible, consumable, inspectable product feature."
 
 ## Priority Order
 

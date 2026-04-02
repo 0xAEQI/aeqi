@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/hook-log.sh"
 source "$SCRIPT_DIR/detect-project.sh"
 
-SOCK="${SIGIL_DATA_DIR:-$HOME/.sigil}/rm.sock"
+SOCK="${AEQI_DATA_DIR:-$HOME/.aeqi}/rm.sock"
 
 # --- Extract file path (jq) ---
 FILE_PATH=""
@@ -60,7 +60,7 @@ REPO_PATH=$(awk -v proj="$PROJECT" -v home="$HOME" '
     END {
         if (in_proj && name == proj && repo) { gsub(/^~/, home, repo); print repo }
     }
-' "$SIGIL_CONFIG")
+' "$AEQI_CONFIG")
 
 RESOURCE="${FILE_PATH#$REPO_PATH/}"
 

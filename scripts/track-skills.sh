@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PostToolUse hook for mcp__sigil__sigil_skills: track loaded skills.
+# PostToolUse hook for mcp__aeqi__aeqi_skills: track loaded skills.
 # Appends skill names to session file so compact primer can remind about them.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -15,7 +15,7 @@ fi
 
 # Only track "get" actions (actually loading a skill's content)
 if [ "$ACTION" = "get" ] && [ -n "$SKILL_NAME" ]; then
-    SKILLS_FILE="$SIGIL_SESSION_DIR/skills.loaded"
+    SKILLS_FILE="$AEQI_SESSION_DIR/skills.loaded"
     # Append if not already tracked
     if ! grep -qxF "$SKILL_NAME" "$SKILLS_FILE" 2>/dev/null; then
         echo "$SKILL_NAME" >> "$SKILLS_FILE"

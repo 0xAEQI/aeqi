@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Shared project detection — sourced by hook scripts.
-# Parses sigil.toml [[projects]] using awk. Zero python dependency.
+# Parses aeqi.toml [[projects]] using awk. Zero python dependency.
 #
 # Usage:
 #   source detect-project.sh
-#   PROJECT=$(detect_project "/home/claudedev/sigil/crates/foo.rs")
+#   PROJECT=$(detect_project "/home/claudedev/aeqi/crates/foo.rs")
 #   PROJECT=$(detect_project)  # uses $PWD
 
 detect_project() {
     local target="${1:-$PWD}"
-    local config="${SIGIL_CONFIG:-/home/claudedev/sigil/config/sigil.toml}"
+    local config="${AEQI_CONFIG:-/home/claudedev/aeqi/config/aeqi.toml}"
 
     [ -f "$config" ] || return 0
 

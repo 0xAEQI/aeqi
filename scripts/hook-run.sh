@@ -3,12 +3,12 @@
 # On script error, syntax error, or invalid output: falls back to allow + logs.
 #
 # Usage in settings.json:
-#   "command": "/home/claudedev/sigil/scripts/hook-run.sh check-recall.sh"
-#   "command": "/home/claudedev/sigil/scripts/hook-run.sh check-branch.sh"
+#   "command": "/home/claudedev/aeqi/scripts/hook-run.sh check-recall.sh"
+#   "command": "/home/claudedev/aeqi/scripts/hook-run.sh check-branch.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT_NAME="$1"; shift
-TEL="/tmp/.sigil_hook_telemetry"
+TEL="/tmp/.aeqi_hook_telemetry"
 
 # Resolve: absolute path stays absolute, relative name resolves to scripts dir
 if [[ "$SCRIPT_NAME" == /* ]]; then
@@ -24,7 +24,7 @@ if [ ! -x "$SCRIPT" ]; then
 fi
 
 # Run the actual hook, capture stdout and exit code
-STDERR_FILE=$(mktemp /tmp/.sigil_hook_stderr.XXXXXX 2>/dev/null || echo "/tmp/.sigil_hook_stderr_$$")
+STDERR_FILE=$(mktemp /tmp/.aeqi_hook_stderr.XXXXXX 2>/dev/null || echo "/tmp/.aeqi_hook_stderr_$$")
 RESULT=$("$SCRIPT" "$@" 2>"$STDERR_FILE")
 EXIT_CODE=$?
 

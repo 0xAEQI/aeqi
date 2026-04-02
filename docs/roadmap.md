@@ -1,10 +1,10 @@
 # Roadmap
 
-This document connects the Sigil vision to the current codebase.
+This document connects the AEQI vision to the current codebase.
 
 ## Current Reality
 
-Sigil already has meaningful foundations:
+AEQI already has meaningful foundations:
 
 - a Rust workspace with a daemon, API, memory layer, task storage, and orchestration logic
 - a native agent loop
@@ -18,7 +18,7 @@ The main gap is not "missing ideas." The main gap is turning existing subsystems
 
 ## Phase 1: Native Runtime Excellence
 
-Goal: make Sigil's native execution path good enough to be the center of gravity.
+Goal: make AEQI's native execution path good enough to be the center of gravity.
 
 Focus areas:
 
@@ -31,7 +31,7 @@ Focus areas:
 
 Exit criteria:
 
-- Sigil-native can complete a meaningful set of coding and repo-operation tasks reliably
+- AEQI-native can complete a meaningful set of coding and repo-operation tasks reliably
 - cost and latency are visible and controllable
 - failures are inspectable instead of mysterious
 
@@ -49,13 +49,13 @@ Focus areas:
 
 Exit criteria:
 
-- a user can move from note to plan to execution without leaving Sigil
+- a user can move from note to plan to execution without leaving AEQI
 - ownership, status, and blockers are visible in one place
 - the system feels like a coherent work OS rather than a set of features
 
 ## Phase 3: Metrics and Reality Loops
 
-Goal: make Sigil optimize for actual outcomes, not merely internal activity.
+Goal: make AEQI optimize for actual outcomes, not merely internal activity.
 
 Focus areas:
 
@@ -73,12 +73,12 @@ Examples:
 
 Exit criteria:
 
-- Sigil can explain whether a mission is succeeding in real terms
+- AEQI can explain whether a mission is succeeding in real terms
 - operator dashboards show outcome health, not just task counts
 
 ## Phase 4: Enterprise and Model Independence
 
-Goal: make Sigil deployable where vendor-hosted coding agents are unacceptable.
+Goal: make AEQI deployable where vendor-hosted coding agents are unacceptable.
 
 Focus areas:
 
@@ -90,12 +90,12 @@ Focus areas:
 
 Exit criteria:
 
-- Sigil can be positioned credibly for regulated or private environments
+- AEQI can be positioned credibly for regulated or private environments
 - model cost and model choice become a policy decision, not an architectural limitation
 
 ## Phase 5: Autonomous Organization Builder
 
-Goal: let Sigil turn large, ambiguous goals into real operating systems.
+Goal: let AEQI turn large, ambiguous goals into real operating systems.
 
 Focus areas:
 

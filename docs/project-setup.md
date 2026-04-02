@@ -1,20 +1,20 @@
 # Project Setup
 
-A **project** is an isolated operating unit in Sigil. Each project has its own:
+A **project** is an isolated operating unit in AEQI. Each project has its own:
 
 - Git repository (working directory)
 - Task store (`.tasks/` -- JSONL task DAG)
-- Memory database (`.sigil/memory.db` -- SQLite + FTS5)
+- Memory database (`.aeqi/memory.db` -- SQLite + FTS5)
 - Identity files (PERSONA.md, IDENTITY.md, AGENTS.md, KNOWLEDGE.md)
 - Skills and workflow templates (pipelines)
-- Worker pool (concurrent Sigil workers)
-- Checkpoints (`.sigil/checkpoints/` -- worker work-in-progress)
+- Worker pool (concurrent AEQI workers)
+- Checkpoints (`.aeqi/checkpoints/` -- worker work-in-progress)
 
 ## Creating a Project
 
 ### 1. Add to config
 
-In `config/sigil.toml`:
+In `config/aeqi.toml`:
 
 ```toml
 [[projects]]
@@ -23,7 +23,7 @@ prefix = "mp"                                    # Task ID prefix (mp-001, mp-00
 repo = "/home/user/myproject"                    # Git repo path
 model = "xiaomi/mimo-v2-pro"                     # LLM model for workers
 max_workers = 3                                  # Max concurrent workers
-execution_mode = "agent"                         # native Sigil worker runtime
+execution_mode = "agent"                         # native AEQI worker runtime
 worker_timeout_secs = 1800                       # 30 min timeout for hung workers
 worktree_root = "/home/user/worktrees"           # Git worktree root (optional)
 max_turns = 25                                   # Max agentic turns per worker
@@ -32,10 +32,10 @@ max_turns = 25                                   # Max agentic turns per worker
 ### 2. Create the project directory
 
 ```bash
-mkdir -p projects/myproject/{pipelines,skills,.tasks,.sigil/checkpoints}
+mkdir -p projects/myproject/{pipelines,skills,.tasks,.aeqi/checkpoints}
 ```
 
-Or run `sigil doctor --fix` to auto-create missing directories.
+Or run `aeqi doctor --fix` to auto-create missing directories.
 
 ### 3. Write identity files
 
@@ -155,7 +155,7 @@ projects/myproject/
     incident.toml
   .tasks/                  <- task storage (JSONL, git-native)
     mp.jsonl
-  .sigil/
+  .aeqi/
     memory.db              <- per-project SQLite + FTS5
     checkpoints/           <- worker checkpoint JSONs
       mp-001.json
@@ -224,7 +224,7 @@ allow = ["shell", "file_read", "list_dir"]
 deny = ["file_write"]
 ```
 
-Run: `sigil skill run reviewer --rig myproject --prompt "the auth module"`
+Run: `aeqi skill run reviewer --rig myproject --prompt "the auth module"`
 
 ## Tasks
 
@@ -232,33 +232,33 @@ Each project's tasks are JSONL files in `.tasks/`:
 
 ```bash
 # Create a task
-sigil assign "Fix login bug" --rig myproject --priority high
+aeqi assign "Fix login bug" --rig myproject --priority high
 
 # Check ready (unblocked) tasks
-sigil ready --rig myproject
+aeqi ready --rig myproject
 
 # Show all open tasks
-sigil beads --rig myproject
+aeqi beads --rig myproject
 
 # Close a task
-sigil close mp-001 --reason "fixed in commit abc123"
+aeqi close mp-001 --reason "fixed in commit abc123"
 
 # Mark done (also updates operations)
-sigil done mp-001
+aeqi done mp-001
 ```
 
 Task IDs are hierarchical: `mp-001` (parent) -> `mp-001.1` (child) -> `mp-001.1.1` (grandchild).
 
 ## Memory
 
-Per-project memory in `.sigil/memory.db` (SQLite + FTS5 + vector similarity):
+Per-project memory in `.aeqi/memory.db` (SQLite + FTS5 + vector similarity):
 
 ```bash
 # Store a memory
-sigil remember "auth-flow" "Login uses JWT with 24h expiry" --rig myproject
+aeqi remember "auth-flow" "Login uses JWT with 24h expiry" --rig myproject
 
 # Search memories
-sigil recall "how does authentication work?" --rig myproject
+aeqi recall "how does authentication work?" --rig myproject
 ```
 
 Hybrid search: BM25 keyword matching + cosine vector similarity + temporal decay (30-day half-life). Results ranked by configurable weights (`vector_weight`, `keyword_weight`).
@@ -268,7 +268,7 @@ Hybrid search: BM25 keyword matching + cosine vector similarity + temporal decay
 Per-project budgets can be configured alongside the global daily cap:
 
 ```toml
-# In sigil.toml
+# In aeqi.toml
 [security]
 max_cost_per_day_usd = 10.0    # Global cap
 
@@ -278,13 +278,13 @@ project-alpha = 5.0
 project-beta = 3.0
 ```
 
-The worker pool checks `can_afford_project()` before spawning any worker. Budget status visible via `sigil daemon query cost`.
+The worker pool checks `can_afford_project()` before spawning any worker. Budget status visible via `aeqi daemon query cost`.
 
 ## Verification
 
 ```bash
-sigil doctor         # Check all projects
-sigil doctor --fix   # Auto-create missing directories/files
+aeqi doctor         # Check all projects
+aeqi doctor --fix   # Auto-create missing directories/files
 ```
 
 Checks: config validity, project directories, identity files, task store, skills, memory DB, secret store.

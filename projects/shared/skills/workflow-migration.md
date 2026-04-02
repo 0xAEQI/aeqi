@@ -18,12 +18,12 @@ Analyze → Plan → Migrate Incrementally → Verify → Clean Up
 ## Phase 1: Analyze
 
 1. **What's changing** — exact version/API/schema differences between old and new
-2. **Blast radius** — what code touches the thing being migrated? `sigil_graph` impact analysis
+2. **Blast radius** — what code touches the thing being migrated? `aeqi_graph` impact analysis
 3. **Breaking changes** — enumerate every breaking change in the upgrade path
 4. **Data migration** — does data need transforming? Is it reversible?
 5. **Rollback plan** — can we undo this? At what cost?
 
-Post: `sigil_blackboard` post with key `task:{id}:migration-analysis`
+Post: `aeqi_blackboard` post with key `task:{id}:migration-analysis`
 
 ---
 
@@ -69,7 +69,7 @@ Never do a big-bang migration. Every step must leave the system working. If step
 1. **Remove old code** — dead code from the expand phase
 2. **Remove compatibility shims** — any adapters between old and new
 3. **Update documentation** — reflect the new state
-4. **Store** — `sigil_remember` migration learnings
+4. **Store** — `aeqi_remember` migration learnings
 
 ---
 

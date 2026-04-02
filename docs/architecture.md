@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Sigil has three main layers:
+AEQI has three main layers:
 
 1. Agent runtime
 2. Orchestration and persistence
@@ -10,12 +10,12 @@ Sigil has three main layers:
 
 ```text
 Operator
-  |-> CLI (`sigil`)
+  |-> CLI (`aeqi`)
   |-> Web UI (`apps/ui`)
-  |-> API / WebSocket (`sigil-web`)
+  |-> API / WebSocket (`aeqi-web`)
                 |
                 v
-        Orchestrator (`sigil-orchestrator`)
+        Orchestrator (`aeqi-orchestrator`)
                 |
                 +-> agent runtime and tools
                 +-> task boards and missions
@@ -23,7 +23,7 @@ Operator
                 +-> audit, dispatches, watchdogs, lifecycle
                 |
                 v
-        Providers (`sigil-providers`)
+        Providers (`aeqi-providers`)
 ```
 
 ## Runtime Layer
@@ -36,20 +36,20 @@ The orchestration layer routes work, supervises workers, tracks task state, pers
 
 ## Interface Layer
 
-- `sigil` is the CLI and daemon entrypoint
-- `sigil-web` exposes the API and browser-facing surface
+- `aeqi` is the CLI and daemon entrypoint
+- `aeqi-web` exposes the API and browser-facing surface
 - `apps/ui` is the operator control plane
 
 ## Repository Shape
 
 ```text
 apps/ui/                 frontend
-crates/sigil-core/       shared config and traits
-crates/sigil-memory/     retrieval and persistence
-crates/sigil-orchestrator/
-crates/sigil-providers/
-crates/sigil-tasks/
-crates/sigil-tools/
-crates/sigil-web/
-sigil-cli/
+crates/aeqi-core/       shared config and traits
+crates/aeqi-memory/     retrieval and persistence
+crates/aeqi-orchestrator/
+crates/aeqi-providers/
+crates/aeqi-tasks/
+crates/aeqi-tools/
+crates/aeqi-web/
+aeqi-cli/
 ```

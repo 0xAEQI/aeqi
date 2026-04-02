@@ -1,6 +1,6 @@
 # Quick Start
 
-This guide gets Sigil running locally with the daemon, API, and web UI.
+This guide gets AEQI running locally with the daemon, API, and web UI.
 
 ## Prerequisites
 
@@ -11,10 +11,10 @@ This guide gets Sigil running locally with the daemon, API, and web UI.
 ## 1. Create Local Config
 
 ```bash
-cp config/sigil.example.toml config/sigil.toml
+cp config/aeqi.example.toml config/aeqi.toml
 ```
 
-`config/sigil.toml` is local-only and should stay uncommitted.
+`config/aeqi.toml` is local-only and should stay uncommitted.
 
 Configure a provider and enable the web server:
 
@@ -27,7 +27,7 @@ default_model = "xiaomi/mimo-v2-pro"
 enabled = true
 bind = "127.0.0.1:8400"
 ui_dist_dir = "../apps/ui/dist"
-auth_secret = "${SIGIL_WEB_SECRET}"
+auth_secret = "${AEQI_WEB_SECRET}"
 ```
 
 ## 2. Build
@@ -38,19 +38,19 @@ npm run ui:install
 npm run ui:build
 ```
 
-## 3. Start Sigil
+## 3. Start AEQI
 
 In one shell:
 
 ```bash
-cargo run --bin sigil -- daemon start
+cargo run --bin aeqi -- daemon start
 ```
 
 In a second shell:
 
 ```bash
-export SIGIL_WEB_SECRET=change-me
-cargo run --bin sigil -- web start
+export AEQI_WEB_SECRET=change-me
+cargo run --bin aeqi -- web start
 ```
 
 Open `http://127.0.0.1:8400`.
@@ -63,4 +63,4 @@ If you want Vite hot reload instead of the compiled UI:
 npm run ui:dev
 ```
 
-That serves the frontend on `http://127.0.0.1:5173` and proxies `/api/*` to `sigil-web` on `:8400`.
+That serves the frontend on `http://127.0.0.1:5173` and proxies `/api/*` to `aeqi-web` on `:8400`.

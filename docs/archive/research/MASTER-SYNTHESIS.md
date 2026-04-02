@@ -1,9 +1,9 @@
-# Sigil Master Synthesis
+# AEQI Master Synthesis
 
-This document is archived research material. The source clones referenced here are kept outside the `sigil` repository.
+This document is archived research material. The source clones referenced here are kept outside the `aeqi` repository.
 
-The definitive plan for making Sigil the best agent orchestrator in existence.
-Derived from deep code-level analysis of 11 repositories + Sigil itself.
+The definitive plan for making AEQI the best agent orchestrator in existence.
+Derived from deep code-level analysis of 11 repositories + AEQI itself.
 
 ---
 
@@ -13,9 +13,9 @@ Derived from deep code-level analysis of 11 repositories + Sigil itself.
 1. IDENTIFY    — What capability area to improve
 2. CLONE       — Clone competitor repos locally
 3. READ CODE   — Not READMEs. Actual source. Trace the full lifecycle.
-4. COMPARE     — What does Sigil do? What do they do? Where's the gap?
+4. COMPARE     — What does AEQI do? What do they do? Where's the gap?
 5. SYNTHESIZE  — Design something SUPERIOR to both (not copy, not ignore)
-6. IMPLEMENT   — Build it in Sigil
+6. IMPLEMENT   — Build it in AEQI
 7. VERIFY      — Tests pass, clippy clean, deployed
 8. DOCUMENT    — Update docs to match reality
 9. REPEAT      — Next capability area
@@ -44,7 +44,7 @@ The goal: excellence through informed synthesis, not imitation.
 
 ---
 
-## Sigil Current State (What We Have)
+## AEQI Current State (What We Have)
 
 **Backend:** 9 crates, 466 tests, clippy clean
 - 8 active middleware (loop detection, guardrails, cost tracking, context compression,
@@ -90,7 +90,7 @@ event broadcasting → brief generation
 - Evidence storage in audit log (test output, diffs, exit codes)
 - Red flag patterns in skill definitions (halt on rationalization)
 - Regression baseline tracking (test count before vs after)
-**Files:** verification.rs, skill struct in sigil-tools/src/skill.rs
+**Files:** verification.rs, skill struct in aeqi-tools/src/skill.rs
 
 #### 3. CHAT/UX
 **Gap:** No live subtask streaming, no approval UI, no interactive briefs
@@ -100,7 +100,7 @@ event broadcasting → brief generation
 - Approval dialog: [Allow Once] [Allow Session] [Allow Always] [Deny]
 - Clarification inline: question with typed options, tap to resume
 - Progressive message editing for Telegram (edit same message)
-**Files:** sigil-ui ChatPage.tsx, ContextPanel.tsx, new ApprovalDialog component
+**Files:** aeqi-ui ChatPage.tsx, ContextPanel.tsx, new ApprovalDialog component
 
 #### 4. MEMORY PRODUCT
 **Gap:** Deep internals, invisible externally
@@ -110,8 +110,8 @@ event broadcasting → brief generation
 - Graph visualization API (nodes + edges + positions for D3)
 - Conversation ingestion endpoint (accept threads → extract facts)
 - Injection safety scanning before storage (Hermes pattern)
-- Workers access memory via existing IPC + CLI (no MCP needed — Sigil is self-contained)
-**Files:** new routes in sigil-web, memory profile logic in sigil-memory
+- Workers access memory via existing IPC + CLI (no MCP needed — AEQI is self-contained)
+**Files:** new routes in aeqi-web, memory profile logic in aeqi-memory
 
 ### TIER 2: HIGH (Significant improvement, builds on Tier 1)
 
@@ -121,7 +121,7 @@ event broadcasting → brief generation
 **Build:**
 - Wire is_tool_allowed() in worker_pool before worker execution
 - Tool registry with capability metadata (reads_fs, writes_fs, network, dangerous)
-- Workers access Sigil via CLI (`sigil task create`, `sigil daemon query`)
+- Workers access AEQI via CLI (`aeqi task create`, `aeqi daemon query`)
 - Progressive tool loading (ToolFilter middleware — metadata only, schemas on demand)
 - NOTE on tool gating by execution mode:
   - Internal agent mode: `is_tool_allowed()` directly filters Rust Tool vec — real enforcement
@@ -129,7 +129,7 @@ event broadcasting → brief generation
     (Claude Code manages its own tools; external filters are prompt-level, not enforced)
   - Both modes benefit from skill-level tool policy, but enforcement differs
 - NOTE: MCP server is DEFERRED — only needed when external consumers exist.
-  Sigil is self-contained: daemon ↔ IPC ↔ workers ↔ Claude Code.
+  AEQI is self-contained: daemon ↔ IPC ↔ workers ↔ Claude Code.
 **Files:** worker_pool.rs, middleware/tool_filter.rs
 
 #### 6. EXECUTION
@@ -154,7 +154,7 @@ event broadcasting → brief generation
 - Phased execution with gates (prevent code before design)
 - Skill chaining (next_skill on completion, fallback_skill on failure)
 - Project-scoped promotion (2+ projects to become global)
-**Files:** sigil-tools/src/skill.rs, worker_pool.rs, skill_promotion.rs
+**Files:** aeqi-tools/src/skill.rs, worker_pool.rs, skill_promotion.rs
 
 #### 8. LEARNING
 **Gap:** No compliance measurement, no cross-project threshold, no instinct formation
@@ -175,7 +175,7 @@ event broadcasting → brief generation
 - Interactive morning brief (each item has action buttons)
 - Operator presence awareness (batch digest if absent > 8 hours)
 - Pattern-driven suggestions (3+ similar task sequences → suggest pipeline)
-**Files:** proactive.rs, sigil-ui ContextPanel
+**Files:** proactive.rs, aeqi-ui ContextPanel
 
 #### 10. ORCHESTRATION
 **Gap:** Already leads; needs polish
@@ -184,7 +184,7 @@ event broadcasting → brief generation
 - DAG visualization in dashboard (live task graph with status per node)
 - Cost-based scheduling (use history to estimate and batch)
 - Delegation summarization (structured summary, not full reasoning)
-**Files:** worker_pool.rs, sigil-ui new DAGView component
+**Files:** worker_pool.rs, aeqi-ui new DAGView component
 
 ---
 
@@ -208,7 +208,7 @@ Items: Chat/UX (#3) + Memory Product (#4)
 ### Phase C: Tool & Execution Depth (Weeks 5-6)
 Items: Tools (#5) + Execution (#6)
 - Wire is_tool_allowed()
-- MCP server for Sigil capabilities
+- MCP server for AEQI capabilities
 - RuntimeBackend trait
 - 4 missing middleware
 
@@ -229,15 +229,15 @@ Items: Proactive (#9) + Orchestration (#10)
 
 ## The Ambition
 
-Sigil aims to be excellent in ways that are KNOWN (best practices from 11 repos)
+AEQI aims to be excellent in ways that are KNOWN (best practices from 11 repos)
 AND in ways that are UNKNOWN (synthesis that creates something new).
 
 The known: middleware chains, verification pipelines, memory graphs, skill systems.
-Every competitor has some of these. Sigil has all of them, wired together.
+Every competitor has some of these. AEQI has all of them, wired together.
 
 The unknown: notes that reshape the system's identity. Proactive action proposals.
 Skill promotion from execution patterns. Memory that reasons about what it knows.
-No competitor has these. Sigil does.
+No competitor has these. AEQI does.
 
 The synthesis process ensures we always learn from the frontier while pushing
 beyond it. Every external repo is an input, never a ceiling.

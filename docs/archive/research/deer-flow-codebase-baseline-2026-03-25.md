@@ -6,7 +6,7 @@ Revision analyzed: `ac97dc6d426c`
 
 ## Purpose
 
-This document is a code-first baseline for Deer Flow so it can be compared to Sigil from actual implementation shape rather than repo branding.
+This document is a code-first baseline for Deer Flow so it can be compared to AEQI from actual implementation shape rather than repo branding.
 
 The main questions are:
 
@@ -14,13 +14,13 @@ The main questions are:
 - where the important logic lives
 - what it is genuinely strong at
 - what it is not trying to be
-- how to compare it fairly with Sigil
-- what Sigil should learn from it
-- what Sigil should not copy blindly
+- how to compare it fairly with AEQI
+- what AEQI should learn from it
+- what AEQI should not copy blindly
 
 ## Executive Summary
 
-Deer Flow is much closer to Sigil's category than Supermemory is, but it is still not the same kind of system.
+Deer Flow is much closer to AEQI's category than Supermemory is, but it is still not the same kind of system.
 
 From the code, Deer Flow is best understood as:
 
@@ -36,7 +36,7 @@ Its center of gravity is:
 - tool and skill composition
 - sandboxed work and artifact production
 
-Sigil's center of gravity is different:
+AEQI's center of gravity is different:
 
 - project and org-level orchestration
 - durable control-plane state
@@ -45,7 +45,7 @@ Sigil's center of gravity is different:
 - worker pool logic
 - budgets and patrol loops
 
-So Deer Flow is not "Sigil but better." It is a strong agent harness and product shell with a more mature live UX than Sigil, but with a shallower orchestration model.
+So Deer Flow is not "AEQI but better." It is a strong agent harness and product shell with a more mature live UX than AEQI, but with a shallower orchestration model.
 
 ## Core Architectural Shape
 
@@ -90,7 +90,7 @@ The important thing here is that Deer Flow's intelligence and behavior are heavi
 
 The embedded client in `backend/packages/harness/deerflow/client.py` is explicit that without a checkpointer, calls are stateless and `thread_id` is mainly for file isolation.
 
-That is a big distinction from Sigil. Deer Flow is thread-centric. Sigil is trying to be task/project/org-centric.
+That is a big distinction from AEQI. Deer Flow is thread-centric. AEQI is trying to be task/project/org-centric.
 
 ### 4. The runtime is middleware-heavy
 
@@ -125,10 +125,10 @@ Key observations:
 - Agent creation is unified and fairly legible.
 - Custom agent configuration exists, but still within the same overall harness shape.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
-- Deer Flow is cleaner than Sigil at packaging one configurable agent runtime.
-- Sigil is still aiming higher at orchestration and separation between control plane and worker fleet.
+- Deer Flow is cleaner than AEQI at packaging one configurable agent runtime.
+- AEQI is still aiming higher at orchestration and separation between control plane and worker fleet.
 
 ### Embedded Client
 
@@ -143,10 +143,10 @@ Key observations:
 - It can manage uploads, threads, skill installs, and stateful runs.
 - It makes the harness feel like a product capability, not just a server app.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
 - This is one of Deer Flow's strongest ideas.
-- Sigil would benefit from a clearer embedded/runtime API for consuming its orchestration and worker capabilities.
+- AEQI would benefit from a clearer embedded/runtime API for consuming its orchestration and worker capabilities.
 
 ### Subagents
 
@@ -168,10 +168,10 @@ Key observations:
 
 This is strong practical delegation, but it is still bounded delegation within one harness, not a persistent organizational worker system.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
-- Deer Flow is better than Sigil at live subtask UX and streaming delegated-task progress into the UI.
-- Sigil still has the more relevant ambition for durable worker ownership, routing, and project-level coordination.
+- Deer Flow is better than AEQI at live subtask UX and streaming delegated-task progress into the UI.
+- AEQI still has the more relevant ambition for durable worker ownership, routing, and project-level coordination.
 
 ### Memory
 
@@ -191,10 +191,10 @@ Key observations:
 
 This is a useful memory system, but it is still centered on personalized conversation memory and thread/agent continuity, not org-scale knowledge and control-plane learning.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
-- Deer Flow is ahead of Sigil in having a cleaner user-facing memory loop inside the harness.
-- Sigil is stronger conceptually in org/project state primitives, but weaker in memory productization.
+- Deer Flow is ahead of AEQI in having a cleaner user-facing memory loop inside the harness.
+- AEQI is stronger conceptually in org/project state primitives, but weaker in memory productization.
 
 ### Checkpointing And Persistence
 
@@ -213,10 +213,10 @@ Key observations:
 
 This is practical, but it is still thread persistence, not a durable orchestration substrate.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
 - Better than a purely stateless agent shell.
-- Still narrower than Sigil's desired task/project/org persistence model.
+- Still narrower than AEQI's desired task/project/org persistence model.
 
 ### Models And Runtime Resolution
 
@@ -234,10 +234,10 @@ Key observations:
 
 This is a solid runtime/model factory design.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
-- Deer Flow is ahead of Sigil in centralized model/runtime resolution.
-- This is an area Sigil should learn from directly.
+- Deer Flow is ahead of AEQI in centralized model/runtime resolution.
+- This is an area AEQI should learn from directly.
 
 ### Sandbox
 
@@ -254,9 +254,9 @@ Key observations:
 - The hardening is not mainly in `LocalSandbox` itself but in surrounding tool/path validation and virtual-path handling.
 - There is real test attention around path traversal, virtual path mapping, and skills/user-data separation.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
-- Deer Flow has a more explicit sandbox abstraction than Sigil.
+- Deer Flow has a more explicit sandbox abstraction than AEQI.
 - But the local execution layer is not obviously as mature or hardened as Hermes's broader execution-environment story.
 
 ### Guardrails
@@ -275,10 +275,10 @@ Key observations:
 
 This is a good policy hook, though not yet a full operator trust framework.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
-- Deer Flow is ahead of Sigil in explicit tool-call guardrail hooks.
-- Sigil should adopt something similarly structured.
+- Deer Flow is ahead of AEQI in explicit tool-call guardrail hooks.
+- AEQI should adopt something similarly structured.
 
 ### Gateway And Channels
 
@@ -293,10 +293,10 @@ Key observations:
 - IM channels are a first-class backend concern.
 - The gateway is part of the product shell, not an afterthought.
 
-Relevant comparison for Sigil:
+Relevant comparison for AEQI:
 
-- Deer Flow has a more concretely packaged live product shell than Sigil right now.
-- Sigil's backend ideas are still more orchestrator-centric.
+- Deer Flow has a more concretely packaged live product shell than AEQI right now.
+- AEQI's backend ideas are still more orchestrator-centric.
 
 ### Frontend
 
@@ -313,11 +313,11 @@ Key observations:
 - It consumes backend APIs for models, skills, memory, uploads, agents, artifacts, MCP, and thread cleanup.
 - It handles live subtask custom events and updates UI state from them.
 
-This is a materially more mature live UI integration than Sigil currently has.
+This is a materially more mature live UI integration than AEQI currently has.
 
-## What Deer Flow Is Better At Than Sigil
+## What Deer Flow Is Better At Than AEQI
 
-Based on code, Deer Flow appears stronger than current Sigil in these areas:
+Based on code, Deer Flow appears stronger than current AEQI in these areas:
 
 - live frontend and streaming UX
 - harness/app layering discipline
@@ -331,9 +331,9 @@ Based on code, Deer Flow appears stronger than current Sigil in these areas:
 
 It also has a real test surface. I counted 59 backend test files, and the tests cover memory, checkpointer behavior, guardrails, sandbox path security, client behavior, tools, uploads, suggestions, skills, and more. I did not run the suite, but the repo is not light on validation work.
 
-## What Deer Flow Is Not Better At Than Sigil
+## What Deer Flow Is Not Better At Than AEQI
 
-Deer Flow is not obviously stronger than Sigil at:
+Deer Flow is not obviously stronger than AEQI at:
 
 - project supervision
 - task DAG orchestration
@@ -344,7 +344,7 @@ Deer Flow is not obviously stronger than Sigil at:
 - durable shared blackboard-style org state
 - explicit operator intervention over a persistent organization
 
-Those are still closer to Sigil's intended differentiator.
+Those are still closer to AEQI's intended differentiator.
 
 ## The Most Important Difference
 
@@ -352,7 +352,7 @@ Deer Flow is mainly:
 
 "a live super-agent harness and product shell"
 
-Sigil is trying to be:
+AEQI is trying to be:
 
 "a persistent AI organization and orchestration control plane"
 
@@ -364,7 +364,7 @@ That distinction matters because Deer Flow optimizes for:
 - tools
 - live streaming UI
 
-Sigil should optimize for:
+AEQI should optimize for:
 
 - tasks
 - projects
@@ -373,17 +373,17 @@ Sigil should optimize for:
 - supervision
 - trustable operator control
 
-## What Sigil Should Learn From Deer Flow
+## What AEQI Should Learn From Deer Flow
 
 ### 1. Harness/App Separation
 
-Sigil should keep its orchestration kernel cleanly separated from product-shell and UI-serving layers.
+AEQI should keep its orchestration kernel cleanly separated from product-shell and UI-serving layers.
 
 Deer Flow's harness boundary test is a strong pattern worth copying.
 
 ### 2. Better Embedded Runtime Surface
 
-Sigil would benefit from a first-class embedded client or SDK surface, not just daemon and CLI entrypoints.
+AEQI would benefit from a first-class embedded client or SDK surface, not just daemon and CLI entrypoints.
 
 ### 3. Better Live Streaming UX
 
@@ -394,7 +394,7 @@ Deer Flow is ahead in:
 - delegated subtask visibility
 - artifact-aware chat surfaces
 
-Sigil should borrow those UX and protocol ideas.
+AEQI should borrow those UX and protocol ideas.
 
 ### 4. Better Runtime Composition
 
@@ -408,11 +408,11 @@ Deer Flow's middleware stack is a good lesson in keeping runtime features modula
 - token tracking
 - plan mode
 
-Sigil should keep orchestration separate, but runtime concerns could be packaged more cleanly like this.
+AEQI should keep orchestration separate, but runtime concerns could be packaged more cleanly like this.
 
 ### 5. Better Model Factory
 
-Sigil should centralize:
+AEQI should centralize:
 
 - model creation
 - provider resolution
@@ -423,7 +423,7 @@ Sigil should centralize:
 
 Deer Flow makes uploads, thread-local data, and artifacts feel native to the product.
 
-Sigil should likely improve its equivalent operator-facing artifact and workspace handling.
+AEQI should likely improve its equivalent operator-facing artifact and workspace handling.
 
 ### 7. Better Test Discipline Around Edges
 
@@ -435,13 +435,13 @@ Deer Flow tests many risky seams directly:
 - harness/app boundary
 - guardrail behavior
 
-Sigil should do more of that.
+AEQI should do more of that.
 
-## What Sigil Should Not Copy Blindly
+## What AEQI Should Not Copy Blindly
 
 ### 1. Thread-Centric Mental Model
 
-Sigil should not let thread/run state become the main organizing abstraction.
+AEQI should not let thread/run state become the main organizing abstraction.
 
 Its stronger path is still task/project/org state.
 
@@ -449,13 +449,13 @@ Its stronger path is still task/project/org state.
 
 Deer Flow's middleware design is good for runtime behavior, but it does not replace a real orchestration control plane.
 
-Sigil should not flatten supervision, routing, retries, and audit into one agent middleware stack.
+AEQI should not flatten supervision, routing, retries, and audit into one agent middleware stack.
 
 ### 3. Built-In Subagent Registry As "Organization"
 
 Deer Flow's subagents are useful, but they are still built-in role types inside one harness.
 
-Sigil should preserve the distinction between:
+AEQI should preserve the distinction between:
 
 - orchestrator
 - workers
@@ -466,15 +466,15 @@ Sigil should preserve the distinction between:
 
 Deer Flow's fallback to in-memory persistence is practical for developer ergonomics, but not enough for a trustworthy orchestration product.
 
-Sigil should be stricter about durability expectations.
+AEQI should be stricter about durability expectations.
 
 ### 5. Thin Local Sandbox As A Finished Safety Story
 
 Deer Flow has some good path-safety work, but the local execution layer is still relatively thin.
 
-Sigil should aim higher on execution policy and environment hardening.
+AEQI should aim higher on execution policy and environment hardening.
 
-## Fair Comparison To Sigil
+## Fair Comparison To AEQI
 
 The most useful comparison boundary is:
 
@@ -487,7 +487,7 @@ The most useful comparison boundary is:
 - embedded client
 - memory and artifacts inside a thread/run product shell
 
-### Sigil
+### AEQI
 
 - orchestration substrate
 - task/project/org state
@@ -496,23 +496,23 @@ The most useful comparison boundary is:
 - audit and intervention
 - durable control plane
 
-If we compare Deer Flow's highly polished live harness against Sigil's full orchestration ambition, the comparison will be misleading.
+If we compare Deer Flow's highly polished live harness against AEQI's full orchestration ambition, the comparison will be misleading.
 
-If we compare Deer Flow's runtime shell and UX against Sigil's worker/runtime/product surfaces, the comparison becomes very useful.
+If we compare Deer Flow's runtime shell and UX against AEQI's worker/runtime/product surfaces, the comparison becomes very useful.
 
 ## Current Comparison Judgment
 
 If the question is "which one has the better live super-agent product shell?" Deer Flow is ahead.
 
-If the question is "which one has the better orchestration substrate for a persistent AI organization?" Sigil is still the more relevant architecture.
+If the question is "which one has the better orchestration substrate for a persistent AI organization?" AEQI is still the more relevant architecture.
 
 If the question is "which one would users experience as more complete today in chat/task UI terms?" Deer Flow is likely ahead.
 
-If the question is "which one has the stronger long-term control-plane idea?" Sigil still does.
+If the question is "which one has the stronger long-term control-plane idea?" AEQI still does.
 
 ## Bottom Line
 
-Deer Flow is a serious and useful reference repo for Sigil.
+Deer Flow is a serious and useful reference repo for AEQI.
 
 It shows how to build:
 
@@ -523,13 +523,13 @@ It shows how to build:
 - modular runtime behavior
 - real frontend integration
 
-But it does not replace Sigil's reason to exist.
+But it does not replace AEQI's reason to exist.
 
 The right move is:
 
-- keep Sigil's orchestration core
+- keep AEQI's orchestration core
 - borrow Deer Flow's runtime-shell and UX discipline
 - borrow Deer Flow's harness layering and testing habits
-- do not collapse Sigil into a thread-centric super-agent runtime
+- do not collapse AEQI into a thread-centric super-agent runtime
 
 That is the productive lesson.

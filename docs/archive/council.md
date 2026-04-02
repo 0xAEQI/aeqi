@@ -1,6 +1,6 @@
 # Council Mode
 
-Council mode exists in Sigil today, but it is part of the daemon's messaging path rather than a dedicated CLI subcommand.
+Council mode exists in AEQI today, but it is part of the daemon's messaging path rather than a dedicated CLI subcommand.
 
 ## How It Works
 
@@ -16,9 +16,9 @@ incoming message
 
 The relevant code lives in:
 
-- `sigil-cli/src/cmd/daemon.rs`
-- `crates/sigil-orchestrator/src/agent_router.rs`
-- `crates/sigil-orchestrator/src/council.rs`
+- `aeqi-cli/src/cmd/daemon.rs`
+- `crates/aeqi-orchestrator/src/agent_router.rs`
+- `crates/aeqi-orchestrator/src/council.rs`
 
 ## Public Entry Point Today
 
@@ -27,7 +27,7 @@ The clearest operator-facing entry point is the Telegram flow handled by the dae
 - normal messages may invoke advisors based on router decisions
 - `/council ...` forces explicit council behavior
 
-There is currently no top-level `sigil council` command in the CLI.
+There is currently no top-level `aeqi council` command in the CLI.
 
 ## Advisor Model
 
