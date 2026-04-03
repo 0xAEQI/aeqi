@@ -251,7 +251,19 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  // Chat channels & history
+  // Sessions
+  getSessions: (agentId?: string) => {
+    const q = new URLSearchParams();
+    if (agentId) q.set("agent_id", agentId);
+    const qs = q.toString();
+    return request<any>(`/sessions${qs ? `?${qs}` : ""}`);
+  },
+  createSession: (agentId: string) =>
+    request<any>("/sessions", { method: "POST", body: JSON.stringify({ agent_id: agentId }) }),
+  closeSession: (sessionId: string) =>
+    request<any>(`/sessions/${sessionId}/close`, { method: "POST" }),
+
+  // Chat channels & history (deprecated — use sessions)
   getChatChannels: () => request<any>("/chat/channels"),
   getChatHistory: (params: { chat_id?: number; company?: string; channel_name?: string; limit?: number }) => {
     const query = new URLSearchParams();
