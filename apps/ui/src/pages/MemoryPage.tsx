@@ -19,52 +19,52 @@ const SCOPE_LABELS: Record<string, string> = {
 };
 
 export default function MemoryPage() {
-  const [projectList, setProjectList] = useState<any[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string>("");
+  const [companyList, setCompanyList] = useState<any[]>([]);
+  const [selectedCompany, setSelectedCompany] = useState<string>("");
   const [memories, setMemories] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
-  // Load projects with memory counts.
+  // Load companies with memory counts.
   useEffect(() => {
     api.getMemories().then((d) => {
-      setProjectList(d.projects || []);
-      // Auto-select first project with memories.
-      const first = (d.projects || []).find((p: any) => p.count > 0);
-      if (first) setSelectedProject(first.project);
+      setCompanyList(d.companies || []);
+      // Auto-select first company with memories.
+      const first = (d.companies || []).find((p: any) => p.count > 0);
+      if (first) setSelectedCompany(first.company);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
 
-  // Load memories for selected project.
+  // Load memories for selected company.
   useEffect(() => {
-    if (!selectedProject) return;
+    if (!selectedCompany) return;
     setLoading(true);
     api.getMemories({
-      project: selectedProject,
+      company: selectedCompany,
       query: search || undefined,
       limit: 100,
     }).then((d) => {
       setMemories(d.memories || []);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [selectedProject, search]);
+  }, [selectedCompany, search]);
 
   return (
     <>
       <Header title="Memory" />
 
-      {/* Project selector + search */}
+      {/* Company selector + search */}
       <div className="filters">
         <select
           className="filter-select"
-          value={selectedProject}
-          onChange={(e) => setSelectedProject(e.target.value)}
+          value={selectedCompany}
+          onChange={(e) => setSelectedCompany(e.target.value)}
         >
-          <option value="">Select project...</option>
-          {projectList.map((p: any) => (
-            <option key={p.project} value={p.project}>
-              {p.project} ({p.count} memories)
+          <option value="">Select company...</option>
+          {companyList.map((p: any) => (
+            <option key={p.company} value={p.company}>
+              {p.company} ({p.count} memories)
             </option>
           ))}
         </select>
@@ -80,12 +80,12 @@ export default function MemoryPage() {
         </span>
       </div>
 
-      {!selectedProject ? (
-        <EmptyState title="Select a project" description="Choose a project to view its agent memories." />
+      {!selectedCompany ? (
+        <EmptyState title="Select a company" description="Choose a company to view its agent memories." />
       ) : loading ? (
         <div className="loading">Loading memories...</div>
       ) : memories.length === 0 ? (
-        <EmptyState title="No memories" description={search ? "No memories match your search." : "No memories stored yet for this project."} />
+        <EmptyState title="No memories" description={search ? "No memories match your search." : "No memories stored yet for this company."} />
       ) : (
         <div>
           {memories.map((m: any) => (

@@ -19,7 +19,7 @@ pub(crate) async fn cmd_operation(
                 .map(|id| {
                     let prefix = id.split('-').next().unwrap_or("");
                     let project_name = config
-                        .projects
+                        .companies
                         .iter()
                         .find(|r| r.prefix == prefix)
                         .map(|r| r.name.clone())
@@ -64,7 +64,7 @@ pub(crate) async fn cmd_operation(
                     let icon = if task_entry.closed { "[x]" } else { "[ ]" };
                     println!(
                         "  {} {} (project: {})",
-                        icon, task_entry.task_id, task_entry.project
+                        icon, task_entry.task_id, task_entry.company
                     );
                 }
             } else {

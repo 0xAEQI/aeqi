@@ -39,7 +39,7 @@ pub(crate) async fn cmd_config(config_path: &Option<PathBuf>, action: ConfigActi
             );
 
             println!("\n[[projects]]");
-            for proj in &config.projects {
+            for proj in &config.companies {
                 println!(
                     "  {} prefix={} model={} workers={}",
                     proj.name,

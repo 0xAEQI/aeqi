@@ -36,15 +36,15 @@ Workers receive context from the orchestrator. They NEVER:
 - Wait for another worker to complete
 - Share state with peers during execution
 
-If workers need shared state, the orchestrator mediates via blackboard between phases.
+If workers need shared state, the orchestrator mediates via notes between phases.
 
 ---
 
 ## Phase 3: Delegate
 
 1. **Fan out** — `aeqi_delegate` with each worker in parallel (async mode)
-2. **Track** — post to `aeqi_blackboard` key `task:{id}:workers` with worker IDs and status
-3. **Monitor** — as workers complete, read their findings from blackboard
+2. **Track** — post to `aeqi_notes` key `task:{id}:workers` with worker IDs and status
+3. **Monitor** — as workers complete, read their findings from notes
 
 ### Scaling Rules
 - **1-3 workers** — orchestrate directly
@@ -59,7 +59,7 @@ Never overload a single orchestrator with 8+ parallel workers. Add hierarchy ins
 
 ## Phase 4: Aggregate
 
-1. **Collect results** — `aeqi_blackboard` query for all `task:{id}:worker:*` entries
+1. **Collect results** — `aeqi_notes` query for all `task:{id}:worker:*` entries
 2. **Merge** — combine findings, deduplicate, resolve conflicts
 3. **Synthesize** — the orchestrator must UNDERSTAND and RESTATE findings, not pass through. Lazy delegation (forwarding without synthesis) is a failure.
 

@@ -1,4 +1,4 @@
-use aeqi_core::config::ProjectConfig;
+use aeqi_core::config::CompanyConfig;
 use aeqi_core::identity::Identity;
 use aeqi_tasks::TaskBoard;
 use anyhow::Result;
@@ -6,9 +6,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 
-/// A Project is a container for repos, tasks, and budget.
-/// Projects do NOT have agent personality — agents work ON projects.
-pub struct Project {
+/// A Company is a container for repos, tasks, and budget.
+/// Companies do NOT have agent personality — agents work ON companies.
+pub struct Company {
     pub name: String,
     pub prefix: String,
     pub repo: PathBuf,
@@ -17,22 +17,22 @@ pub struct Project {
     pub max_workers: u32,
     pub worker_timeout_secs: u64,
     /// Project-only context (AGENTS.md, KNOWLEDGE.md, HEARTBEAT.md from projects/{name}/).
-    pub project_identity: Identity,
+    pub company_identity: Identity,
     pub tasks: Arc<Mutex<TaskBoard>>,
     pub task_notify: Arc<Notify>,
     pub departments: Vec<aeqi_core::config::DepartmentConfig>,
 }
 
-impl Project {
+impl Company {
     /// Create a project from configuration.
     pub fn from_config(
-        config: &ProjectConfig,
+        config: &CompanyConfig,
         project_dir: &std::path::Path,
         default_model: &str,
     ) -> Result<Self> {
         // Load project-only files (AGENTS.md, KNOWLEDGE.md, HEARTBEAT.md).
         // Uses load_from_dir since projects don't have agent personality.
-        let project_identity = Identity::load_from_dir(project_dir).unwrap_or_default();
+        let company_identity = Identity::load_from_dir(project_dir).unwrap_or_default();
 
         let tasks_dir = project_dir.join(".tasks");
         let task_board = TaskBoard::open(&tasks_dir)?;
@@ -54,7 +54,7 @@ impl Project {
                 .unwrap_or_else(|| default_model.to_string()),
             max_workers: config.max_workers,
             worker_timeout_secs: config.worker_timeout_secs,
-            project_identity,
+            company_identity,
             tasks: Arc::new(Mutex::new(task_board)),
             task_notify: Arc::new(Notify::new()),
             departments: config.departments.clone(),

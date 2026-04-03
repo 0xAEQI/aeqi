@@ -46,6 +46,7 @@ export default function App() {
         <Route path="automations" element={<Navigate to="/triggers" replace />} />
         <Route path="knowledge" element={<Navigate to="/memories" replace />} />
         <Route path="memory" element={<Navigate to="/memories" replace />} />
+        <Route path="notes" element={<Navigate to="/memories" replace />} />
         <Route path="blackboard" element={<Navigate to="/memories" replace />} />
         <Route path="cost" element={<Navigate to="/finance" replace />} />
         <Route path="audit" element={<Navigate to="/" replace />} />

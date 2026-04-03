@@ -27,7 +27,8 @@ use tracing::{debug, info};
 pub struct Department {
     pub id: String,
     pub name: String,
-    pub project: Option<String>,
+    #[serde(alias = "project")]
+    pub company: Option<String>,
     pub manager_id: Option<String>,
     pub parent_id: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -63,8 +64,9 @@ pub struct PersistentAgent {
     /// The full system prompt — the agent's identity, personality, role,
     /// instructions. Stored in DB. This IS the agent.
     pub system_prompt: String,
-    /// Project scope. None = root (cross-project).
-    pub project: Option<String>,
+    /// Company scope. None = root (cross-company).
+    #[serde(alias = "project")]
+    pub company: Option<String>,
     /// Foreign key to departments table. None = unassigned.
     pub department_id: Option<String>,
     /// Preferred model.
@@ -105,7 +107,8 @@ pub struct AgentTemplateFrontmatter {
     pub model: Option<String>,
     #[serde(default)]
     pub capabilities: Vec<String>,
-    pub project: Option<String>,
+    #[serde(alias = "project")]
+    pub company: Option<String>,
     #[serde(default)]
     pub triggers: Vec<TemplateTrigger>,
     // --- Visual identity for TUI ---
@@ -454,7 +457,7 @@ impl AgentRegistry {
                 fm.display_name.as_deref(),
                 &template_name,
                 &system_prompt,
-                project_override.or(fm.project.as_deref()),
+                project_override.or(fm.company.as_deref()),
                 fm.model.as_deref(),
                 &fm.capabilities,
             )
@@ -528,7 +531,7 @@ impl AgentRegistry {
             display_name: display_name.map(|s| s.to_string()),
             template: template.to_string(),
             system_prompt: system_prompt.to_string(),
-            project: project.map(|s| s.to_string()),
+            company: project.map(|s| s.to_string()),
             department_id: None,
             model: model.map(|s| s.to_string()),
             capabilities: capabilities.to_vec(),
@@ -553,7 +556,7 @@ impl AgentRegistry {
                 agent.display_name,
                 agent.template,
                 agent.system_prompt,
-                agent.project,
+                agent.company,
                 agent.model,
                 caps_json,
                 agent.status.to_string(),
@@ -728,7 +731,7 @@ impl AgentRegistry {
         let dept = Department {
             id: id.clone(),
             name: name.to_string(),
-            project: project.map(|s| s.to_string()),
+            company: project.map(|s| s.to_string()),
             manager_id: manager_id.map(|s| s.to_string()),
             parent_id: parent_id.map(|s| s.to_string()),
             created_at: now,
@@ -741,7 +744,7 @@ impl AgentRegistry {
             params![
                 dept.id,
                 dept.name,
-                dept.project,
+                dept.company,
                 dept.manager_id,
                 dept.parent_id,
                 dept.created_at.to_rfc3339(),
@@ -1116,7 +1119,7 @@ fn row_to_department(row: &rusqlite::Row) -> Department {
     Department {
         id: row.get("id").unwrap_or_default(),
         name: row.get("name").unwrap_or_default(),
-        project: row.get("project").ok(),
+        company: row.get("project").ok(),
         manager_id: row.get("manager_id").ok(),
         parent_id: row.get("parent_id").ok(),
         created_at: row
@@ -1145,7 +1148,7 @@ fn row_to_agent(row: &rusqlite::Row) -> PersistentAgent {
         display_name: row.get("display_name").ok(),
         template: row.get("template").unwrap_or_default(),
         system_prompt: row.get("system_prompt").unwrap_or_default(),
-        project: row.get("project").ok(),
+        company: row.get("project").ok(),
         department_id: row.get("department_id").ok(),
         model: row.get("model").ok(),
         capabilities,
@@ -1206,7 +1209,7 @@ mod tests {
         assert_eq!(agent.name, "shadow");
         assert_eq!(agent.system_prompt, "You are Shadow.");
         assert_eq!(agent.capabilities, vec!["spawn_agents"]);
-        assert!(agent.project.is_none());
+        assert!(agent.company.is_none());
         assert_eq!(agent.status, AgentStatus::Active);
         assert_eq!(agent.session_count, 0);
 
@@ -1231,7 +1234,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(agent.project.as_deref(), Some("aeqi"));
+        assert_eq!(agent.company.as_deref(), Some("aeqi"));
 
         let list = reg.list(Some("aeqi"), None).await.unwrap();
         assert_eq!(list.len(), 1);
@@ -1386,7 +1389,7 @@ You learn everything about the user aggressively.
         assert_eq!(agent.model.as_deref(), Some("anthropic/claude-sonnet-4.6"));
         assert_eq!(agent.capabilities, vec!["spawn_agents", "spawn_projects"]);
         assert!(agent.system_prompt.contains("personal assistant"));
-        assert!(agent.project.is_none()); // Root scope
+        assert!(agent.company.is_none()); // Root scope
     }
 
     #[tokio::test]
@@ -1449,7 +1452,7 @@ You are a monitoring agent.
             .unwrap();
 
         assert_eq!(dept.name, "engineering");
-        assert_eq!(dept.project.as_deref(), Some("aeqi"));
+        assert_eq!(dept.company.as_deref(), Some("aeqi"));
         assert!(dept.manager_id.is_none());
         assert!(dept.parent_id.is_none());
         assert!(!dept.id.is_empty());
@@ -1674,14 +1677,14 @@ You are a monitoring agent.
             .await
             .unwrap();
         assert!(dept.is_some());
-        assert_eq!(dept.unwrap().project.as_deref(), Some("aeqi"));
+        assert_eq!(dept.unwrap().company.as_deref(), Some("aeqi"));
 
         let dept = reg
             .get_department_by_name("engineering", Some("other"))
             .await
             .unwrap();
         assert!(dept.is_some());
-        assert_eq!(dept.unwrap().project.as_deref(), Some("other"));
+        assert_eq!(dept.unwrap().company.as_deref(), Some("other"));
 
         let nope = reg
             .get_department_by_name("nonexistent", Some("aeqi"))

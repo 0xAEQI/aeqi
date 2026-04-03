@@ -1,9 +1,9 @@
-//! Inter-Agent Blackboard — shared coordination space between workers.
+//! Inter-Agent Notes — shared coordination space between workers.
 //!
-//! The blackboard provides a shared knowledge and coordination surface where
-//! agents can post discoveries, claim resources, signal state changes, and
-//! record decisions. Entries are ephemeral (TTL-based) and scoped per-project,
-//! with optional cross-project queries.
+//! Notes provide a shared knowledge and coordination surface where agents can
+//! post discoveries, claim resources, signal state changes, and record
+//! decisions. Entries are ephemeral (TTL-based) and scoped per-project, with
+//! optional cross-project queries.
 //!
 //! ## Entry Types (by key prefix convention)
 //!
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Mutex;
 
-/// How long a blackboard entry persists.
+/// How long a note entry persists.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EntryDurability {
@@ -41,14 +41,15 @@ pub enum ClaimResult {
     Renewed,
 }
 
-/// A single blackboard entry.
+/// A single note entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BlackboardEntry {
+pub struct NoteEntry {
     pub id: String,
     pub key: String,
     pub content: String,
     pub agent: String,
-    pub project: String,
+    #[serde(alias = "project")]
+    pub company: String,
     pub tags: Vec<String>,
     pub durability: EntryDurability,
     pub created_at: DateTime<Utc>,
@@ -60,21 +61,22 @@ pub struct BlackboardEntry {
 pub struct AgentVisibility {
     /// The agent's own UUID — grants access to `agent:{uuid}:*` entries.
     pub agent_id: Option<String>,
-    /// The project the agent belongs to — grants access to `project:{name}:*` entries.
-    pub project: Option<String>,
+    /// The company the agent belongs to — grants access to `project:{name}:*` entries.
+    #[serde(alias = "project")]
+    pub company: Option<String>,
     /// The department the agent belongs to — grants access to `dept:{name}:*` entries.
     pub department: Option<String>,
 }
 
-/// SQLite-backed inter-agent blackboard.
-pub struct Blackboard {
+/// SQLite-backed inter-agent notes store.
+pub struct Notes {
     conn: Mutex<Connection>,
     transient_ttl_hours: u64,
     durable_ttl_days: u64,
     claim_ttl_hours: u64,
 }
 
-impl Blackboard {
+impl Notes {
     pub fn open(
         path: &Path,
         transient_ttl_hours: u64,
@@ -131,7 +133,7 @@ impl Blackboard {
         project: &str,
         tags: &[String],
         durability: EntryDurability,
-    ) -> Result<BlackboardEntry> {
+    ) -> Result<NoteEntry> {
         let now = Utc::now();
         let expires_at = match durability {
             EntryDurability::Transient => {
@@ -141,12 +143,12 @@ impl Blackboard {
         };
         let id = uuid::Uuid::new_v4().to_string();
 
-        let entry = BlackboardEntry {
+        let entry = NoteEntry {
             id: id.clone(),
             key: key.to_string(),
             content: content.to_string(),
             agent: agent.to_string(),
-            project: project.to_string(),
+            company: project.to_string(),
             tags: tags.to_vec(),
             durability,
             created_at: now,
@@ -167,7 +169,7 @@ impl Blackboard {
             "INSERT OR REPLACE INTO aeqi_blackboard (id, key, content, agent, project, tags_json, durability, created_at, expires_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             rusqlite::params![
-                entry.id, entry.key, entry.content, entry.agent, entry.project,
+                entry.id, entry.key, entry.content, entry.agent, entry.company,
                 tags_json, dur_str, entry.created_at.to_rfc3339(), entry.expires_at.to_rfc3339(),
             ],
         )?;
@@ -288,12 +290,7 @@ impl Blackboard {
     }
 
     /// Query entries by project and tags (any tag matches).
-    pub fn query(
-        &self,
-        project: &str,
-        tags: &[String],
-        limit: u32,
-    ) -> Result<Vec<BlackboardEntry>> {
+    pub fn query(&self, project: &str, tags: &[String], limit: u32) -> Result<Vec<NoteEntry>> {
         let conn = self
             .conn
             .lock()
@@ -307,7 +304,7 @@ impl Blackboard {
         // Query all non-expired entries for the project, then filter by tag in Rust
         // (SQLite JSON queries are limited).
         let entries = self.list_project_internal(&conn, project, 1000, &now, None)?;
-        let mut matched: Vec<BlackboardEntry> = entries
+        let mut matched: Vec<NoteEntry> = entries
             .into_iter()
             .filter(|e| e.tags.iter().any(|t| tags.contains(t)))
             .collect();
@@ -330,11 +327,11 @@ impl Blackboard {
         visibility: &AgentVisibility,
         tags: &[String],
         limit: usize,
-    ) -> Result<Vec<BlackboardEntry>> {
+    ) -> Result<Vec<NoteEntry>> {
         // Fetch unfiltered entries (use a generous internal limit).
         let raw = self.query(project, tags, 1000)?;
 
-        let mut filtered: Vec<BlackboardEntry> = raw
+        let mut filtered: Vec<NoteEntry> = raw
             .into_iter()
             .filter(|e| entry_visible(&e.key, visibility))
             .collect();
@@ -350,7 +347,7 @@ impl Blackboard {
         tags: &[String],
         since: DateTime<Utc>,
         limit: u32,
-    ) -> Result<Vec<BlackboardEntry>> {
+    ) -> Result<Vec<NoteEntry>> {
         let conn = self
             .conn
             .lock()
@@ -364,7 +361,7 @@ impl Blackboard {
             return Ok(result);
         }
 
-        let mut matched: Vec<BlackboardEntry> = entries
+        let mut matched: Vec<NoteEntry> = entries
             .into_iter()
             .filter(|e| e.tags.iter().any(|t| tags.contains(t)))
             .collect();
@@ -378,7 +375,7 @@ impl Blackboard {
         tags: &[String],
         since: Option<DateTime<Utc>>,
         limit: u32,
-    ) -> Result<Vec<BlackboardEntry>> {
+    ) -> Result<Vec<NoteEntry>> {
         let conn = self
             .conn
             .lock()
@@ -415,7 +412,7 @@ impl Blackboard {
             return Ok(result);
         }
 
-        let mut matched: Vec<BlackboardEntry> = entries
+        let mut matched: Vec<NoteEntry> = entries
             .into_iter()
             .filter(|e| e.tags.iter().any(|t| tags.contains(t)))
             .collect();
@@ -447,7 +444,7 @@ impl Blackboard {
     }
 
     /// Get a specific entry by project and key.
-    pub fn get_by_key(&self, project: &str, key: &str) -> Result<Option<BlackboardEntry>> {
+    pub fn get_by_key(&self, project: &str, key: &str) -> Result<Option<NoteEntry>> {
         let conn = self
             .conn
             .lock()
@@ -482,7 +479,7 @@ impl Blackboard {
     }
 
     /// List all non-expired entries for a project.
-    pub fn list_project(&self, project: &str, limit: u32) -> Result<Vec<BlackboardEntry>> {
+    pub fn list_project(&self, project: &str, limit: u32) -> Result<Vec<NoteEntry>> {
         let conn = self
             .conn
             .lock()
@@ -498,7 +495,7 @@ impl Blackboard {
         limit: u32,
         now: &str,
         since: Option<DateTime<Utc>>,
-    ) -> Result<Vec<BlackboardEntry>> {
+    ) -> Result<Vec<NoteEntry>> {
         let entries = if let Some(since_dt) = since {
             let since_str = since_dt.to_rfc3339();
             let mut stmt = conn.prepare(
@@ -526,7 +523,7 @@ impl Blackboard {
         Ok(entries)
     }
 
-    fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<BlackboardEntry> {
+    fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<NoteEntry> {
         let id: String = row.get(0)?;
         let key: String = row.get(1)?;
         let content: String = row.get(2)?;
@@ -547,12 +544,12 @@ impl Blackboard {
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
 
-        Ok(BlackboardEntry {
+        Ok(NoteEntry {
             id,
             key,
             content,
             agent,
-            project,
+            company: project,
             tags,
             durability,
             created_at,
@@ -567,7 +564,7 @@ fn entry_visible(key: &str, vis: &AgentVisibility) -> bool {
         return true;
     }
     if let Some(rest) = key.strip_prefix("project:") {
-        return match vis.project.as_deref() {
+        return match vis.company.as_deref() {
             Some(p) => rest.starts_with(&format!("{p}:")),
             None => false,
         };
@@ -593,9 +590,9 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn temp_bb() -> (Blackboard, TempDir) {
+    fn temp_bb() -> (Notes, TempDir) {
         let dir = TempDir::new().unwrap();
-        let bb = Blackboard::open(&dir.path().join("bb.db"), 24, 7, 2).unwrap();
+        let bb = Notes::open(&dir.path().join("bb.db"), 24, 7, 2).unwrap();
         (bb, dir)
     }
 
@@ -893,7 +890,7 @@ mod tests {
             .query_cross_project(&["signal".to_string()], None, 10)
             .unwrap();
         assert_eq!(signals.len(), 1);
-        assert_eq!(signals[0].project, "backend");
+        assert_eq!(signals[0].company, "backend");
     }
 
     #[test]
@@ -945,7 +942,7 @@ mod tests {
     fn test_entry_visible_helper() {
         let vis = AgentVisibility {
             agent_id: Some("a-123".into()),
-            project: Some("alpha".into()),
+            company: Some("alpha".into()),
             department: Some("eng".into()),
         };
 
@@ -1075,7 +1072,7 @@ mod tests {
         // Agent in project "proj", dept "eng", id "a1"
         let vis = AgentVisibility {
             agent_id: Some("a1".into()),
-            project: Some("proj".into()),
+            company: Some("proj".into()),
             department: Some("eng".into()),
         };
 

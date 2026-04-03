@@ -9,11 +9,11 @@ use tracing::{debug, info, warn};
 use crate::agent_registry::AgentRegistry;
 use crate::chat_engine::{ChatEngine, ChatMessage, ChatSource};
 use crate::conversation_store::{
-    agency_chat_id, department_chat_id, named_channel_chat_id, project_chat_id,
+    agency_chat_id, company_chat_id, department_chat_id, named_channel_chat_id,
 };
 use crate::execution_events::{EventBroadcaster, ExecutionEvent};
 use crate::message::{Dispatch, DispatchBus, DispatchHealth, DispatchKind};
-use crate::registry::ProjectRegistry;
+use crate::registry::CompanyRegistry;
 use crate::session_tracker::SessionTracker;
 use crate::trigger::TriggerStore;
 
@@ -111,7 +111,7 @@ fn resolve_web_chat_id(
         if let Some(department) = department_hint {
             return department_chat_id(project, department);
         }
-        return project_chat_id(project);
+        return company_chat_id(project);
     }
 
     if department_hint.is_some() {
@@ -162,7 +162,7 @@ fn merge_timeline_metadata(
 }
 
 async fn find_task_snapshot(
-    registry: &Arc<ProjectRegistry>,
+    registry: &Arc<CompanyRegistry>,
     project_hint: Option<&str>,
     task_id: &str,
 ) -> Option<serde_json::Value> {
@@ -175,7 +175,7 @@ async fn find_task_snapshot(
         return Some(task_snapshot(task));
     }
 
-    for project_name in registry.project_names().await {
+    for project_name in registry.company_names().await {
         if let Some(board) = registry.get_task_board(&project_name).await
             && let Ok(board) = board.try_lock()
             && let Some(task) = board.get(task_id)
@@ -192,10 +192,10 @@ fn attach_chat_id(mut payload: serde_json::Value, chat_id: i64) -> serde_json::V
     payload
 }
 
-/// The Daemon: background process that runs the ProjectRegistry patrol loop
+/// The Daemon: background process that runs the CompanyRegistry patrol loop
 /// and trigger system.
 pub struct Daemon {
-    pub registry: Arc<ProjectRegistry>,
+    pub registry: Arc<CompanyRegistry>,
     pub dispatch_bus: Arc<DispatchBus>,
     pub patrol_interval_secs: u64,
     pub background_automation_enabled: bool,
@@ -215,7 +215,7 @@ pub struct Daemon {
 }
 
 impl Daemon {
-    pub fn new(registry: Arc<ProjectRegistry>, dispatch_bus: Arc<DispatchBus>) -> Self {
+    pub fn new(registry: Arc<CompanyRegistry>, dispatch_bus: Arc<DispatchBus>) -> Self {
         Self {
             registry,
             dispatch_bus,
@@ -248,7 +248,7 @@ impl Daemon {
         // Look up agent to determine project.
         let project = if let Some(ref registry) = self.agent_registry {
             match registry.get(&trigger.agent_id).await {
-                Ok(Some(agent)) => match agent.project {
+                Ok(Some(agent)) => match agent.company {
                     Some(p) => p,
                     None => {
                         warn!(
@@ -361,12 +361,12 @@ impl Daemon {
                 self.process_agent_dispatches(
                     &agent.id,
                     &agent.name,
-                    &agent.project,
+                    &agent.company,
                     &id_dispatches,
                 )
                 .await;
             } else {
-                self.process_agent_dispatches(&agent.id, &agent.name, &agent.project, &dispatches)
+                self.process_agent_dispatches(&agent.id, &agent.name, &agent.company, &dispatches)
                     .await;
             }
         }
@@ -676,7 +676,7 @@ impl Daemon {
                         // Look up agent project.
                         let project = if let Some(ref ar) = agent_reg {
                             match ar.get(&trigger.agent_id).await {
-                                Ok(Some(a)) => a.project,
+                                Ok(Some(a)) => a.company,
                                 _ => None,
                             }
                         } else {
@@ -888,11 +888,11 @@ impl Daemon {
 
                         // (b) Per-project budgets + worker counts + orchestrator params.
                         let orch = &new_config.orchestrator;
-                        for pcfg in &new_config.projects {
+                        for pcfg in &new_config.companies {
                             if let Some(budget) = pcfg.max_cost_per_day_usd {
                                 self.registry
                                     .cost_ledger
-                                    .set_project_budget(&pcfg.name, budget);
+                                    .set_company_budget(&pcfg.name, budget);
                             }
 
                             // Update worker pool parameters.
@@ -997,7 +997,7 @@ impl Daemon {
             self.registry.cost_ledger.prune_old();
 
             // 11. Prune expired blackboard entries.
-            if let Some(ref bb) = self.registry.blackboard
+            if let Some(ref bb) = self.registry.notes
                 && let Err(e) = bb.prune_expired()
             {
                 warn!(error = %e, "failed to prune blackboard");
@@ -1015,7 +1015,7 @@ impl Daemon {
                     info!(count = ready.len(), "flushing debounced memory writes");
                     if let Some(ref engine) = self.chat_engine {
                         for w in &ready {
-                            if let Some(mem) = engine.memory_stores.get(&w.project) {
+                            if let Some(mem) = engine.memory_stores.get(&w.company) {
                                 let category = match w.category.as_str() {
                                     "fact" => aeqi_core::traits::MemoryCategory::Fact,
                                     "procedure" => aeqi_core::traits::MemoryCategory::Procedure,
@@ -1030,20 +1030,20 @@ impl Daemon {
                                 };
                                 match mem.store(&w.key, &w.content, category, scope, None).await {
                                     Ok(id) => debug!(
-                                        project = %w.project,
+                                        project = %w.company,
                                         id = %id,
                                         key = %w.key,
                                         "debounced write persisted"
                                     ),
                                     Err(e) => warn!(
-                                        project = %w.project,
+                                        project = %w.company,
                                         key = %w.key,
                                         "debounced write failed: {e}"
                                     ),
                                 }
                             } else {
                                 debug!(
-                                    project = %w.project,
+                                    project = %w.company,
                                     key = %w.key,
                                     "no memory store for project — write dropped"
                                 );
@@ -1081,7 +1081,7 @@ impl Daemon {
     #[allow(clippy::too_many_arguments)]
     async fn socket_accept_loop(
         listener: tokio::net::UnixListener,
-        registry: Arc<ProjectRegistry>,
+        registry: Arc<CompanyRegistry>,
         dispatch_bus: Arc<DispatchBus>,
         trigger_store: Option<Arc<TriggerStore>>,
         agent_registry: Option<Arc<AgentRegistry>>,
@@ -1133,7 +1133,7 @@ impl Daemon {
     #[allow(clippy::too_many_arguments)]
     async fn handle_socket_connection(
         stream: tokio::net::UnixStream,
-        registry: Arc<ProjectRegistry>,
+        registry: Arc<CompanyRegistry>,
         dispatch_bus: Arc<DispatchBus>,
         trigger_store: Option<Arc<TriggerStore>>,
         agent_registry: Option<Arc<AgentRegistry>>,
@@ -1171,7 +1171,7 @@ impl Daemon {
                 "ping" => serde_json::json!({"ok": true, "pong": true}),
 
                 "status" => {
-                    let project_names: Vec<String> = registry.project_names().await;
+                    let project_names: Vec<String> = registry.company_names().await;
                     let worker_count = registry.total_max_workers().await;
                     let dispatch_health = dispatch_bus.health(ACK_RETRY_AGE_SECS).await;
                     let mail_count = dispatch_health.unread;
@@ -1182,7 +1182,7 @@ impl Daemon {
                     };
 
                     let (spent, budget, remaining) = registry.cost_ledger.budget_status();
-                    let project_budgets = registry.cost_ledger.all_project_budget_statuses();
+                    let project_budgets = registry.cost_ledger.all_company_budget_statuses();
                     let project_budget_info: serde_json::Map<String, serde_json::Value> =
                         project_budgets
                             .into_iter()
@@ -1220,7 +1220,7 @@ impl Daemon {
                 }
 
                 "readiness" => {
-                    let worker_limits = registry.project_worker_limits().await;
+                    let worker_limits = registry.company_worker_limits().await;
                     let dispatch_health = dispatch_bus.health(ACK_RETRY_AGE_SECS).await;
                     let (spent, budget, remaining) = registry.cost_ledger.budget_status();
                     readiness_response(
@@ -1252,8 +1252,8 @@ impl Daemon {
                     })
                 }
 
-                "projects" => {
-                    let summaries = registry.list_project_summaries().await;
+                "companies" | "projects" => {
+                    let summaries = registry.list_company_summaries().await;
                     let projects: Vec<serde_json::Value> = summaries
                         .iter()
                         .map(|s| {
@@ -1337,7 +1337,7 @@ impl Daemon {
                 "cost" => {
                     let (spent, budget, remaining) = registry.cost_ledger.budget_status();
                     let report = registry.cost_ledger.daily_report();
-                    let project_budgets = registry.cost_ledger.all_project_budget_statuses();
+                    let project_budgets = registry.cost_ledger.all_company_budget_statuses();
                     let project_budget_info: serde_json::Map<String, serde_json::Value> =
                         project_budgets
                             .into_iter()
@@ -1377,7 +1377,7 @@ impl Daemon {
                                 .map(|e| {
                                     serde_json::json!({
                                         "timestamp": e.timestamp.to_rfc3339(),
-                                        "project": e.project,
+                                        "project": e.company,
                                         "decision_type": e.decision_type.to_string(),
                                         "task_id": e.task_id,
                                         "agent": e.agent,
@@ -1393,7 +1393,7 @@ impl Daemon {
                     }
                 }
 
-                "blackboard" => {
+                "notes" | "blackboard" => {
                     let project_filter = request
                         .get("project")
                         .and_then(|v| v.as_str())
@@ -1428,15 +1428,15 @@ impl Daemon {
                         .and_then(|v| v.as_str())
                         .map(String::from);
 
-                    match &registry.blackboard {
+                    match &registry.notes {
                         Some(bb) => {
                             let entries = if cross_project {
                                 bb.query_cross_project(&tags, since, limit)
                                     .unwrap_or_default()
                             } else if scope_agent_id.is_some() || scope_department.is_some() {
-                                let vis = crate::blackboard::AgentVisibility {
+                                let vis = crate::notes::AgentVisibility {
                                     agent_id: scope_agent_id,
-                                    project: Some(project_filter.to_string()),
+                                    company: Some(project_filter.to_string()),
                                     department: scope_department,
                                 };
                                 bb.query_scoped(project_filter, &vis, &tags, limit as usize)
@@ -1461,7 +1461,7 @@ impl Daemon {
                                         "key": e.key,
                                         "content": e.content,
                                         "agent": e.agent,
-                                        "project": e.project,
+                                        "project": e.company,
                                         "tags": e.tags,
                                         "created_at": e.created_at.to_rfc3339(),
                                         "expires_at": e.expires_at.to_rfc3339(),
@@ -1476,13 +1476,13 @@ impl Daemon {
                     }
                 }
 
-                "get_blackboard" => {
+                "get_notes" | "get_blackboard" => {
                     let project = request
                         .get("project")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
                     let key = request.get("key").and_then(|v| v.as_str()).unwrap_or("");
-                    match &registry.blackboard {
+                    match &registry.notes {
                         Some(bb) => match bb.get_by_key(project, key) {
                             Ok(Some(entry)) => serde_json::json!({
                                 "ok": true,
@@ -1490,7 +1490,7 @@ impl Daemon {
                                     "key": entry.key,
                                     "content": entry.content,
                                     "agent": entry.agent,
-                                    "project": entry.project,
+                                    "project": entry.company,
                                     "tags": entry.tags,
                                     "created_at": entry.created_at.to_rfc3339(),
                                     "expires_at": entry.expires_at.to_rfc3339(),
@@ -1505,7 +1505,7 @@ impl Daemon {
                     }
                 }
 
-                "claim_blackboard" => {
+                "claim_notes" | "claim_blackboard" => {
                     let resource = request
                         .get("resource")
                         .and_then(|v| v.as_str())
@@ -1526,15 +1526,15 @@ impl Daemon {
                     if resource.is_empty() || project.is_empty() {
                         serde_json::json!({"ok": false, "error": "resource and project are required"})
                     } else {
-                        match &registry.blackboard {
+                        match &registry.notes {
                             Some(bb) => match bb.claim(resource, agent, project, content) {
-                                Ok(crate::blackboard::ClaimResult::Acquired) => {
+                                Ok(crate::notes::ClaimResult::Acquired) => {
                                     serde_json::json!({"ok": true, "result": "acquired", "resource": resource})
                                 }
-                                Ok(crate::blackboard::ClaimResult::Renewed) => {
+                                Ok(crate::notes::ClaimResult::Renewed) => {
                                     serde_json::json!({"ok": true, "result": "renewed", "resource": resource})
                                 }
-                                Ok(crate::blackboard::ClaimResult::Held { holder, content }) => {
+                                Ok(crate::notes::ClaimResult::Held { holder, content }) => {
                                     serde_json::json!({"ok": true, "result": "held", "holder": holder, "content": content})
                                 }
                                 Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
@@ -1546,7 +1546,7 @@ impl Daemon {
                     }
                 }
 
-                "release_blackboard" => {
+                "release_notes" | "release_blackboard" => {
                     let resource = request
                         .get("resource")
                         .and_then(|v| v.as_str())
@@ -1564,7 +1564,7 @@ impl Daemon {
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
 
-                    match &registry.blackboard {
+                    match &registry.notes {
                         Some(bb) => match bb.release(resource, agent, project, force) {
                             Ok(true) => serde_json::json!({"ok": true, "released": true}),
                             Ok(false) => {
@@ -1578,14 +1578,14 @@ impl Daemon {
                     }
                 }
 
-                "delete_blackboard" => {
+                "delete_notes" | "delete_blackboard" => {
                     let project = request
                         .get("project")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
                     let key = request.get("key").and_then(|v| v.as_str()).unwrap_or("");
 
-                    match &registry.blackboard {
+                    match &registry.notes {
                         Some(bb) => match bb.delete_by_key(project, key) {
                             Ok(true) => serde_json::json!({"ok": true, "deleted": true}),
                             Ok(false) => serde_json::json!({"ok": true, "deleted": false}),
@@ -1607,7 +1607,7 @@ impl Daemon {
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
 
-                    match &registry.blackboard {
+                    match &registry.notes {
                         Some(bb) => match bb.check_claim(resource, project) {
                             Ok(Some((agent, content))) => serde_json::json!({
                                 "ok": true, "claimed": true, "agent": agent, "content": content
@@ -1656,7 +1656,7 @@ impl Daemon {
                     let project_names: Vec<String> = if let Some(name) = project_filter {
                         vec![name.to_string()]
                     } else {
-                        registry.project_names().await
+                        registry.company_names().await
                     };
 
                     let mut all_tasks = Vec::new();
@@ -1771,7 +1771,7 @@ impl Daemon {
                         } else {
                             let _prefix = task_id.split('-').next().unwrap_or("");
                             let mut found = None;
-                            for name in registry.project_names().await {
+                            for name in registry.company_names().await {
                                 if let Some(board) = registry.get_task_board(&name).await {
                                     let board = board.lock().await;
                                     if board.get(task_id).is_some() {
@@ -1790,7 +1790,7 @@ impl Daemon {
                                     match board.close(task_id, reason) {
                                         Ok(task) => {
                                             // Clean up task:* blackboard entries on close.
-                                            if let Some(ref bb) = registry.blackboard {
+                                            if let Some(ref bb) = registry.notes {
                                                 let prefix = format!("task:{}:", task_id);
                                                 if let Ok(entries) = bb.list_project(&name, 200) {
                                                     let mut cleaned = 0u32;
@@ -1836,7 +1836,7 @@ impl Daemon {
                     }
                 }
 
-                "post_blackboard" => {
+                "post_notes" | "post_blackboard" => {
                     let key = request.get("key").and_then(|v| v.as_str()).unwrap_or("");
                     let content = request
                         .get("content")
@@ -1860,14 +1860,14 @@ impl Daemon {
                         })
                         .unwrap_or_default();
                     let durability = match request.get("durability").and_then(|v| v.as_str()) {
-                        Some("durable") => crate::blackboard::EntryDurability::Durable,
-                        _ => crate::blackboard::EntryDurability::Transient,
+                        Some("durable") => crate::notes::EntryDurability::Durable,
+                        _ => crate::notes::EntryDurability::Transient,
                     };
 
                     if key.is_empty() || content.is_empty() {
                         serde_json::json!({"ok": false, "error": "key and content are required"})
                     } else {
-                        match &registry.blackboard {
+                        match &registry.notes {
                             Some(bb) => match bb
                                 .post(key, content, agent, project, &tags, durability)
                             {
@@ -2258,7 +2258,7 @@ impl Daemon {
                                             let project = match &agent_registry {
                                                 Some(reg) => match reg.get(&trigger.agent_id).await
                                                 {
-                                                    Ok(Some(agent)) => agent.project.clone(),
+                                                    Ok(Some(agent)) => agent.company.clone(),
                                                     _ => None,
                                                 },
                                                 None => None,
@@ -2771,7 +2771,7 @@ impl Daemon {
                     serde_json::json!({"ok": true, "pipelines": pipelines})
                 }
 
-                "project_knowledge" => {
+                "company_knowledge" | "project_knowledge" => {
                     let project = request
                         .get("project")
                         .and_then(|v| v.as_str())
@@ -2837,7 +2837,7 @@ impl Daemon {
                         }
 
                         // 2. Fetch blackboard entries for this project.
-                        if let Some(ref bb) = registry.blackboard
+                        if let Some(ref bb) = registry.notes
                             && let Ok(entries) = bb.list_project(project, limit as u32)
                         {
                             for entry in entries {
@@ -2845,7 +2845,7 @@ impl Daemon {
                                     "id": entry.id,
                                     "key": entry.key,
                                     "content": entry.content,
-                                    "source": "blackboard",
+                                    "source": "notes",
                                     "agent": entry.agent,
                                     "tags": entry.tags,
                                     "created_at": entry.created_at.to_rfc3339(),
@@ -2949,7 +2949,7 @@ impl Daemon {
                                         "name": a.name,
                                         "display_name": a.display_name,
                                         "template": a.template,
-                                        "project": a.project,
+                                        "project": a.company,
                                         "department_id": a.department_id,
                                         "model": a.model,
                                         "capabilities": a.capabilities,
@@ -2983,7 +2983,7 @@ impl Daemon {
                                         serde_json::json!({
                                             "id": d.id,
                                             "name": d.name,
-                                            "project": d.project,
+                                            "project": d.company,
                                             "manager_id": d.manager_id,
                                             "parent_id": d.parent_id,
                                             "created_at": d.created_at,
@@ -3352,7 +3352,7 @@ mod tests {
         resolve_web_chat_id,
     };
     use crate::conversation_store::{
-        agency_chat_id, department_chat_id, named_channel_chat_id, project_chat_id,
+        agency_chat_id, company_chat_id, department_chat_id, named_channel_chat_id,
     };
 
     #[test]
@@ -3503,7 +3503,7 @@ mod tests {
         );
         assert_eq!(
             resolve_web_chat_id(None, Some("alpha"), None, Some("alpha"),),
-            project_chat_id("alpha")
+            company_chat_id("alpha")
         );
         assert_eq!(
             resolve_web_chat_id(None, None, None, Some("ops")),

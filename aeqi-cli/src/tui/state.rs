@@ -291,7 +291,7 @@ fn tool_emoji(name: &str) -> &'static str {
         "execute_plan" => "📋",
         "memory_recall" | "aeqi_recall" => "📚",
         "memory_store" | "aeqi_remember" => "💾",
-        "blackboard" | "aeqi_blackboard" => "📌",
+        "notes" | "aeqi_notes" | "blackboard" | "aeqi_blackboard" => "📌",
         "aeqi_graph" => "🔗",
         "aeqi_skills" => "⚡",
         _ => "⚙️",

@@ -381,7 +381,8 @@ pub struct RuntimeSession {
     pub session_id: String,
     pub task_id: String,
     pub worker_id: String,
-    pub project: String,
+    #[serde(alias = "project")]
+    pub company: String,
     pub model: Option<String>,
     pub status: RuntimeSessionStatus,
     pub phase: RuntimePhase,
@@ -403,7 +404,7 @@ impl RuntimeSession {
             session_id: format!("rt-{}", Uuid::new_v4().simple()),
             task_id: task_id.into(),
             worker_id: worker_id.into(),
-            project: project.into(),
+            company: project.into(),
             model,
             status: RuntimeSessionStatus::Created,
             phase: RuntimePhase::Prime,

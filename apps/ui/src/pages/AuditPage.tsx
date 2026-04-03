@@ -7,18 +7,18 @@ import { api } from "@/lib/api";
 export default function AuditPage() {
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [projectFilter, setProjectFilter] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
   const [limit, setLimit] = useState(50);
 
   useEffect(() => {
     setLoading(true);
     const params: any = { last: limit };
-    if (projectFilter) params.project = projectFilter;
+    if (companyFilter) params.company = companyFilter;
     api.getAudit(params).then((data) => {
       setEvents(data.events || []);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [projectFilter, limit]);
+  }, [companyFilter, limit]);
 
   return (
     <>
@@ -27,9 +27,9 @@ export default function AuditPage() {
       <div className="filters">
         <input
           className="filter-input"
-          placeholder="Filter by project..."
-          value={projectFilter}
-          onChange={(e) => setProjectFilter(e.target.value)}
+          placeholder="Filter by company..."
+          value={companyFilter}
+          onChange={(e) => setCompanyFilter(e.target.value)}
         />
         <select
           className="filter-select"

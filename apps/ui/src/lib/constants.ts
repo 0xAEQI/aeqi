@@ -37,7 +37,7 @@ export const ROLE_LABELS: Record<string, string> = {
 
 export const NAV_ITEMS = [
   { label: "Dashboard", href: "/", icon: "grid" },
-  { label: "Projects", href: "/projects", icon: "folder" },
+  { label: "Companies", href: "/companies", icon: "folder" },
   { label: "Agents", href: "/agents", icon: "cpu" },
   { label: "Tasks", href: "/tasks", icon: "list" },
   { label: "Missions", href: "/missions", icon: "target" },

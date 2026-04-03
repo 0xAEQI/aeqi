@@ -2,7 +2,21 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
+<<<<<<< HEAD
 import { useAuthStore } from "@/store/auth";
+=======
+
+interface Session {
+  id: string;
+  subject: string;
+  status: string;
+  agent: string;
+  company: string;
+  skill?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+>>>>>>> rename/blackboard-notes-project-company
 
 interface Message {
   role: string;
@@ -62,12 +76,25 @@ export default function SessionsPage() {
 
     // Fetch tasks for active/history sessions
     api.getTasks({}).then((d: any) => {
+<<<<<<< HEAD
       const tasks = d.tasks || [];
       const filtered = scope
         ? tasks.filter((t: any) =>
             (t.assignee || t.agent_id || "").toLowerCase().includes(scope.toLowerCase())
           )
         : tasks;
+=======
+      let tasks = (d.tasks || []).map((t: any) => ({
+        id: t.id,
+        subject: t.subject,
+        status: t.status,
+        agent: t.assignee || t.agent_id || "—",
+        company: t.company || "—",
+        skill: t.skill,
+        created_at: t.created_at,
+        updated_at: t.updated_at,
+      }));
+>>>>>>> rename/blackboard-notes-project-company
 
       for (const t of filtered) {
         const isActive = t.status === "InProgress" || t.status === "in_progress";
@@ -86,6 +113,7 @@ export default function SessionsPage() {
 
   // Load messages for selected session
   useEffect(() => {
+<<<<<<< HEAD
     if (activeSessionId === "perpetual") {
       api.getChatHistory({ limit: 50 })
         .then((d: any) => setMessages(d.messages || []))
@@ -98,6 +126,17 @@ export default function SessionsPage() {
       setMessages([]);
     }
   }, [activeSessionId]);
+=======
+    if (!activeSession) return;
+    api.getChatHistory({ chat_id: undefined, company: undefined, limit: 100 })
+      .then((d: any) => {
+        // Filter messages that match this task's transcript channel
+        setMessages(d.messages || []);
+        setTimeout(() => messagesEnd.current?.scrollIntoView({ behavior: "smooth" }), 100);
+      })
+      .catch(() => setMessages([]));
+  }, [activeSession]);
+>>>>>>> rename/blackboard-notes-project-company
 
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: "smooth" });

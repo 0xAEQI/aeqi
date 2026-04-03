@@ -2740,8 +2740,8 @@ a:hover {
   border-bottom: 1px solid var(--border);
 }
 
-/* Blackboard */
-.blackboard-entry {
+/* Notes */
+.note-entry {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -2749,20 +2749,20 @@ a:hover {
   margin-bottom: var(--space-3);
 }
 
-.blackboard-key {
+.note-key {
   font-weight: 500;
   color: var(--accent);
   margin-bottom: var(--space-1);
   font-size: var(--font-size-sm);
 }
 
-.blackboard-content {
+.note-content {
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
   margin-bottom: var(--space-2);
 }
 
-.blackboard-meta {
+.note-meta {
   display: flex;
   gap: var(--space-3);
   font-size: var(--font-size-xs);

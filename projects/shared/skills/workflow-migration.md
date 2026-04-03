@@ -23,7 +23,7 @@ Analyze → Plan → Migrate Incrementally → Verify → Clean Up
 4. **Data migration** — does data need transforming? Is it reversible?
 5. **Rollback plan** — can we undo this? At what cost?
 
-Post: `aeqi_blackboard` post with key `task:{id}:migration-analysis`
+Post: `aeqi_notes` post with key `task:{id}:migration-analysis`
 
 ---
 

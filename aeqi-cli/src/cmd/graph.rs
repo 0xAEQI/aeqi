@@ -6,8 +6,8 @@ use crate::helpers::load_config;
 
 pub(crate) async fn cmd_graph(config_path: &Option<PathBuf>, action: GraphAction) -> Result<()> {
     match action {
-        GraphAction::Index { project, full } => cmd_graph_index(config_path, &project, full),
-        GraphAction::Stats { project } => cmd_graph_stats(config_path, &project),
+        GraphAction::Index { company, full } => cmd_graph_index(config_path, &company, full),
+        GraphAction::Stats { company } => cmd_graph_stats(config_path, &company),
     }
 }
 
@@ -16,7 +16,7 @@ fn cmd_graph_index(config_path: &Option<PathBuf>, project: &str, full: bool) -> 
     let data_dir = config.data_dir();
 
     let repo_path = config
-        .projects
+        .companies
         .iter()
         .find(|p| p.name == project)
         .map(|p| {

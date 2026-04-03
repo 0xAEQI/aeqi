@@ -79,7 +79,7 @@ export default function OperationsPage() {
                 </div>
                 <div className="ops-card-body">
                   <div className="ops-card-meta">
-                    <span className="ops-card-project">{job.project}</span>
+                    <span className="ops-card-project">{job.company}</span>
                     {job.last_run && (
                       <span className="ops-card-last-run">
                         Last: {new Date(job.last_run).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}

@@ -1,30 +1,27 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
-use crate::cli::BlackboardAction;
+use crate::cli::NotesAction;
 use crate::helpers::load_config;
-use aeqi_orchestrator::blackboard::{Blackboard, ClaimResult, EntryDurability};
+use aeqi_orchestrator::notes::{ClaimResult, EntryDurability, Notes};
 
-pub(crate) async fn cmd_blackboard(
-    config_path: &Option<PathBuf>,
-    action: BlackboardAction,
-) -> Result<()> {
+pub(crate) async fn cmd_notes(config_path: &Option<PathBuf>, action: NotesAction) -> Result<()> {
     let (config, _) = load_config(config_path)?;
     let data_dir = config.data_dir();
-    let bb_path = PathBuf::from(&data_dir).join("blackboard.db");
+    let bb_path = PathBuf::from(&data_dir).join("notes.db");
     let orch = &config.orchestrator;
-    let bb = Blackboard::open(
+    let bb = Notes::open(
         &bb_path,
-        orch.blackboard_transient_ttl_hours,
-        orch.blackboard_durable_ttl_days,
-        orch.blackboard_claim_ttl_hours,
+        orch.notes_transient_ttl_hours,
+        orch.notes_durable_ttl_days,
+        orch.notes_claim_ttl_hours,
     )?;
 
     match action {
-        BlackboardAction::List { project, limit } => {
-            let entries = bb.list_project(&project, limit)?;
+        NotesAction::List { company, limit } => {
+            let entries = bb.list_project(&company, limit)?;
             if entries.is_empty() {
-                println!("No blackboard entries for project '{project}'.");
+                println!("No note entries for company '{company}'.");
                 return Ok(());
             }
             for entry in &entries {
@@ -44,8 +41,8 @@ pub(crate) async fn cmd_blackboard(
                 );
             }
         }
-        BlackboardAction::Post {
-            project,
+        NotesAction::Post {
+            company,
             key,
             content,
             tags,
@@ -55,19 +52,19 @@ pub(crate) async fn cmd_blackboard(
                 "durable" => EntryDurability::Durable,
                 _ => EntryDurability::Transient,
             };
-            let entry = bb.post(&key, &content, "cli", &project, &tags, dur)?;
+            let entry = bb.post(&key, &content, "cli", &company, &tags, dur)?;
             println!(
                 "Posted {} (expires {})",
                 entry.key,
                 entry.expires_at.format("%Y-%m-%d %H:%M")
             );
         }
-        BlackboardAction::Query {
-            project,
+        NotesAction::Query {
+            company,
             tags,
             limit,
         } => {
-            let entries = bb.query(&project, &tags, limit)?;
+            let entries = bb.query(&company, &tags, limit)?;
             if entries.is_empty() {
                 println!("No matching entries.");
                 return Ok(());
@@ -76,7 +73,7 @@ pub(crate) async fn cmd_blackboard(
                 println!("{}: {} (by {})", entry.key, entry.content, entry.agent);
             }
         }
-        BlackboardAction::Get { project, key } => match bb.get_by_key(&project, &key)? {
+        NotesAction::Get { company, key } => match bb.get_by_key(&company, &key)? {
             Some(entry) => {
                 println!(
                     "{}: {} (by {}, expires {})",
@@ -88,14 +85,14 @@ pub(crate) async fn cmd_blackboard(
             }
             None => println!("No entry found for key '{key}'."),
         },
-        BlackboardAction::Claim {
-            project,
+        NotesAction::Claim {
+            company,
             resource,
             content,
             agent,
         } => {
             let agent = agent.as_deref().unwrap_or("cli");
-            match bb.claim(&resource, agent, &project, &content)? {
+            match bb.claim(&resource, agent, &company, &content)? {
                 ClaimResult::Acquired => {
                     println!("Claimed: {resource}");
                 }
@@ -107,21 +104,21 @@ pub(crate) async fn cmd_blackboard(
                 }
             }
         }
-        BlackboardAction::Release {
-            project,
+        NotesAction::Release {
+            company,
             resource,
             agent,
             force,
         } => {
             let agent = agent.as_deref().unwrap_or("cli");
-            if bb.release(&resource, agent, &project, force)? {
+            if bb.release(&resource, agent, &company, force)? {
                 println!("Released: {resource}");
             } else {
                 println!("No claim found for '{resource}' (or not owned by {agent}).");
             }
         }
-        BlackboardAction::Delete { project, key } => {
-            if bb.delete_by_key(&project, &key)? {
+        NotesAction::Delete { company, key } => {
+            if bb.delete_by_key(&company, &key)? {
                 println!("Deleted: {key}");
             } else {
                 println!("No entry found for key '{key}'.");

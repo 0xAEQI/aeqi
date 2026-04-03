@@ -8,38 +8,38 @@ import { runtimeLabel, summarizeTaskRuntime } from "@/lib/runtime";
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<any[]>([]);
-  const [projects, setProjects] = useState<any[]>([]);
+  const [companies, setCompanies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
-  const [projectFilter, setProjectFilter] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [newTask, setNewTask] = useState({ project: "", subject: "", description: "" });
+  const [newTask, setNewTask] = useState({ company: "", subject: "", description: "" });
   const [creating, setCreating] = useState(false);
 
   const fetchTasks = () => {
     setLoading(true);
     const params: any = {};
     if (statusFilter) params.status = statusFilter;
-    if (projectFilter) params.project = projectFilter;
+    if (companyFilter) params.company = companyFilter;
     api.getTasks(params).then((data) => {
       setTasks(data.tasks || []);
       setLoading(false);
     }).catch(() => setLoading(false));
   };
 
-  useEffect(() => { fetchTasks(); }, [statusFilter, projectFilter]);
+  useEffect(() => { fetchTasks(); }, [statusFilter, companyFilter]);
 
   useEffect(() => {
-    api.getProjects().then((data) => setProjects(data.projects || [])).catch(() => {});
+    api.getCompanies().then((data) => setCompanies(data.companies || [])).catch(() => {});
   }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTask.project || !newTask.subject) return;
+    if (!newTask.company || !newTask.subject) return;
     setCreating(true);
     try {
       await api.createTask(newTask);
-      setNewTask({ project: "", subject: "", description: "" });
+      setNewTask({ company: "", subject: "", description: "" });
       setShowForm(false);
       fetchTasks();
     } catch {
@@ -69,12 +69,12 @@ export default function TasksPage() {
           <div style={{ display: "flex", gap: "var(--space-3)", marginBottom: "var(--space-3)" }}>
             <select
               className="filter-select"
-              value={newTask.project}
-              onChange={(e) => setNewTask({ ...newTask, project: e.target.value })}
+              value={newTask.company}
+              onChange={(e) => setNewTask({ ...newTask, company: e.target.value })}
               required
             >
-              <option value="">Select project...</option>
-              {projects.map((p: any) => (
+              <option value="">Select company...</option>
+              {companies.map((p: any) => (
                 <option key={p.name} value={p.name}>{p.name}</option>
               ))}
             </select>
@@ -115,11 +115,11 @@ export default function TasksPage() {
         </select>
         <select
           className="filter-select"
-          value={projectFilter}
-          onChange={(e) => setProjectFilter(e.target.value)}
+          value={companyFilter}
+          onChange={(e) => setCompanyFilter(e.target.value)}
         >
-          <option value="">All projects</option>
-          {projects.map((p: any) => (
+          <option value="">All companies</option>
+          {companies.map((p: any) => (
             <option key={p.name} value={p.name}>{p.name}</option>
           ))}
         </select>
@@ -164,7 +164,7 @@ export default function TasksPage() {
                 <div className="task-meta">
                   <StatusBadge status={task.status} size="sm" />
                   <span>{task.assignee || "—"}</span>
-                  <span>{task.project}</span>
+                  <span>{task.company}</span>
                   {task.status !== "done" && task.status !== "cancelled" && (
                     <button
                       className="btn"

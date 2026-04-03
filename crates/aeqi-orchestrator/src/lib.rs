@@ -2,7 +2,7 @@
 //! Agent orchestration engine — the operational heart of AEQI.
 //!
 //! Coordinates worker execution ([`AgentWorker`]), worker pool patrol ([`WorkerPool`]),
-//! router classification ([`AgentRouter`]), project registry ([`ProjectRegistry`]),
+//! router classification ([`AgentRouter`]), company registry ([`CompanyRegistry`]),
 //! dispatch bus ([`DispatchBus`]), cost ledger ([`CostLedger`]), Prometheus metrics
 //! ([`AEQIMetrics`]), and conversation storage.
 //!
@@ -13,10 +13,10 @@ pub mod agent_registry;
 pub mod agent_router;
 pub mod agent_worker;
 pub mod audit;
-pub mod blackboard;
 pub mod chat_engine;
 pub mod checkpoint;
 pub mod claude_code;
+pub mod company;
 pub mod context_budget;
 pub mod conversation_store;
 pub mod cost_ledger;
@@ -32,10 +32,10 @@ pub mod intent;
 pub mod message;
 pub mod metrics;
 pub mod middleware;
+pub mod notes;
 pub mod operation;
 pub mod pipeline;
 pub mod preflight;
-pub mod project;
 pub mod registry;
 pub mod runtime;
 pub mod session_tracker;
@@ -50,9 +50,9 @@ pub use agent_registry::Department;
 pub use agent_router::{AgentRouter, RouteDecision};
 pub use agent_worker::{AgentWorker, WorkerState};
 pub use audit::{AuditEvent, AuditLog, DecisionType};
-pub use blackboard::{AgentVisibility, Blackboard};
 pub use chat_engine::ChatEngine;
 pub use checkpoint::AgentCheckpoint;
+pub use company::Company;
 pub use context_budget::ContextBudget;
 pub use conversation_store::ConversationStore;
 pub use cost_ledger::CostLedger;
@@ -64,10 +64,10 @@ pub use expertise::ExpertiseLedger;
 pub use hook::Hook;
 pub use message::{Dispatch, DispatchBus, DispatchHealth, DispatchKind};
 pub use metrics::AEQIMetrics;
+pub use notes::{AgentVisibility, Notes};
 pub use operation::{Operation, OperationStore};
 pub use pipeline::{Pipeline, PipelineStep};
-pub use project::Project;
-pub use registry::{ProjectRegistry, ProjectSummary};
+pub use registry::{CompanyRegistry, CompanySummary};
 pub use runtime::{
     Artifact, ArtifactKind, RuntimeExecution, RuntimeOutcome, RuntimeOutcomeStatus, RuntimePhase,
     RuntimeSession, RuntimeSessionStatus, VerificationReport,

@@ -180,31 +180,31 @@ function GlobalContext() {
   );
 }
 
-function ProjectContext({ project }: { project: string }) {
+function CompanyContext({ company }: { company: string }) {
   const [tasks, setTasks] = useState<any[]>([]);
   const [knowledge, setKnowledge] = useState<any[]>([]);
-  const [projectData, setProjectData] = useState<any>(null);
+  const [companyData, setCompanyData] = useState<any>(null);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
     setSearch("");
-    api.getTasks({ project }).then((d) => setTasks(d.tasks || [])).catch(() => {});
-    api.getChannelKnowledge({ project, limit: 15 }).then((d) => setKnowledge(d.items || [])).catch(() => {});
-    api.getProjects().then((d) => {
-      const p = (d.projects || []).find((p: any) => p.name === project);
-      setProjectData(p || null);
+    api.getTasks({ company }).then((d) => setTasks(d.tasks || [])).catch(() => {});
+    api.getChannelKnowledge({ company, limit: 15 }).then((d) => setKnowledge(d.items || [])).catch(() => {});
+    api.getCompanies().then((d) => {
+      const p = (d.companies || []).find((p: any) => p.name === company);
+      setCompanyData(p || null);
     }).catch(() => {});
-  }, [project]);
+  }, [company]);
 
   const handleSearch = (q: string) => {
     setSearch(q);
-    api.getChannelKnowledge({ project, query: q || undefined, limit: 15 })
+    api.getChannelKnowledge({ company, query: q || undefined, limit: 15 })
       .then((d) => setKnowledge(d.items || []))
       .catch(() => {});
   };
 
   const openTasks = tasks.filter((t: any) => t.status === "pending" || t.status === "in_progress");
-  const team = projectData?.team;
+  const team = companyData?.team;
 
   return (
     <div className="ctx-content">
@@ -293,7 +293,7 @@ export default function ContextPanel() {
       {tab === "notes" && <NotesTab channel={channel} />}
       {tab === "context" && (
         projectName ? (
-          <ProjectContext project={projectName} />
+          <CompanyContext company={projectName} />
         ) : (
           <GlobalContext />
         )

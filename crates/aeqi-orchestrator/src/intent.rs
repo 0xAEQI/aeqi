@@ -15,7 +15,7 @@ pub enum ChatIntent {
     /// "close task X", "mark X done"
     CloseTask,
     /// "note: ...", "remember: ..."
-    BlackboardPost,
+    NotePost,
     /// "status", "what's going on", "how are things"
     StatusQuery,
     /// Complex request that should go to the full path (agent execution).
@@ -86,7 +86,7 @@ impl IntentClassifier {
             || lower.starts_with("remember:")
             || lower.starts_with("blackboard:")
         {
-            return Some(ChatIntent::BlackboardPost);
+            return Some(ChatIntent::NotePost);
         }
 
         // Status queries — common patterns.
@@ -146,7 +146,7 @@ impl IntentClassifier {
                     let result = match intent_str.as_str() {
                         "create_task" => ChatIntent::CreateTask,
                         "close_task" => ChatIntent::CloseTask,
-                        "note" => ChatIntent::BlackboardPost,
+                        "note" => ChatIntent::NotePost,
                         "status" => ChatIntent::StatusQuery,
                         "full" => ChatIntent::FullPath,
                         _ => ChatIntent::Unknown,

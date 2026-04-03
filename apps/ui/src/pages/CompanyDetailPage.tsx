@@ -8,9 +8,9 @@ import { PRIORITY_COLORS } from "@/lib/constants";
 import { api } from "@/lib/api";
 import { runtimeLabel, summarizeTaskRuntime } from "@/lib/runtime";
 
-export default function ProjectDetailPage() {
+export default function CompanyDetailPage() {
   const { name } = useParams<{ name: string }>();
-  const [project, setProject] = useState<any>(null);
+  const [company, setCompany] = useState<any>(null);
   const [tasks, setTasks] = useState<any[]>([]);
   const [missions, setMissions] = useState<any[]>([]);
   const [audit, setAudit] = useState<any[]>([]);
@@ -22,20 +22,20 @@ export default function ProjectDetailPage() {
     setLoading(true);
 
     Promise.all([
-      api.getProjects().then((d) => {
-        const p = (d.projects || []).find((p: any) => p.name === name);
-        setProject(p || null);
+      api.getCompanies().then((d) => {
+        const p = (d.companies || []).find((p: any) => p.name === name);
+        setCompany(p || null);
       }),
-      api.getTasks({ project: name }).then((d) => setTasks(d.tasks || [])),
-      api.getMissions({ project: name }).then((d) => setMissions(d.missions || [])),
-      api.getAudit({ project: name, last: 30 }).then((d) => setAudit(d.events || [])),
+      api.getTasks({ company: name }).then((d) => setTasks(d.tasks || [])),
+      api.getMissions({ company: name }).then((d) => setMissions(d.missions || [])),
+      api.getAudit({ company: name, last: 30 }).then((d) => setAudit(d.events || [])),
     ])
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [name]);
 
-  if (loading) return <div className="loading">Loading project...</div>;
-  if (!project) return <div className="loading">Project not found</div>;
+  if (loading) return <div className="loading">Loading company...</div>;
+  if (!company) return <div className="loading">Company not found</div>;
 
   const pendingTasks = tasks.filter((t) => t.status === "pending");
   const activeTasks = tasks.filter((t) => t.status === "in_progress");
@@ -46,10 +46,10 @@ export default function ProjectDetailPage() {
   return (
     <>
       <Header
-        title={project.name}
+        title={company.name}
         breadcrumbs={[
-          { label: "Projects", href: "/projects" },
-          { label: project.name },
+          { label: "Companies", href: "/companies" },
+          { label: company.name },
         ]}
       />
 
@@ -81,26 +81,26 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* Project Info */}
+      {/* Company Info */}
       <div className="detail-grid">
         <div className="detail-sidebar">
           {/* Info Panel */}
           <div className="detail-panel">
-            <div className="detail-panel-title">Project Info</div>
+            <div className="detail-panel-title">Company Info</div>
             <div className="detail-field">
               <div className="detail-field-label">Prefix</div>
-              <div className="detail-field-value"><code>{project.prefix}</code></div>
+              <div className="detail-field-value"><code>{company.prefix}</code></div>
             </div>
-            {project.team && (
+            {company.team && (
               <>
                 <div className="detail-field">
                   <div className="detail-field-label">Team Leader</div>
-                  <div className="detail-field-value">{project.team.leader}</div>
+                  <div className="detail-field-value">{company.team.leader}</div>
                 </div>
                 <div className="detail-field">
                   <div className="detail-field-label">Team</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-1)" }}>
-                    {(project.team.agents || []).map((a: string) => (
+                    {(company.team.agents || []).map((a: string) => (
                       <span key={a} className="expertise-tag">{a}</span>
                     ))}
                   </div>
@@ -138,7 +138,7 @@ export default function ProjectDetailPage() {
           {tab === "tasks" && (
                 <div className="task-table">
                   {tasks.length === 0 ? (
-                    <div className="dash-empty">No tasks in this project</div>
+                    <div className="dash-empty">No tasks in this company</div>
                   ) : (
                     tasks.slice(0, 50).map((task: any) => {
                       const label = runtimeLabel(task.runtime);
@@ -177,7 +177,7 @@ export default function ProjectDetailPage() {
                   )}
               {tasks.length > 50 && (
                 <div className="dash-empty">
-                  <Link to={`/tasks?project=${name}`}>View all {tasks.length} tasks</Link>
+                  <Link to={`/tasks?company=${name}`}>View all {tasks.length} tasks</Link>
                 </div>
               )}
             </div>
@@ -187,7 +187,7 @@ export default function ProjectDetailPage() {
           {tab === "missions" && (
             <div>
               {missions.length === 0 ? (
-                <div className="dash-empty">No missions in this project</div>
+                <div className="dash-empty">No missions in this company</div>
               ) : (
                 <div className="cards-grid">
                   {missions.map((m: any) => (
@@ -203,7 +203,7 @@ export default function ProjectDetailPage() {
             <div className="column-section">
               <div className="column-section-body">
                 {audit.length === 0 ? (
-                  <div className="dash-empty">No audit events for this project</div>
+                  <div className="dash-empty">No audit events for this company</div>
                 ) : (
                   audit.map((entry: any, i: number) => (
                     <AuditEntryComponent key={i} entry={entry} />

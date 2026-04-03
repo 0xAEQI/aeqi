@@ -19,7 +19,7 @@ pub(crate) async fn cmd_trigger(
             schedule,
             at,
             event,
-            event_project,
+            event_company,
             event_tool,
             cooldown,
             webhook,
@@ -49,10 +49,10 @@ pub(crate) async fn cmd_trigger(
                 }
                 let pattern = match event_name.as_str() {
                     "task_completed" => aeqi_orchestrator::trigger::EventPattern::TaskCompleted {
-                        project: event_project,
+                        project: event_company.clone(),
                     },
                     "task_failed" => aeqi_orchestrator::trigger::EventPattern::TaskFailed {
-                        project: event_project,
+                        project: event_company,
                     },
                     "tool_call_completed" => {
                         aeqi_orchestrator::trigger::EventPattern::ToolCallCompleted {

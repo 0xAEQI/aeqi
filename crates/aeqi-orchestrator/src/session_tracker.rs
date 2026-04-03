@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 use tracing::{debug, info, warn};
 
-use crate::registry::ProjectRegistry;
+use crate::registry::CompanyRegistry;
 use aeqi_core::traits::{Channel, OutgoingMessage};
 
 /// Session alarm and progress heartbeat system.
@@ -19,7 +19,7 @@ use aeqi_core::traits::{Channel, OutgoingMessage};
 pub struct SessionTracker {
     pub channel: Arc<dyn Channel>,
     pub chat_id: i64,
-    pub registry: Arc<ProjectRegistry>,
+    pub registry: Arc<CompanyRegistry>,
     pub checkin_interval: Duration,
     pub alarm_interval: Duration,
     pub min_flood_interval: Duration,

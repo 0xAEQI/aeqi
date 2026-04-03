@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::message::DispatchBus;
-use crate::registry::ProjectRegistry;
+use crate::registry::CompanyRegistry;
 use aeqi_core::traits::{Memory, MemoryCategory, MemoryQuery, MemoryScope};
 
 /// Tool that surfaces OpenRouter key usage and per-project worker execution
@@ -321,11 +321,11 @@ impl Tool for MemoryRecallTool {
 
 /// Tool for reading full task details by ID.
 pub struct QuestDetailTool {
-    registry: Arc<ProjectRegistry>,
+    registry: Arc<CompanyRegistry>,
 }
 
 impl QuestDetailTool {
-    pub fn new(registry: Arc<ProjectRegistry>) -> Self {
+    pub fn new(registry: Arc<CompanyRegistry>) -> Self {
         Self { registry }
     }
 }
@@ -338,9 +338,9 @@ impl Tool for QuestDetailTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing task_id"))?;
 
-        let projects = self.registry.project_names().await;
+        let projects = self.registry.company_names().await;
         for project_name in &projects {
-            if let Some(project) = self.registry.get_project(project_name).await {
+            if let Some(project) = self.registry.get_company(project_name).await {
                 let store = project.tasks.lock().await;
                 if let Some(task) = store.get(task_id) {
                     let mut out = format!(
@@ -398,11 +398,11 @@ impl Tool for QuestDetailTool {
 
 /// Tool for cancelling a task by ID.
 pub struct QuestCancelTool {
-    registry: Arc<ProjectRegistry>,
+    registry: Arc<CompanyRegistry>,
 }
 
 impl QuestCancelTool {
-    pub fn new(registry: Arc<ProjectRegistry>) -> Self {
+    pub fn new(registry: Arc<CompanyRegistry>) -> Self {
         Self { registry }
     }
 }
@@ -419,9 +419,9 @@ impl Tool for QuestCancelTool {
             .and_then(|v| v.as_str())
             .unwrap_or("Cancelled by leader agent");
 
-        let projects = self.registry.project_names().await;
+        let projects = self.registry.company_names().await;
         for project_name in &projects {
-            if let Some(project) = self.registry.get_project(project_name).await {
+            if let Some(project) = self.registry.get_company(project_name).await {
                 let mut store = project.tasks.lock().await;
                 if store.get(task_id).is_some() {
                     match store.update(task_id, |q| {
@@ -467,11 +467,11 @@ impl Tool for QuestCancelTool {
 
 /// Tool for reprioritizing a task.
 pub struct QuestReprioritizeTool {
-    registry: Arc<ProjectRegistry>,
+    registry: Arc<CompanyRegistry>,
 }
 
 impl QuestReprioritizeTool {
-    pub fn new(registry: Arc<ProjectRegistry>) -> Self {
+    pub fn new(registry: Arc<CompanyRegistry>) -> Self {
         Self { registry }
     }
 }
@@ -500,9 +500,9 @@ impl Tool for QuestReprioritizeTool {
             }
         };
 
-        let projects = self.registry.project_names().await;
+        let projects = self.registry.company_names().await;
         for project_name in &projects {
-            if let Some(project) = self.registry.get_project(project_name).await {
+            if let Some(project) = self.registry.get_company(project_name).await {
                 let mut store = project.tasks.lock().await;
                 if store.get(task_id).is_some() {
                     match store.update(task_id, |q| {
@@ -544,21 +544,17 @@ impl Tool for QuestReprioritizeTool {
     }
 }
 
-/// Tool for posting/querying the inter-agent blackboard.
-pub struct BlackboardTool {
-    blackboard: Arc<crate::blackboard::Blackboard>,
+/// Tool for posting/querying inter-agent notes.
+pub struct NotesTool {
+    notes: Arc<crate::notes::Notes>,
     agent_name: String,
     project_name: String,
 }
 
-impl BlackboardTool {
-    pub fn new(
-        blackboard: Arc<crate::blackboard::Blackboard>,
-        agent_name: String,
-        project_name: String,
-    ) -> Self {
+impl NotesTool {
+    pub fn new(notes: Arc<crate::notes::Notes>, agent_name: String, project_name: String) -> Self {
         Self {
-            blackboard,
+            notes,
             agent_name,
             project_name,
         }
@@ -566,7 +562,7 @@ impl BlackboardTool {
 }
 
 #[async_trait]
-impl Tool for BlackboardTool {
+impl Tool for NotesTool {
     async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
         let action = args
             .get("action")
@@ -593,11 +589,11 @@ impl Tool for BlackboardTool {
                     })
                     .unwrap_or_default();
                 let durability = match args.get("durability").and_then(|v| v.as_str()) {
-                    Some("durable") => crate::blackboard::EntryDurability::Durable,
-                    _ => crate::blackboard::EntryDurability::Transient,
+                    Some("durable") => crate::notes::EntryDurability::Durable,
+                    _ => crate::notes::EntryDurability::Transient,
                 };
 
-                match self.blackboard.post(
+                match self.notes.post(
                     key,
                     content,
                     &self.agent_name,
@@ -625,7 +621,7 @@ impl Tool for BlackboardTool {
                     .unwrap_or_default();
                 let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
 
-                match self.blackboard.query(&self.project_name, &tags, limit) {
+                match self.notes.query(&self.project_name, &tags, limit) {
                     Ok(entries) if entries.is_empty() => {
                         Ok(ToolResult::success("No matching blackboard entries."))
                     }
@@ -655,7 +651,7 @@ impl Tool for BlackboardTool {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing key"))?;
 
-                match self.blackboard.get_by_key(&self.project_name, key) {
+                match self.notes.get_by_key(&self.project_name, key) {
                     Ok(Some(entry)) => Ok(ToolResult::success(format!(
                         "{}: {} (by {}, expires {})",
                         entry.key,
@@ -677,16 +673,16 @@ impl Tool for BlackboardTool {
                 let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
 
                 match self
-                    .blackboard
+                    .notes
                     .claim(resource, &self.agent_name, &self.project_name, content)
                 {
-                    Ok(crate::blackboard::ClaimResult::Acquired) => {
+                    Ok(crate::notes::ClaimResult::Acquired) => {
                         Ok(ToolResult::success(format!("Claimed: {resource}")))
                     }
-                    Ok(crate::blackboard::ClaimResult::Renewed) => {
+                    Ok(crate::notes::ClaimResult::Renewed) => {
                         Ok(ToolResult::success(format!("Renewed claim: {resource}")))
                     }
-                    Ok(crate::blackboard::ClaimResult::Held { holder, content }) => {
+                    Ok(crate::notes::ClaimResult::Held { holder, content }) => {
                         Ok(ToolResult::success(format!(
                             "BLOCKED — {resource} is claimed by {holder}: {content}"
                         )))
@@ -702,7 +698,7 @@ impl Tool for BlackboardTool {
                 let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
 
                 match self
-                    .blackboard
+                    .notes
                     .release(resource, &self.agent_name, &self.project_name, force)
                 {
                     Ok(true) => Ok(ToolResult::success(format!("Released: {resource}"))),
@@ -718,7 +714,7 @@ impl Tool for BlackboardTool {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing key"))?;
 
-                match self.blackboard.delete_by_key(&self.project_name, key) {
+                match self.notes.delete_by_key(&self.project_name, key) {
                     Ok(true) => Ok(ToolResult::success(format!("Deleted: {key}"))),
                     Ok(false) => Ok(ToolResult::success(format!("No entry found for: {key}"))),
                     Err(e) => Ok(ToolResult::error(format!("Delete failed: {e}"))),
@@ -732,7 +728,7 @@ impl Tool for BlackboardTool {
 
     fn spec(&self) -> ToolSpec {
         ToolSpec {
-            name: "blackboard".to_string(),
+            name: "notes".to_string(),
             description: "Shared coordination surface. Post discoveries, claim resources, signal state, query entries. Key prefixes: claim: (locks), signal: (broadcasts), finding: (results), decision: (choices).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -751,7 +747,7 @@ impl Tool for BlackboardTool {
     }
 
     fn name(&self) -> &str {
-        "blackboard"
+        "notes"
     }
 }
 
@@ -762,12 +758,12 @@ impl Tool for BlackboardTool {
 /// Including `channel_reply` causes double-delivery: the tool sends once, and the
 /// task's closed_reason (the LLM's confirmation text) gets sent again.
 pub fn build_orchestration_tools(
-    registry: Arc<ProjectRegistry>,
+    registry: Arc<CompanyRegistry>,
     dispatch_bus: Arc<DispatchBus>,
     _channels: Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
     api_key: Option<String>,
     memory: Option<Arc<dyn Memory>>,
-    blackboard: Option<Arc<crate::blackboard::Blackboard>>,
+    notes: Option<Arc<crate::notes::Notes>>,
     event_broadcaster: Option<Arc<crate::EventBroadcaster>>,
 ) -> Vec<Arc<dyn Tool>> {
     let leader_name = registry.leader_agent_name.clone();
@@ -789,12 +785,8 @@ pub fn build_orchestration_tools(
         tools.push(Arc::new(MemoryRecallTool::new(mem)));
     }
 
-    if let Some(bb) = blackboard {
-        tools.push(Arc::new(BlackboardTool::new(
-            bb,
-            leader_name,
-            "*".to_string(),
-        )));
+    if let Some(bb) = notes {
+        tools.push(Arc::new(NotesTool::new(bb, leader_name, "*".to_string())));
     }
 
     tools

@@ -9,8 +9,8 @@ use tracing::{debug, info, warn};
 
 use crate::agent_worker::AgentWorker;
 use crate::audit::{AuditEvent, AuditLog, DecisionType};
-use crate::blackboard::Blackboard;
 use crate::checkpoint::AgentCheckpoint;
+use crate::company::Company;
 use crate::cost_ledger::{CostEntry, CostLedger};
 use crate::escalation::{EscalationPolicy, EscalationTracker};
 use crate::execution_events::EventBroadcaster;
@@ -24,8 +24,8 @@ use crate::middleware::{
     LoopDetectionMiddleware, MemoryRefreshMiddleware, MiddlewareChain, Outcome, OutcomeStatus,
     SafetyNetMiddleware,
 };
+use crate::notes::Notes;
 use crate::preflight::{PreflightAssessment, PreflightVerdict};
-use crate::project::Project;
 use crate::verification::{TaskContext, VerificationPipeline};
 
 /// Label prefix for tracking escalation depth on tasks.
@@ -44,7 +44,7 @@ struct TrackedWorker {
 /// WorkerPool: per-project worker pool. Runs patrol cycles, manages workers,
 /// detects stuck/orphaned tasks, handles escalation, reports to Leader Agent.
 pub struct WorkerPool {
-    pub project_name: String,
+    pub company_name: String,
     pub max_workers: u32,
     pub patrol_interval_secs: u64,
     pub dispatch_bus: Arc<DispatchBus>,
@@ -91,8 +91,8 @@ pub struct WorkerPool {
     pub audit_log: Option<Arc<AuditLog>>,
     /// Agent expertise ledger for smart routing (Phase 2).
     pub expertise_ledger: Option<Arc<ExpertiseLedger>>,
-    /// Inter-agent blackboard for shared knowledge (Phase 3).
-    pub blackboard: Option<Arc<Blackboard>>,
+    /// Inter-agent notes for shared knowledge (Phase 3).
+    pub notes: Option<Arc<Notes>>,
     /// Enable expertise-based routing for task assignment.
     pub expertise_routing: bool,
     /// Enable pre-flight assessment before worker spawn.
@@ -131,13 +131,13 @@ pub struct WorkerPool {
 
 impl WorkerPool {
     pub fn new(
-        project: &Project,
+        project: &Company,
         provider: Arc<dyn Provider>,
         tools: Vec<Arc<dyn Tool>>,
         dispatch_bus: Arc<DispatchBus>,
     ) -> Self {
         Self {
-            project_name: project.name.clone(),
+            company_name: project.name.clone(),
             max_workers: project.max_workers,
             patrol_interval_secs: 60,
             dispatch_bus,
@@ -145,7 +145,7 @@ impl WorkerPool {
             provider,
             tools,
             model: project.model.clone(),
-            identity: project.project_identity.clone(),
+            identity: project.company_identity.clone(),
             repo: Some(project.repo.clone()),
             worker_max_budget_usd: None,
             running_tasks: Vec::new(),
@@ -165,7 +165,7 @@ impl WorkerPool {
             gate_channels: Vec::new(),
             audit_log: None,
             expertise_ledger: None,
-            blackboard: None,
+            notes: None,
             expertise_routing: false,
             preflight_enabled: false,
             preflight_model: String::new(),
@@ -288,7 +288,7 @@ impl WorkerPool {
                 persistent_capabilities = pa.capabilities.clone();
                 agent_department = pa.department_id.clone();
                 info!(
-                    project = %self.project_name,
+                    project = %self.company_name,
                     agent = %agent_name,
                     agent_id = %pa.id,
                     "loaded persistent agent identity from registry"
@@ -311,7 +311,7 @@ impl WorkerPool {
                 AgentWorker::new_claude_code(
                     agent_name.clone(),
                     worker_name,
-                    self.project_name.clone(),
+                    self.company_name.clone(),
                     cwd,
                     budget,
                     identity.clone(),
@@ -323,7 +323,7 @@ impl WorkerPool {
             aeqi_core::ExecutionMode::Agent => AgentWorker::new(
                 agent_name.clone(),
                 worker_name,
-                self.project_name.clone(),
+                self.company_name.clone(),
                 self.provider.clone(),
                 self.tools.clone(),
                 identity.clone(),
@@ -357,21 +357,21 @@ impl WorkerPool {
         }
 
         // Pass blackboard + audit log for failure analysis mode-specific strategies.
-        worker.blackboard = self.blackboard.clone();
+        worker.notes = self.notes.clone();
         worker.audit_log = self.audit_log.clone();
 
         // Inject relevant blackboard entries into worker identity preamble.
         // Phase 7: Use query_scoped() with agent visibility to enforce
         // department-based blackboard access control.
-        if let Some(ref bb) = self.blackboard {
+        if let Some(ref bb) = self.notes {
             let tags: Vec<String> = task.labels.clone();
-            let visibility = crate::blackboard::AgentVisibility {
+            let visibility = crate::notes::AgentVisibility {
                 agent_id: persistent_agent_id.clone(),
-                project: Some(self.project_name.clone()),
+                company: Some(self.company_name.clone()),
                 department: agent_department.clone(),
             };
             let entries = bb
-                .query_scoped(&self.project_name, &visibility, &tags, 5)
+                .query_scoped(&self.company_name, &visibility, &tags, 5)
                 .unwrap_or_default();
             if !entries.is_empty() {
                 let bb_context = entries
@@ -399,7 +399,7 @@ impl WorkerPool {
                 agent_id.clone(),
             )));
             info!(
-                project = %self.project_name,
+                project = %self.company_name,
                 agent_id = %agent_id,
                 "injected manage_triggers tool"
             );
@@ -466,14 +466,14 @@ impl WorkerPool {
         if let Some(ref skill_name) = task.skill {
             if let Some(prompt) = self.load_skill_prompt(skill_name) {
                 info!(
-                    project = %self.project_name,
+                    project = %self.company_name,
                     skill = %skill_name,
                     "injecting skill prompt into worker identity"
                 );
                 worker.identity.skill_prompt = Some(prompt);
             } else {
                 warn!(
-                    project = %self.project_name,
+                    project = %self.company_name,
                     skill = %skill_name,
                     "skill not found in skills directories"
                 );
@@ -487,7 +487,7 @@ impl WorkerPool {
                 let before = tools.len();
                 tools.retain(|t| skill.is_tool_allowed(t.name()));
                 info!(
-                    project = %self.project_name,
+                    project = %self.company_name,
                     skill = %skill_name,
                     before = before,
                     after = tools.len(),
@@ -535,13 +535,13 @@ impl WorkerPool {
     /// tokio task. The daemon loop never stalls waiting for workers.
     pub async fn patrol(&mut self) -> Result<()> {
         let patrol_start = std::time::Instant::now();
-        debug!(project = %self.project_name, "patrol cycle");
+        debug!(project = %self.company_name, "patrol cycle");
 
         // 0. Reload tasks from disk to pick up externally-created tasks.
         {
             let mut store = self.tasks.lock().await;
             if let Err(e) = store.reload() {
-                warn!(project = %self.project_name, error = %e, "failed to reload tasks from disk");
+                warn!(project = %self.company_name, error = %e, "failed to reload tasks from disk");
             }
 
             // Reset orphaned InProgress tasks (e.g. from daemon restart or worker panic).
@@ -561,7 +561,7 @@ impl WorkerPool {
                 .collect();
             for id in orphaned {
                 warn!(
-                    project = %self.project_name,
+                    project = %self.company_name,
                     task = %id,
                     "resetting orphaned InProgress task to Pending"
                 );
@@ -569,7 +569,7 @@ impl WorkerPool {
                     t.status = TaskStatus::Pending;
                     t.assignee = None;
                 }) {
-                    warn!(project = %self.project_name, task = %id, error = %e, "failed to reset orphaned task");
+                    warn!(project = %self.company_name, task = %id, error = %e, "failed to reset orphaned task");
                 }
             }
         }
@@ -597,7 +597,7 @@ impl WorkerPool {
         }
         for task_id in timed_out {
             warn!(
-                project = %self.project_name,
+                project = %self.company_name,
                 task = %task_id,
                 timeout_secs = self.worker_timeout_secs,
                 "worker timed out, aborting and resetting task"
@@ -607,7 +607,7 @@ impl WorkerPool {
             if let Some(ref audit) = self.audit_log {
                 let _ = audit.record(
                     &AuditEvent::new(
-                        &self.project_name,
+                        &self.company_name,
                         DecisionType::WorkerTimedOut,
                         format!("Timed out after {}s", self.worker_timeout_secs),
                     )
@@ -629,13 +629,13 @@ impl WorkerPool {
 
                         let cp_path = AgentCheckpoint::path_for_task(repo, &task_id);
                         if let Err(e) = checkpoint.write(&cp_path) {
-                            warn!(project = %self.project_name, task = %task_id, error = %e, "failed to write timeout checkpoint");
+                            warn!(project = %self.company_name, task = %task_id, error = %e, "failed to write timeout checkpoint");
                         } else {
-                            info!(project = %self.project_name, task = %task_id, files = checkpoint.modified_files.len(), "timeout checkpoint captured");
+                            info!(project = %self.company_name, task = %task_id, files = checkpoint.modified_files.len(), "timeout checkpoint captured");
                         }
                     }
                     Err(e) => {
-                        warn!(project = %self.project_name, task = %task_id, error = %e, "failed to capture timeout checkpoint");
+                        warn!(project = %self.company_name, task = %task_id, error = %e, "failed to capture timeout checkpoint");
                     }
                 }
             }
@@ -646,17 +646,17 @@ impl WorkerPool {
                     q.status = TaskStatus::Pending;
                     q.assignee = None;
                 }) {
-                    warn!(project = %self.project_name, task = %task_id, error = %e, "failed to reset timed-out task");
+                    warn!(project = %self.company_name, task = %task_id, error = %e, "failed to reset timed-out task");
                 }
             }
             self.dispatch_bus
                 .send(Dispatch::new_typed(
-                    &format!("pool-{}", self.project_name),
+                    &format!("pool-{}", self.company_name),
                     &self.escalation_target,
                     DispatchKind::DelegateRequest {
                         prompt: format!(
                             "Worker timed out after {}s on task {} in project {}. Please investigate.",
-                            self.worker_timeout_secs, task_id, self.project_name
+                            self.worker_timeout_secs, task_id, self.company_name
                         ),
                         response_mode: "none".to_string(),
                         create_task: false,
@@ -672,7 +672,7 @@ impl WorkerPool {
 
         // 3. Assign + launch ready tasks.
         if self.paused {
-            debug!(project = %self.project_name, "project paused — skipping task assignment");
+            debug!(project = %self.company_name, "project paused — skipping task assignment");
             // Skip straight to reporting.
             let active = self.running_tasks.len();
             let pending = {
@@ -709,11 +709,11 @@ impl WorkerPool {
 
             // Budget check: don't spawn if global daily budget or project budget is exhausted.
             if let Some(ref ledger) = self.cost_ledger
-                && !ledger.can_afford_project(&self.project_name)
+                && !ledger.can_afford_company(&self.company_name)
             {
-                let (spent, budget, _) = ledger.project_budget_status(&self.project_name);
+                let (spent, budget, _) = ledger.company_budget_status(&self.company_name);
                 warn!(
-                    project = %self.project_name,
+                    project = %self.company_name,
                     spent_usd = spent,
                     budget_usd = budget,
                     "budget exhausted for project, skipping task"
@@ -722,7 +722,7 @@ impl WorkerPool {
                 if let Some(ref audit) = self.audit_log {
                     let _ = audit.record(
                         &AuditEvent::new(
-                            &self.project_name,
+                            &self.company_name,
                             DecisionType::BudgetBlocked,
                             format!("Budget exhausted: ${spent:.2}/${budget:.2}"),
                         )
@@ -737,7 +737,7 @@ impl WorkerPool {
             let agent_name = task
                 .agent_id
                 .clone()
-                .unwrap_or_else(|| self.project_name.clone());
+                .unwrap_or_else(|| self.company_name.clone());
 
             // Per-agent concurrency control: skip if max_concurrent reached.
             if let Some(ref registry) = self.agent_registry {
@@ -764,7 +764,7 @@ impl WorkerPool {
 
                 if running_for_agent >= max_concurrent {
                     debug!(
-                        project = %self.project_name,
+                        project = %self.company_name,
                         agent = %agent_name,
                         running = running_for_agent,
                         max_concurrent = max_concurrent,
@@ -774,7 +774,7 @@ impl WorkerPool {
                 }
             }
 
-            let worker_name = format!("{}:{}:{}", self.project_name, agent_name, worker_idx);
+            let worker_name = format!("{}:{}:{}", self.company_name, agent_name, worker_idx);
 
             if let Some(ref audit) = self.audit_log {
                 let routing_summary = if task.agent_id.is_some() {
@@ -784,7 +784,7 @@ impl WorkerPool {
                 };
                 let _ = audit.record(
                     &AuditEvent::new(
-                        &self.project_name,
+                        &self.company_name,
                         DecisionType::RouteDecision,
                         routing_summary,
                     )
@@ -822,7 +822,7 @@ impl WorkerPool {
                         if b.skill.is_none() {
                             b.skill = Some(skill_name.clone());
                             info!(
-                                project = %self.project_name,
+                                project = %self.company_name,
                                 task = %b.id,
                                 skill = %skill_name,
                                 "auto-injected adaptive pipeline skill"
@@ -833,7 +833,7 @@ impl WorkerPool {
                     let budget_remaining = self
                         .cost_ledger
                         .as_ref()
-                        .map(|l| l.project_budget_status(&self.project_name).2)
+                        .map(|l| l.company_budget_status(&self.company_name).2)
                         .unwrap_or(10.0);
                     let agent_success_rate = self
                         .expertise_ledger
@@ -851,7 +851,7 @@ impl WorkerPool {
                     match &verdict {
                         PreflightVerdict::Reject { reason } => {
                             info!(
-                                project = %self.project_name,
+                                project = %self.company_name,
                                 task = %task.id,
                                 reason = %reason,
                                 "preflight rejected task"
@@ -859,7 +859,7 @@ impl WorkerPool {
                             if let Some(ref audit) = self.audit_log {
                                 let _ = audit.record(
                                     &AuditEvent::new(
-                                        &self.project_name,
+                                        &self.company_name,
                                         DecisionType::PreflightRejected,
                                         format!("Rejected: {reason}"),
                                     )
@@ -879,7 +879,7 @@ impl WorkerPool {
                         }
                         PreflightVerdict::Reroute { reason } => {
                             info!(
-                                project = %self.project_name,
+                                project = %self.company_name,
                                 task = %task.id,
                                 reason = %reason,
                                 "preflight rerouted task"
@@ -887,7 +887,7 @@ impl WorkerPool {
                             if let Some(ref audit) = self.audit_log {
                                 let _ = audit.record(
                                     &AuditEvent::new(
-                                        &self.project_name,
+                                        &self.company_name,
                                         DecisionType::PreflightRejected,
                                         format!("Rerouted: {reason}"),
                                     )
@@ -903,7 +903,7 @@ impl WorkerPool {
             }
 
             info!(
-                project = %self.project_name,
+                project = %self.company_name,
                 worker = %worker_name,
                 agent = %agent_name,
                 task = %task.id,
@@ -916,7 +916,7 @@ impl WorkerPool {
             if let Some(ref audit) = self.audit_log {
                 let _ = audit.record(
                     &AuditEvent::new(
-                        &self.project_name,
+                        &self.company_name,
                         DecisionType::TaskAssigned,
                         format!("Assigned to {agent_name} via {worker_name}"),
                     )
@@ -944,7 +944,7 @@ impl WorkerPool {
                             Self::cap_description_with_limit(&mut b.description, max_desc);
                         });
                         info!(
-                            project = %self.project_name,
+                            project = %self.company_name,
                             task = %task.id,
                             "injected external checkpoint context from previous worker"
                         );
@@ -954,7 +954,7 @@ impl WorkerPool {
                     Ok(None) => {} // No checkpoint — normal launch.
                     Err(e) => {
                         warn!(
-                            project = %self.project_name,
+                            project = %self.company_name,
                             task = %task.id,
                             error = %e,
                             "failed to read checkpoint — launching without it"
@@ -968,7 +968,7 @@ impl WorkerPool {
             let task_id = task.id.0.clone();
 
             // Fire-and-forget: worker handles its own task updates + dispatch notifications.
-            let project_name_task = self.project_name.clone();
+            let company_name_task = self.company_name.clone();
             let task_id_clone = task_id.clone();
             let cost_ledger = self.cost_ledger.clone();
             let metrics = self.metrics.clone();
@@ -978,7 +978,7 @@ impl WorkerPool {
             if let Some(ref audit) = self.audit_log {
                 let _ = audit.record(
                     &AuditEvent::new(
-                        &self.project_name,
+                        &self.company_name,
                         DecisionType::WorkerSpawned,
                         format!("Worker {} spawned for task {}", worker_name, task.id),
                     )
@@ -988,7 +988,7 @@ impl WorkerPool {
             }
             let tasks_for_err = self.tasks.clone();
             let expertise_ledger = self.expertise_ledger.clone();
-            let blackboard_worker = self.blackboard.clone();
+            let blackboard_worker = self.notes.clone();
             let audit_log_worker = self.audit_log.clone();
             let dispatch_bus_worker = self.dispatch_bus.clone();
             // Route response to the original delegating agent if present, else system leader.
@@ -1028,7 +1028,7 @@ impl WorkerPool {
                     Ok((outcome, mut runtime, cost_usd, turns)) => {
                         let duration_secs = start.elapsed().as_secs_f64();
                         debug!(
-                            project = %project_name_task,
+                            project = %company_name_task,
                             outcome = ?std::mem::discriminant(&outcome),
                             cost_usd,
                             turns,
@@ -1039,7 +1039,7 @@ impl WorkerPool {
                         // Record to cost ledger.
                         if let Some(ref ledger) = cost_ledger {
                             let _ = ledger.record(CostEntry {
-                                project: project_name_task.clone(),
+                                company: company_name_task.clone(),
                                 task_id: task_id_clone.clone(),
                                 worker: "worker".to_string(),
                                 cost_usd,
@@ -1103,7 +1103,7 @@ impl WorkerPool {
                             };
                             let _ = audit.record(
                                 &AuditEvent::new(
-                                    &project_name_task,
+                                    &company_name_task,
                                     dt,
                                     format!(
                                         "Outcome: {:?}, cost=${cost_usd:.3}, turns={turns}",
@@ -1164,7 +1164,7 @@ impl WorkerPool {
                                         // Also send dispatch so delegate_from agent gets notified.
                                         dispatch_bus_worker
                                             .send(Dispatch::new_typed(
-                                                &format!("pool-{project_name_task}"),
+                                                &format!("pool-{company_name_task}"),
                                                 &outcome_recipient,
                                                 DispatchKind::DelegateResponse {
                                                     reply_to: reply_to_id,
@@ -1178,7 +1178,7 @@ impl WorkerPool {
                                     _ => {
                                         dispatch_bus_worker
                                             .send(Dispatch::new_typed(
-                                                &format!("pool-{project_name_task}"),
+                                                &format!("pool-{company_name_task}"),
                                                 &outcome_recipient,
                                                 DispatchKind::DelegateResponse {
                                                     reply_to: reply_to_id,
@@ -1205,17 +1205,17 @@ impl WorkerPool {
                                             &key,
                                             &content,
                                             &agent_name_for_records,
-                                            &project_name_task,
+                                            &company_name_task,
                                             &task_labels,
-                                            crate::blackboard::EntryDurability::Transient,
+                                            crate::notes::EntryDurability::Transient,
                                         )
                                         .is_ok()
                                         && let Some(ref audit) = audit_log_worker
                                     {
                                         let _ = audit.record(
                                             &AuditEvent::new(
-                                                &project_name_task,
-                                                DecisionType::BlackboardPost,
+                                                &company_name_task,
+                                                DecisionType::NotePost,
                                                 format!(
                                                     "Posted completion summary for task {}",
                                                     task_id_clone
@@ -1254,8 +1254,8 @@ impl WorkerPool {
                                         task_id: task_id_clone.clone(),
                                         subject: task_subject.clone(),
                                         done_condition,
-                                        project: project_name_task.clone(),
-                                        project_dir: verification_repo.clone(),
+                                        company: company_name_task.clone(),
+                                        company_dir: verification_repo.clone(),
                                         artifacts: runtime_artifacts.clone(),
                                     };
                                     let mw_outcome = Outcome {
@@ -1303,7 +1303,7 @@ impl WorkerPool {
                                         if let Some(ref audit) = audit_log_worker {
                                             let _ = audit.record(
                                                 &AuditEvent::new(
-                                                    &project_name_task,
+                                                    &company_name_task,
                                                     DecisionType::TaskFailed,
                                                     format!(
                                                         "Verification rejected (confidence={:.2}): {}",
@@ -1331,7 +1331,7 @@ impl WorkerPool {
                                         );
                                         dispatch_bus_worker
                                             .send(Dispatch::new_typed(
-                                                &format!("verification-{project_name_task}"),
+                                                &format!("verification-{company_name_task}"),
                                                 &outcome_recipient,
                                                 DispatchKind::DelegateRequest {
                                                     prompt: feedback,
@@ -1361,7 +1361,7 @@ impl WorkerPool {
                             } => {
                                 dispatch_bus_worker
                                     .send(Dispatch::new_typed(
-                                        &format!("pool-{project_name_task}"),
+                                        &format!("pool-{company_name_task}"),
                                         &outcome_recipient,
                                         DispatchKind::DelegateRequest {
                                             prompt: format!(
@@ -1379,7 +1379,7 @@ impl WorkerPool {
                             TaskOutcome::Failed(error) => {
                                 dispatch_bus_worker
                                     .send(Dispatch::new_typed(
-                                        &format!("pool-{project_name_task}"),
+                                        &format!("pool-{company_name_task}"),
                                         &outcome_recipient,
                                         DispatchKind::DelegateRequest {
                                             prompt: format!(
@@ -1475,7 +1475,7 @@ impl WorkerPool {
                     }
                     Err(e) => {
                         warn!(
-                            project = %project_name_task,
+                            project = %company_name_task,
                             task = %task_id_clone,
                             error = %e,
                             "worker execution error — resetting task to Pending"
@@ -1515,14 +1515,14 @@ impl WorkerPool {
             self.last_report = current;
             self.dispatch_bus
                 .send(Dispatch::new_typed(
-                    &format!("pool-{}", self.project_name),
+                    &format!("pool-{}", self.company_name),
                     &self.escalation_target,
                     DispatchKind::DelegateResponse {
-                        reply_to: format!("patrol-{}", self.project_name),
+                        reply_to: format!("patrol-{}", self.company_name),
                         response_mode: "none".to_string(),
                         content: format!(
                             "Project {}: {} active workers, {} pending tasks",
-                            self.project_name, active, pending
+                            self.company_name, active, pending
                         ),
                     },
                 ))
@@ -1598,7 +1598,7 @@ impl WorkerPool {
             .unwrap_or_else(|| "(no blocker details captured)".to_string());
 
         info!(
-            project = %self.project_name,
+            project = %self.company_name,
             task = %task.id,
             depth = new_depth,
             "attempting project-level resolution"
@@ -1608,7 +1608,7 @@ impl WorkerPool {
         if let Some(ref audit) = self.audit_log {
             let _ = audit.record(
                 &AuditEvent::new(
-                    &self.project_name,
+                    &self.company_name,
                     DecisionType::TaskRetried,
                     format!("Project-level resolution attempt {new_depth}"),
                 )
@@ -1688,7 +1688,7 @@ impl WorkerPool {
                 .unwrap_or_else(|| "(no details)".to_string());
             let msg = format!(
                 "BLOCKED: {}/{} — {}\n\n{}\n\nThis task has exhausted all automated resolution attempts.",
-                self.project_name, task.id, task.subject, summary
+                self.company_name, task.id, task.subject, summary
             );
             for gate in &self.gate_channels {
                 let outgoing = OutgoingMessage {
@@ -1704,10 +1704,10 @@ impl WorkerPool {
             // Send HumanEscalation dispatch for internal tracking.
             self.dispatch_bus
                 .send(Dispatch::new_typed(
-                    &format!("pool-{}", self.project_name),
+                    &format!("pool-{}", self.company_name),
                     "human",
                     DispatchKind::HumanEscalation {
-                        project: self.project_name.clone(),
+                        project: self.company_name.clone(),
                         task_id: task.id.to_string(),
                         subject: task.subject.clone(),
                         summary: summary.to_string(),
@@ -1722,7 +1722,7 @@ impl WorkerPool {
                 });
             }
             info!(
-                project = %self.project_name,
+                project = %self.company_name,
                 task = %task.id,
                 channels = self.gate_channels.len(),
                 "human escalation sent"
@@ -1758,7 +1758,7 @@ impl WorkerPool {
         };
 
         info!(
-            project = %self.project_name,
+            project = %self.company_name,
             task = %task.id,
             target = %target,
             "escalating blocked task"
@@ -1768,7 +1768,7 @@ impl WorkerPool {
         if let Some(ref audit) = self.audit_log {
             let _ = audit.record(
                 &AuditEvent::new(
-                    &self.project_name,
+                    &self.company_name,
                     DecisionType::TaskEscalated,
                     format!("Escalated to {target}"),
                 )
@@ -1788,7 +1788,7 @@ impl WorkerPool {
 
         self.dispatch_bus
             .send(Dispatch::new_typed(
-                &format!("pool-{}", self.project_name),
+                &format!("pool-{}", self.company_name),
                 target,
                 DispatchKind::DelegateRequest {
                     prompt: format!(
@@ -1799,7 +1799,7 @@ impl WorkerPool {
                          Please try to resolve using your cross-project knowledge (KNOWLEDGE.md). \
                          If you can answer the blocker question, send a delegation response back. \
                          If you cannot resolve it, escalate to the human operator via Telegram.",
-                        self.project_name,
+                        self.company_name,
                         task.id,
                         task.subject,
                         task.priority,
@@ -1819,7 +1819,7 @@ impl WorkerPool {
     /// with the answer appended to the description.
     pub async fn handle_resolution(&self, task_id: &str, answer: &str) {
         info!(
-            project = %self.project_name,
+            project = %self.company_name,
             task = %task_id,
             "received resolution from leader"
         );
@@ -1926,7 +1926,7 @@ impl WorkerPool {
         // the next patrol() iteration handle it. The centralized coordinator
         // already checked concurrency limits.
         debug!(
-            project = %self.project_name,
+            project = %self.company_name,
             task = %task.id,
             agent = %agent_name,
             "spawn_worker: task eligible for next patrol spawn"
@@ -1977,7 +1977,7 @@ impl WorkerPool {
         {
             let mut store = self.tasks.lock().await;
             if let Err(e) = store.reload() {
-                warn!(project = %self.project_name, error = %e, "failed to reload tasks from disk");
+                warn!(project = %self.company_name, error = %e, "failed to reload tasks from disk");
             }
             let running_ids: std::collections::HashSet<&str> = self
                 .running_tasks
@@ -1993,7 +1993,7 @@ impl WorkerPool {
                 .map(|t| t.id.0.clone())
                 .collect();
             for id in orphaned {
-                warn!(project = %self.project_name, task = %id, "resetting orphaned InProgress task to Pending");
+                warn!(project = %self.company_name, task = %id, "resetting orphaned InProgress task to Pending");
                 let _ = store.update(&id, |t| {
                     t.status = TaskStatus::Pending;
                     t.assignee = None;
@@ -2016,7 +2016,7 @@ impl WorkerPool {
             true
         });
         for task_id in &timed_out {
-            warn!(project = %self.project_name, task = %task_id, "worker timed out");
+            warn!(project = %self.company_name, task = %task_id, "worker timed out");
             let mut store = self.tasks.lock().await;
             let _ = store.update(task_id, |t| {
                 t.status = TaskStatus::Pending;
@@ -2036,7 +2036,7 @@ impl WorkerPool {
         }
         // Budget check.
         if let Some(ref ledger) = self.cost_ledger
-            && !ledger.can_afford_project(&self.project_name)
+            && !ledger.can_afford_company(&self.company_name)
         {
             return vec![];
         }
@@ -2049,7 +2049,7 @@ impl WorkerPool {
                 let agent = t
                     .agent_id
                     .clone()
-                    .unwrap_or_else(|| self.project_name.clone());
+                    .unwrap_or_else(|| self.company_name.clone());
                 (t.clone(), agent)
             })
             .collect()

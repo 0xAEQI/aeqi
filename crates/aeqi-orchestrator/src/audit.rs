@@ -28,7 +28,7 @@ pub enum DecisionType {
     RouteDecision,
     PreflightRejected,
     FailureAnalyzed,
-    BlackboardPost,
+    NotePost,
     WatchdogFired,
     DependencyInferred,
 }
@@ -47,7 +47,8 @@ impl std::fmt::Display for DecisionType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEvent {
     pub timestamp: DateTime<Utc>,
-    pub project: String,
+    #[serde(alias = "project")]
+    pub company: String,
     pub task_id: Option<String>,
     pub decision_type: DecisionType,
     pub agent: Option<String>,
@@ -63,7 +64,7 @@ impl AuditEvent {
     ) -> Self {
         Self {
             timestamp: Utc::now(),
-            project: project.into(),
+            company: project.into(),
             task_id: None,
             decision_type,
             agent: None,
@@ -146,7 +147,7 @@ impl AuditLog {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             rusqlite::params![
                 event.timestamp.to_rfc3339(),
-                event.project,
+                event.company,
                 event.task_id,
                 decision_type_str,
                 event.agent,
@@ -239,7 +240,7 @@ impl AuditLog {
 
             events.push(AuditEvent {
                 timestamp,
-                project,
+                company: project,
                 task_id,
                 decision_type,
                 agent,

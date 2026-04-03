@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# PostToolUse hook for mcp__aeqi__aeqi_blackboard: nudge delegation after plan posting.
-# When a plan is posted to the blackboard, suggest delegating before implementing.
+# PostToolUse hook for mcp__aeqi__aeqi_notes: nudge delegation after plan posting.
+# When a plan is posted to notes, suggest delegating before implementing.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/hook-log.sh"

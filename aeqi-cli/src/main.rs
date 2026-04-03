@@ -41,14 +41,14 @@ async fn main() -> Result<()> {
         None => cmd::chat::cmd_chat(&cli.config).await,
         Some(Commands::Run {
             prompt,
-            project,
+            company,
             model,
             max_iterations,
         }) => {
             cmd::run::cmd_run(
                 &cli.config,
                 &prompt,
-                project.as_deref(),
+                company.as_deref(),
                 model.as_deref(),
                 max_iterations,
             )
@@ -66,34 +66,34 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Status) => cmd::status::cmd_status(&cli.config).await,
         Some(Commands::Monitor {
-            project,
+            company,
             watch,
             interval_secs,
             json,
         }) => {
-            cmd::monitor::cmd_monitor(&cli.config, project.as_deref(), watch, interval_secs, json)
+            cmd::monitor::cmd_monitor(&cli.config, company.as_deref(), watch, interval_secs, json)
                 .await
         }
         Some(Commands::Assign {
             subject,
-            project,
+            company,
             description,
             priority,
         }) => {
             cmd::tasks::cmd_assign(
                 &cli.config,
                 &subject,
-                &project,
+                &company,
                 &description,
                 priority.as_deref(),
             )
             .await
         }
-        Some(Commands::Ready { project }) => {
-            cmd::tasks::cmd_ready(&cli.config, project.as_deref()).await
+        Some(Commands::Ready { company }) => {
+            cmd::tasks::cmd_ready(&cli.config, company.as_deref()).await
         }
-        Some(Commands::Tasks { project, all }) => {
-            cmd::tasks::cmd_tasks(&cli.config, project.as_deref(), all).await
+        Some(Commands::Tasks { company, all }) => {
+            cmd::tasks::cmd_tasks(&cli.config, company.as_deref(), all).await
         }
         Some(Commands::Close { id, reason }) => {
             cmd::tasks::cmd_close(&cli.config, &id, &reason).await
@@ -101,14 +101,14 @@ async fn main() -> Result<()> {
         Some(Commands::Daemon { action }) => cmd::daemon::cmd_daemon(&cli.config, action).await,
         Some(Commands::Recall {
             query,
-            project,
+            company,
             top_k,
-        }) => cmd::memory::cmd_recall(&cli.config, &query, project.as_deref(), top_k).await,
+        }) => cmd::memory::cmd_recall(&cli.config, &query, company.as_deref(), top_k).await,
         Some(Commands::Remember {
             key,
             content,
-            project,
-        }) => cmd::memory::cmd_remember(&cli.config, &key, &content, project.as_deref()).await,
+            company,
+        }) => cmd::memory::cmd_remember(&cli.config, &key, &content, company.as_deref()).await,
         Some(Commands::Pipeline { action }) => {
             cmd::pipeline::cmd_pipeline(&cli.config, action).await
         }
@@ -124,26 +124,24 @@ async fn main() -> Result<()> {
         Some(Commands::Done { task_id, reason }) => {
             cmd::tasks::cmd_done(&cli.config, &task_id, &reason).await
         }
-        Some(Commands::Team { project }) => {
-            cmd::team::cmd_team(&cli.config, project.as_deref()).await
+        Some(Commands::Team { company }) => {
+            cmd::team::cmd_team(&cli.config, company.as_deref()).await
         }
         Some(Commands::Config { action }) => cmd::config::cmd_config(&cli.config, action).await,
         Some(Commands::Agent { action }) => cmd::agent::cmd_agent(&cli.config, action).await,
         Some(Commands::Audit {
-            project,
+            company,
             task,
             last,
-        }) => cmd::audit::cmd_audit(&cli.config, project.as_deref(), task.as_deref(), last).await,
-        Some(Commands::Blackboard { action }) => {
-            cmd::blackboard::cmd_blackboard(&cli.config, action).await
-        }
-        Some(Commands::Deps { project, apply }) => {
-            cmd::deps::cmd_deps(&cli.config, &project, apply).await
+        }) => cmd::audit::cmd_audit(&cli.config, company.as_deref(), task.as_deref(), last).await,
+        Some(Commands::Notes { action }) => cmd::notes::cmd_notes(&cli.config, action).await,
+        Some(Commands::Deps { company, apply }) => {
+            cmd::deps::cmd_deps(&cli.config, &company, apply).await
         }
         Some(Commands::Web { action }) => cmd::web::cmd_web(&cli.config, action).await,
         Some(Commands::Graph { action }) => cmd::graph::cmd_graph(&cli.config, action).await,
-        Some(Commands::Chat { agent, project }) => {
-            tui::run(&cli.config, agent.as_deref(), project.as_deref()).await
+        Some(Commands::Chat { agent, company }) => {
+            tui::run(&cli.config, agent.as_deref(), company.as_deref()).await
         }
         Some(Commands::Mcp) => cmd::mcp::cmd_mcp(&cli.config).map(|_| ()),
     }

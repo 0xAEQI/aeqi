@@ -138,10 +138,11 @@ pub struct TaskContext {
     pub subject: String,
     /// The explicit "done when" condition, if specified.
     pub done_condition: Option<String>,
-    /// Project this task belongs to.
-    pub project: String,
-    /// Project directory on disk (for running tests, checking files).
-    pub project_dir: Option<PathBuf>,
+    /// Company this task belongs to.
+    #[serde(alias = "project")]
+    pub company: String,
+    /// Company directory on disk (for running tests, checking files).
+    pub company_dir: Option<PathBuf>,
     /// Known artifact paths (files, commits) from worker output.
     pub artifacts: Vec<String>,
 }
@@ -267,7 +268,7 @@ impl VerificationPipeline {
         }
 
         // Collect git diff stats if project_dir is available.
-        if let Some(ref project_dir) = task.project_dir {
+        if let Some(ref project_dir) = task.company_dir {
             Self::collect_git_evidence(project_dir, &mut evidence).await;
         }
 
@@ -372,7 +373,7 @@ impl VerificationPipeline {
         evidence: &mut VerificationEvidence,
     ) -> Vec<VerificationSignal> {
         // Try real test execution if project_dir is available.
-        if let Some(ref project_dir) = task.project_dir {
+        if let Some(ref project_dir) = task.company_dir {
             // Detect Cargo.toml -> Rust project.
             let cargo_toml = project_dir.join("Cargo.toml");
             if cargo_toml.exists() {
@@ -748,8 +749,8 @@ mod tests {
             task_id: "task-1".into(),
             subject: "implement feature X".into(),
             done_condition: done_condition.map(|s| s.into()),
-            project: "aeqi".into(),
-            project_dir: None,
+            company: "aeqi".into(),
+            company_dir: None,
             artifacts,
         }
     }

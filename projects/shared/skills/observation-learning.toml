@@ -6,7 +6,7 @@ when_to_use = "Triggered automatically via schedule. Do not invoke manually."
 context = "fork"
 
 [tools]
-allow = ["read_file", "glob", "grep", "shell", "memory_recall", "memory_store", "blackboard"]
+allow = ["read_file", "glob", "grep", "shell", "memory_recall", "memory_store", "notes"]
 deny = ["write_file", "edit_file", "delegate"]
 
 [prompt]

@@ -50,16 +50,16 @@ emit_health() {
     fi
 }
 
-# --- Reverse blackboard channel: surface signals from previous sessions ---
+# --- Reverse notes channel: surface signals from previous sessions ---
 emit_reverse_channel() {
     [ -S "$SOCK" ] || return 0
     local proj="${1:-aeqi}"
     # Query for recent nudges and findings
     local bb_resp
-    bb_resp=$(printf '{"cmd":"blackboard","project":"%s","limit":10}' "$proj" | socat -t2 - UNIX-CONNECT:"$SOCK" 2>/dev/null) || true
+    bb_resp=$(printf '{"cmd":"notes","project":"%s","limit":10}' "$proj" | socat -t2 - UNIX-CONNECT:"$SOCK" 2>/dev/null) || true
     [ -z "$bb_resp" ] && return 0
 
-    # Extract entries with signal: or finding: prefixes from recent blackboard
+    # Extract entries with signal: or finding: prefixes from recent notes
     local signals
     signals=$(printf '%s' "$bb_resp" | jq -r '
         .entries // [] | map(select(
@@ -71,7 +71,7 @@ emit_reverse_channel() {
 
     if [ -n "$signals" ]; then
         echo ""
-        echo "## Blackboard Signals"
+        echo "## Notes Signals"
         echo "$signals"
     fi
 }
@@ -203,7 +203,7 @@ fi
 cat <<'QREF'
 ## Quick Reference — MCP Tool Names
   mcp__aeqi__aeqi_recall, mcp__aeqi__aeqi_remember, mcp__aeqi__aeqi_primer
-  mcp__aeqi__aeqi_skills, mcp__aeqi__aeqi_agents, mcp__aeqi__aeqi_blackboard
+  mcp__aeqi__aeqi_skills, mcp__aeqi__aeqi_agents, mcp__aeqi__aeqi_notes
   mcp__aeqi__aeqi_create_task, mcp__aeqi__aeqi_close_task, mcp__aeqi__aeqi_status
 QREF
 
@@ -283,7 +283,7 @@ if [ -z "$PROJECT" ] || [ "$PROJECT" = "shared" ]; then
     fi
 fi
 
-# Reverse blackboard channel — surface signals from prior sessions
+# Reverse notes channel — surface signals from prior sessions
 emit_reverse_channel "${PROJECT:-aeqi}"
 
 log_hook "session-primer" "injected" "event=$EVENT project=${PROJECT:-root}"

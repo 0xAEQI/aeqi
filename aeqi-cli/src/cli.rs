@@ -5,8 +5,8 @@ pub enum Commands {
     /// Run a one-shot agent with a prompt.
     Run {
         prompt: String,
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: Option<String>,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: Option<String>,
         #[arg(short, long)]
         model: Option<String>,
         #[arg(long, default_value = "20")]
@@ -44,9 +44,9 @@ pub enum Commands {
     Status,
     /// Show a consolidated operator monitor view.
     Monitor {
-        /// Focus on a single project.
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: Option<String>,
+        /// Focus on a single company.
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: Option<String>,
         /// Refresh the monitor continuously.
         #[arg(long)]
         watch: bool,
@@ -59,11 +59,11 @@ pub enum Commands {
     },
 
     // --- Phase 2: Tasks ---
-    /// Assign a task to a project.
+    /// Assign a task to a company.
     Assign {
         subject: String,
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: String,
         #[arg(short, long, default_value = "")]
         description: String,
         #[arg(short, long)]
@@ -71,13 +71,13 @@ pub enum Commands {
     },
     /// Show unblocked (ready) work.
     Ready {
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: Option<String>,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: Option<String>,
     },
     /// Show all open tasks.
     Tasks {
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: Option<String>,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: Option<String>,
         #[arg(long)]
         all: bool,
     },
@@ -99,8 +99,8 @@ pub enum Commands {
     /// Search collective memory.
     Recall {
         query: String,
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: Option<String>,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: Option<String>,
         #[arg(short, long, default_value = "5")]
         top_k: usize,
     },
@@ -108,8 +108,8 @@ pub enum Commands {
     Remember {
         key: String,
         content: String,
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: Option<String>,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: Option<String>,
     },
 
     // --- Phase 5: Pipelines ---
@@ -135,8 +135,8 @@ pub enum Commands {
     },
 
     // --- Missions ---
-    // --- Cross-project ---
-    /// Track work across projects.
+    // --- Cross-company ---
+    /// Track work across companies.
     Operation {
         #[command(subcommand)]
         action: OperationAction,
@@ -157,11 +157,11 @@ pub enum Commands {
         reason: String,
     },
 
-    /// Show system team and per-project teams.
+    /// Show system team and per-company teams.
     Team {
-        /// Show team for a specific project.
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: Option<String>,
+        /// Show team for a specific company.
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: Option<String>,
     },
 
     // --- Config ---
@@ -179,9 +179,9 @@ pub enum Commands {
 
     /// Query the decision audit trail.
     Audit {
-        /// Filter by project name.
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: Option<String>,
+        /// Filter by company name.
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: Option<String>,
         /// Filter by task ID.
         #[arg(short, long)]
         task: Option<String>,
@@ -190,16 +190,17 @@ pub enum Commands {
         last: u32,
     },
 
-    /// Query or post to the inter-agent blackboard.
-    Blackboard {
+    /// Query or post to the inter-agent notes.
+    #[command(alias = "blackboard")]
+    Notes {
         #[command(subcommand)]
-        action: BlackboardAction,
+        action: NotesAction,
     },
 
     /// Suggest or apply inferred task dependencies.
     Deps {
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: String,
         /// Auto-apply dependencies above this confidence threshold.
         #[arg(long)]
         apply: Option<f64>,
@@ -219,12 +220,12 @@ pub enum Commands {
 
     /// Interactive streaming chat with a AEQI agent (TUI).
     Chat {
-        /// Persistent agent to chat with (default: auto-select based on project).
+        /// Persistent agent to chat with (default: auto-select based on company).
         #[arg(short, long)]
         agent: Option<String>,
-        /// Project scope for agent selection and memory.
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: Option<String>,
+        /// Company scope for agent selection and memory.
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: Option<String>,
     },
 
     /// Run as an MCP (Model Context Protocol) server.
@@ -233,34 +234,34 @@ pub enum Commands {
 
 #[derive(Subcommand)]
 pub enum GraphAction {
-    /// Index (or re-index) the code graph for a project.
+    /// Index (or re-index) the code graph for a company.
     Index {
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: String,
         /// Full re-index instead of incremental (git-diff based).
         #[arg(long)]
         full: bool,
     },
-    /// Show graph statistics for a project.
+    /// Show graph statistics for a company.
     Stats {
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: String,
     },
 }
 
 #[derive(Subcommand)]
-pub enum BlackboardAction {
-    /// List blackboard entries for a project.
+pub enum NotesAction {
+    /// List note entries for a company.
     List {
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: String,
         #[arg(short, long, default_value = "20")]
         limit: u32,
     },
-    /// Post a new entry to the blackboard.
+    /// Post a new note entry.
     Post {
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: String,
         key: String,
         content: String,
         #[arg(short, long)]
@@ -268,10 +269,10 @@ pub enum BlackboardAction {
         #[arg(long, default_value = "transient")]
         durability: String,
     },
-    /// Query blackboard by tags.
+    /// Query notes by tags.
     Query {
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: String,
         #[arg(short, long)]
         tags: Vec<String>,
         #[arg(short, long, default_value = "10")]
@@ -279,14 +280,14 @@ pub enum BlackboardAction {
     },
     /// Get a specific entry by key.
     Get {
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: String,
         key: String,
     },
     /// Claim exclusive access to a resource.
     Claim {
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: String,
         /// Resource to claim (e.g. file path, module name).
         resource: String,
         /// Description of what you're doing with the resource.
@@ -297,8 +298,8 @@ pub enum BlackboardAction {
     },
     /// Release a previously claimed resource.
     Release {
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: String,
         /// Resource to release.
         resource: String,
         /// Agent name (defaults to "cli").
@@ -310,8 +311,8 @@ pub enum BlackboardAction {
     },
     /// Delete an entry by key.
     Delete {
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: String,
         key: String,
     },
 }
@@ -324,9 +325,9 @@ pub enum AgentAction {
     Spawn {
         /// Path to the agent template file (frontmatter + system prompt).
         template: String,
-        /// Override project scope from template.
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: Option<String>,
+        /// Override company scope from template.
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: Option<String>,
     },
     /// Show details of a persistent agent.
     Show {
@@ -345,9 +346,9 @@ pub enum AgentAction {
     },
     /// List all persistent agents from the registry.
     Registry {
-        /// Filter by project.
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: Option<String>,
+        /// Filter by company.
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: Option<String>,
     },
     /// Migrate `[[agents]]` from aeqi.toml to agent.toml files on disk.
     Migrate {
@@ -391,7 +392,7 @@ pub enum DaemonAction {
     Status,
     /// Query the running daemon via IPC socket.
     Query {
-        /// Command to send (ping, status, readiness, projects, dispatches, cost, metrics, audit, blackboard, expertise).
+        /// Command to send (ping, status, readiness, companies, dispatches, cost, metrics, audit, notes, expertise).
         cmd: String,
     },
 }
@@ -423,9 +424,9 @@ pub enum TriggerAction {
         /// Event pattern: task_completed, task_failed, tool_call_completed.
         #[arg(short, long)]
         event: Option<String>,
-        /// Event project filter (optional).
-        #[arg(long)]
-        event_project: Option<String>,
+        /// Event company filter (optional).
+        #[arg(long, alias = "event-project")]
+        event_company: Option<String>,
         /// Event tool filter (optional).
         #[arg(long)]
         event_tool: Option<String>,
@@ -463,16 +464,16 @@ pub enum TriggerAction {
 
 #[derive(Subcommand)]
 pub enum SkillAction {
-    /// List available skills for a project.
+    /// List available skills for a company.
     List {
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: Option<String>,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: Option<String>,
     },
     /// Run a skill by name.
     Run {
         name: String,
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: String,
         /// Additional user prompt appended after the skill's user_prefix.
         prompt: Option<String>,
     },
@@ -480,7 +481,7 @@ pub enum SkillAction {
 
 #[derive(Subcommand)]
 pub enum OperationAction {
-    /// Create an operation tracking tasks across projects.
+    /// Create an operation tracking tasks across companies.
     Create {
         name: String,
         /// Task IDs to track (e.g. as-001 rd-002).
@@ -497,16 +498,16 @@ pub enum PipelineAction {
     /// Pour (instantiate) a pipeline workflow.
     Pour {
         template: String,
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: String,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: String,
         /// Variables as key=value pairs.
         #[arg(long = "var")]
         vars: Vec<String>,
     },
     /// List available pipeline templates.
     List {
-        #[arg(short = 'r', long = "project", alias = "rig")]
-        project: Option<String>,
+        #[arg(short = 'r', long = "company", alias = "project")]
+        company: Option<String>,
     },
     /// Show status of a pipeline (parent task and its children).
     Status { id: String },

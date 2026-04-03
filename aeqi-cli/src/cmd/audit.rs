@@ -39,7 +39,7 @@ pub(crate) async fn cmd_audit(
         println!(
             "[{}] {} | {} | task={} agent={} | {}",
             event.timestamp.format("%Y-%m-%d %H:%M:%S"),
-            event.project,
+            event.company,
             event.decision_type,
             task_str,
             agent_str,

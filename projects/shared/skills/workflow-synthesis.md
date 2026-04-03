@@ -21,7 +21,7 @@ Analyze Source → Map AEQI → Gap Analysis → Prioritize → Implement → Cl
 
 1. **Read thoroughly** — code, docs, architecture. Don't skim.
 2. **Extract patterns** — what design decisions did they make? What problems do they solve? What trade-offs did they accept?
-3. **Post findings** — `aeqi_blackboard` post with key `task:{id}:external-analysis`
+3. **Post findings** — `aeqi_notes` post with key `task:{id}:external-analysis`
 4. **Delegate deep dives** — `aeqi_delegate` with the researcher agent for specific subsystems
 
 ### What to Extract
@@ -46,7 +46,7 @@ Understand AEQI's current equivalent for every pattern found.
 1. **Recall existing knowledge** — `aeqi_recall` for each area the external source covers
 2. **Search codebase** — `aeqi_graph` search/context for AEQI's existing implementations
 3. **Map equivalences** — for each external pattern, find AEQI's corresponding mechanism (or note its absence)
-4. **Post mapping** — `aeqi_blackboard` post with key `task:{id}:aeqi-mapping`
+4. **Post mapping** — `aeqi_notes` post with key `task:{id}:aeqi-mapping`
 
 ### Mapping Quality
 Every external pattern gets ONE of:
@@ -71,7 +71,7 @@ For each capability in the external source:
 | **Present but weaker** | AEQI has this but the external source does it better | Candidate for improvement |
 | **Present in external, unnecessary** | Solving a problem AEQI doesn't have | Skip — don't bloat |
 
-Post analysis: `aeqi_blackboard` post with key `task:{id}:gap-analysis`
+Post analysis: `aeqi_notes` post with key `task:{id}:gap-analysis`
 
 <HARD-GATE>
 Don't adopt patterns just because a respected project uses them. Every adoption must solve a REAL problem in AEQI. "They have it" is not a reason. "Our users need X and this solves X" is.
@@ -89,7 +89,7 @@ Order improvements by impact × effort. Not everything worth doing is worth doin
 2. **Classify by path:**
    - **Harness (Path A)** — improves Claude Code + AEQI MCP integration (hooks, primer, skills)
    - **Runtime (Path B)** — improves native agent orchestrator (agent loop, middleware, worker pool)
-   - **Shared** — improves both paths (memory, graph, blackboard, tools)
+   - **Shared** — improves both paths (memory, graph, notes, tools)
 3. **Prefer shared improvements** — changes that benefit both paths get priority
 4. **Create implementation plan** — ordered list of changes with the appropriate workflow for each
 
@@ -107,11 +107,11 @@ Execute the prioritized improvements using the appropriate workflow for each.
    - Restructuring existing code → `aeqi_skills` get workflow-refactor
    - Fixing identified weakness → `aeqi_skills` get workflow-bugfix
 3. **After each improvement**, verify it integrates cleanly — no dead code, no orphaned features
-4. **Post progress** — `aeqi_blackboard` post with key `task:{id}:progress`
+4. **Post progress** — `aeqi_notes` post with key `task:{id}:progress`
 
 ### Synthesis Discipline
 - Adapt patterns to AEQI's architecture. Don't transplant foreign idioms.
-- Express borrowed ideas in AEQI's existing primitives (triggers, skills, blackboard, memory).
+- Express borrowed ideas in AEQI's existing primitives (triggers, skills, notes, memory).
 - If a pattern requires a new primitive, justify why existing primitives can't handle it.
 - Every adopted pattern must have tests proving it works in AEQI's context.
 
