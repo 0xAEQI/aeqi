@@ -527,6 +527,23 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             let mut daemon = Daemon::new(registry, dispatch_bus);
             daemon.event_broadcaster = event_broadcaster;
             daemon.chat_engine = chat_engine;
+
+            // Set up default provider for direct session messaging.
+            if let Some(first_project) = config.companies.first() {
+                match build_provider_for_project(&config, &first_project.name) {
+                    Ok(provider) => {
+                        daemon.default_provider = Some(provider);
+                        daemon.default_model = config.model_for_company(&first_project.name);
+                        info!(
+                            model = %daemon.default_model,
+                            "default session provider initialized"
+                        );
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "failed to build default session provider");
+                    }
+                }
+            }
             daemon.set_readiness_context(
                 config.companies.len(),
                 advisor_agents.len(),

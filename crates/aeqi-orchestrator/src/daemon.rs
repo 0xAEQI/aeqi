@@ -204,6 +204,8 @@ pub struct Daemon {
     pub chat_engine: Option<Arc<ChatEngine>>,
     pub write_queue: Arc<std::sync::Mutex<aeqi_memory::debounce::WriteQueue>>,
     pub event_broadcaster: Arc<EventBroadcaster>,
+    pub default_provider: Option<Arc<dyn aeqi_core::traits::Provider>>,
+    pub default_model: String,
     event_buffer: Arc<Mutex<EventBuffer>>,
     pub pid_file: Option<PathBuf>,
     pub socket_path: Option<PathBuf>,
@@ -228,6 +230,8 @@ impl Daemon {
                 aeqi_memory::debounce::WriteQueue::default(),
             )),
             event_broadcaster: Arc::new(EventBroadcaster::new()),
+            default_provider: None,
+            default_model: String::new(),
             event_buffer: Arc::new(Mutex::new(EventBuffer::default())),
             pid_file: None,
             socket_path: None,
@@ -805,6 +809,8 @@ impl Daemon {
                     let event_buffer = self.event_buffer.clone();
                     let running = self.running.clone();
                     let readiness = self.readiness.clone();
+                    let default_provider = self.default_provider.clone();
+                    let default_model = self.default_model.clone();
                     info!(path = %sock_path.display(), "IPC socket listening");
                     tokio::spawn(async move {
                         Self::socket_accept_loop(
@@ -817,6 +823,8 @@ impl Daemon {
                             event_buffer,
                             running,
                             readiness,
+                            default_provider,
+                            default_model,
                         )
                         .await;
                     });
@@ -1089,6 +1097,8 @@ impl Daemon {
         event_buffer: Arc<Mutex<EventBuffer>>,
         running: Arc<std::sync::atomic::AtomicBool>,
         readiness: ReadinessContext,
+        default_provider: Option<Arc<dyn aeqi_core::traits::Provider>>,
+        default_model: String,
     ) {
         loop {
             if !running.load(std::sync::atomic::Ordering::SeqCst) {
@@ -1103,6 +1113,8 @@ impl Daemon {
                     let chat_engine = chat_engine.clone();
                     let event_buffer = event_buffer.clone();
                     let readiness = readiness.clone();
+                    let default_provider = default_provider.clone();
+                    let default_model = default_model.clone();
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_socket_connection(
                             stream,
@@ -1113,6 +1125,8 @@ impl Daemon {
                             chat_engine,
                             event_buffer,
                             readiness,
+                            default_provider,
+                            default_model,
                         )
                         .await
                         {
@@ -1140,6 +1154,8 @@ impl Daemon {
         chat_engine: Option<Arc<ChatEngine>>,
         event_buffer: Arc<Mutex<EventBuffer>>,
         readiness: ReadinessContext,
+        default_provider: Option<Arc<dyn aeqi_core::traits::Provider>>,
+        default_model: String,
     ) -> Result<()> {
         const MAX_IPC_LINE_BYTES: usize = 10 * 1024 * 1024; // 10 MB
         let (reader, mut writer) = stream.into_split();
@@ -3188,6 +3204,84 @@ impl Daemon {
                         serde_json::json!({"ok": false, "error": "agent registry not available"})
                     }
                 },
+
+                "session_send" => {
+                    let message = request_field(&request, "message").unwrap_or("");
+                    if message.is_empty() {
+                        serde_json::json!({"ok": false, "error": "message is required"})
+                    } else {
+                        let chat_id = request
+                            .get("chat_id")
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or_else(|| named_channel_chat_id("web:default"));
+
+                        let conversation_store = registry.conversation_store.clone();
+
+                        // Record user message.
+                        if let Some(ref cs) = conversation_store {
+                            let _ = cs.ensure_channel(chat_id, "web", "session").await;
+                            let _ = cs
+                                .record_with_source(chat_id, "user", message, Some("web"))
+                                .await;
+                        }
+
+                        // Load recent conversation history.
+                        let history = if let Some(ref cs) = conversation_store {
+                            cs.recent(chat_id, 20).await.unwrap_or_default()
+                        } else {
+                            vec![]
+                        };
+
+                        // Build messages for the LLM.
+                        let mut messages = vec![aeqi_core::traits::Message {
+                            role: aeqi_core::traits::Role::System,
+                            content: aeqi_core::traits::MessageContent::text(
+                                "You are an AI assistant.",
+                            ),
+                        }];
+                        for msg in &history {
+                            let role = match msg.role.as_str() {
+                                "user" | "User" => aeqi_core::traits::Role::User,
+                                _ => aeqi_core::traits::Role::Assistant,
+                            };
+                            messages.push(aeqi_core::traits::Message {
+                                role,
+                                content: aeqi_core::traits::MessageContent::text(&msg.content),
+                            });
+                        }
+
+                        // Call provider directly.
+                        if let Some(ref provider) = default_provider {
+                            let chat_req = aeqi_core::traits::ChatRequest {
+                                model: default_model.clone(),
+                                messages,
+                                tools: vec![],
+                                max_tokens: 4096,
+                                temperature: 0.7,
+                            };
+                            match provider.chat(&chat_req).await {
+                                Ok(response) => {
+                                    let text = response.content.unwrap_or_default();
+                                    // Record assistant response.
+                                    if let Some(ref cs) = conversation_store {
+                                        let _ = cs
+                                            .record_with_source(
+                                                chat_id,
+                                                "assistant",
+                                                &text,
+                                                Some("web"),
+                                            )
+                                            .await;
+                                    }
+                                    serde_json::json!({"ok": true, "text": text, "chat_id": chat_id})
+                                }
+                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                            }
+                        } else {
+                            serde_json::json!({"ok": false, "error": "no provider available"})
+                        }
+                    }
+                }
 
                 _ => serde_json::json!({"ok": false, "error": format!("unknown command: {cmd}")}),
             };

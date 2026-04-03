@@ -38,6 +38,7 @@ pub fn api_routes() -> Router<AppState> {
         .route("/worker/events", get(worker_events))
         .route("/chat", post(chat))
         .route("/chat/full", post(chat_full))
+        .route("/session/send", post(session_send))
         .route("/chat/poll/{task_id}", get(chat_poll))
         .route("/chat/history", get(chat_history))
         .route("/chat/timeline", get(chat_timeline))
@@ -492,6 +493,13 @@ async fn chat(State(state): State<AppState>, Json(body): Json<serde_json::Value>
 
 async fn chat_full(State(state): State<AppState>, Json(body): Json<serde_json::Value>) -> Response {
     ipc_proxy(state, "chat_full", body).await
+}
+
+async fn session_send(
+    State(state): State<AppState>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    ipc_proxy(state, "session_send", body).await
 }
 
 async fn chat_poll(
