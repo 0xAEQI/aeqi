@@ -179,6 +179,7 @@ export default function AgentNav() {
 
   return (
     <nav className="agent-nav">
+      {/* Company scope — on dark base */}
       <div
         className={`agent-row scope-header${!selectedAgent ? " active" : ""}`}
         onClick={() => { setSelectedAgent(null); navigate(currentPath()); }}
@@ -186,35 +187,39 @@ export default function AgentNav() {
         {scopeName}
       </div>
 
-      <div className="agent-nav-sep" />
-
-      {rootAgents.map((agent) => (
-        <div
-          key={agent.id}
-          className={`agent-row${selectedAgent === agent.name ? " active" : ""}`}
-          onClick={() => handleSelectAgent(agent.name)}
-        >
-          {agent.display_name || agent.name}
+      {/* Agents panel — elevated inlay */}
+      <div className="agent-nav-panel">
+        <div className="agent-nav-panel-header">
+          <span className="agent-nav-panel-title">Agents</span>
+          <span className="agent-nav-panel-add" onClick={() => navigate("/agents")}>+</span>
         </div>
-      ))}
 
-      {tree.map((node) => (
-        <DeptGroupView
-          key={node.dept.id}
-          node={node}
-          depth={0}
-          selectedAgent={selectedAgent}
-          collapsed={collapsed}
-          onSelectAgent={handleSelectAgent}
-          onSelectDept={handleSelectDept}
-          onToggle={toggleDept}
-        />
-      ))}
+        {rootAgents.map((agent) => (
+          <div
+            key={agent.id}
+            className={`agent-row${selectedAgent === agent.name ? " active" : ""}`}
+            onClick={() => handleSelectAgent(agent.name)}
+          >
+            {agent.display_name || agent.name}
+          </div>
+        ))}
 
-      {/* Bottom — pinned */}
+        {tree.map((node) => (
+          <DeptGroupView
+            key={node.dept.id}
+            node={node}
+            depth={0}
+            selectedAgent={selectedAgent}
+            collapsed={collapsed}
+            onSelectAgent={handleSelectAgent}
+            onSelectDept={handleSelectDept}
+            onToggle={toggleDept}
+          />
+        ))}
+      </div>
+
+      {/* Bottom — docs link */}
       <div className="agent-nav-bottom">
-        <div className="agent-nav-sep" />
-        <div className="agent-nav-add" onClick={() => navigate("/agents")}>+</div>
         <a className="agent-nav-text-btn" href="https://github.com/0xAEQI/aeqi" target="_blank" rel="noopener">docs</a>
       </div>
     </nav>

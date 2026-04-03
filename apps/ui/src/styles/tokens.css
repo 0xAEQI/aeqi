@@ -379,6 +379,52 @@ a:hover {
   font-family: var(--font-mono);
 }
 
+.agent-nav-panel {
+  flex: 1;
+  background: var(--bg-surface);
+  border-radius: 12px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  margin: 0 4px;
+}
+
+.agent-nav-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding: 0 10px;
+}
+
+.agent-nav-panel-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.agent-nav-panel-add {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.agent-nav-panel-add:hover {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
 .agent-nav-sep {
   height: 8px;
   flex-shrink: 0;
