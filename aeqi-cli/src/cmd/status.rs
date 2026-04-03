@@ -47,15 +47,15 @@ pub(crate) async fn cmd_status(config_path: &Option<PathBuf>) -> Result<()> {
     }
 
     println!("Projects:");
-    for project_cfg in &config.projects {
+    for project_cfg in &config.companies {
         let repo_ok = PathBuf::from(&project_cfg.repo).exists();
         print!(
             "  {} [{}] prefix={} runtime={} model={} workers={}",
             project_cfg.name,
             if repo_ok { "OK" } else { "MISSING" },
             project_cfg.prefix,
-            config.runtime_for_project(&project_cfg.name).provider,
-            config.model_for_project(&project_cfg.name),
+            config.runtime_for_company(&project_cfg.name).provider,
+            config.model_for_company(&project_cfg.name),
             project_cfg.max_workers,
         );
 

@@ -102,7 +102,7 @@ async fn build_monitor_report(
 
     let projects_cfg: Vec<_> = if let Some(name) = project_filter {
         let projects: Vec<_> = config
-            .projects
+            .companies
             .iter()
             .filter(|project| project.name == name)
             .collect();
@@ -111,19 +111,19 @@ async fn build_monitor_report(
         }
         projects
     } else {
-        config.projects.iter().collect()
+        config.companies.iter().collect()
     };
 
     let daemon = load_daemon_monitor(config_path).await;
     let mut projects = Vec::new();
     for project in projects_cfg {
-        let runtime = config.runtime_for_project(&project.name);
+        let runtime = config.runtime_for_company(&project.name);
         projects.push(build_project_monitor(
             &config,
             &project.name,
             &project.repo,
             &runtime.provider.to_string(),
-            &config.model_for_project(&project.name),
+            &config.model_for_company(&project.name),
         ));
     }
 
@@ -383,12 +383,12 @@ fn build_interventions(daemon: &DaemonMonitor, projects: &[ProjectMonitor]) -> V
                 .cloned()
                 .unwrap_or_else(|| "blocked work".to_string());
             project_actions.push(format!(
-                "{} is stalled with blocked work and no active execution. Start with `{focus}` and inspect `aeqi audit --project {}`.",
+                "{} is stalled with blocked work and no active execution. Start with `{focus}` and inspect `aeqi audit --company {}`.",
                 project.name, project.name
             ));
         } else if project.critical_ready_tasks > 0 {
             project_actions.push(format!(
-                "{} has {} critical ready task(s). Pull them into execution with `aeqi ready --project {}` or let the daemon patrol pick them up.",
+                "{} has {} critical ready task(s). Pull them into execution with `aeqi ready --company {}` or let the daemon patrol pick them up.",
                 project.name, project.critical_ready_tasks, project.name
             ));
         } else if project.ready_tasks > 0 && project.in_progress_tasks == 0 {
@@ -660,7 +660,7 @@ mod tests {
 
         assert_eq!(interventions.len(), 1);
         assert!(interventions[0].contains("critical ready task"));
-        assert!(interventions[0].contains("aeqi ready --project beta"));
+        assert!(interventions[0].contains("aeqi ready --company beta"));
     }
 
     #[test]

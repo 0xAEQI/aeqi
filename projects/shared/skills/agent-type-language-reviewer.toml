@@ -6,7 +6,7 @@ when_to_use = "Use after implementation when reviewing code in a specific langua
 context = "fork"
 
 [tools]
-allow = ["read_file", "glob", "grep", "shell", "memory_recall", "blackboard"]
+allow = ["read_file", "glob", "grep", "shell", "memory_recall", "notes"]
 deny = ["write_file", "edit_file", "delegate"]
 
 [prompt]

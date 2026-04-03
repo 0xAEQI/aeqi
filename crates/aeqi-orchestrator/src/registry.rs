@@ -5,18 +5,18 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
 
 use crate::audit::AuditLog;
-use crate::blackboard::Blackboard;
+use crate::notes::Notes;
 use crate::conversation_store::ConversationStore;
 use crate::cost_ledger::CostLedger;
 use crate::expertise::ExpertiseLedger;
 use crate::message::DispatchBus;
 use crate::metrics::AEQIMetrics;
 use crate::operation::OperationStore;
-use crate::project::Project;
+use crate::company::Company;
 use crate::worker_pool::WorkerPool;
 
-pub struct ProjectRegistry {
-    projects: RwLock<HashMap<String, Arc<Project>>>,
+pub struct CompanyRegistry {
+    projects: RwLock<HashMap<String, Arc<Company>>>,
     worker_pools: RwLock<HashMap<String, Arc<Mutex<WorkerPool>>>>,
     pub dispatch_bus: Arc<DispatchBus>,
     pub wake: Arc<tokio::sync::Notify>,
@@ -30,8 +30,8 @@ pub struct ProjectRegistry {
     pub audit_log: Option<Arc<AuditLog>>,
     /// Agent expertise ledger for smart routing (Phase 2).
     pub expertise_ledger: Option<Arc<ExpertiseLedger>>,
-    /// Inter-agent blackboard for shared knowledge (Phase 3).
-    pub blackboard: Option<Arc<Blackboard>>,
+    /// Inter-agent notes for shared knowledge (Phase 3).
+    pub notes: Option<Arc<Notes>>,
     /// Unified conversation store for all chat channels.
     pub conversation_store: Option<Arc<ConversationStore>>,
     /// Names from [[projects]] config (to distinguish from agent entries).
@@ -40,7 +40,7 @@ pub struct ProjectRegistry {
     agent_registry: RwLock<Option<Arc<crate::agent_registry::AgentRegistry>>>,
 }
 
-impl ProjectRegistry {
+impl CompanyRegistry {
     pub fn new(dispatch_bus: Arc<DispatchBus>, leader_agent_name: String) -> Self {
         Self {
             projects: RwLock::new(HashMap::new()),
@@ -53,7 +53,7 @@ impl ProjectRegistry {
             operation_store: None,
             audit_log: None,
             expertise_ledger: None,
-            blackboard: None,
+            notes: None,
             conversation_store: None,
             config_project_names: Vec::new(),
             agent_registry: RwLock::new(None),
@@ -73,26 +73,26 @@ impl ProjectRegistry {
     /// Register a project without creating a WorkerPool.
     /// Used for dynamically registered projects
     /// but don't run daemon-driven execution.
-    pub async fn register_project_only(&self, project: Arc<Project>) {
+    pub async fn register_company_only(&self, project: Arc<Company>) {
         let name = project.name.clone();
-        self.metrics.ensure_project(&name);
+        self.metrics.ensure_company(&name);
         self.projects.write().await.insert(name, project);
     }
 
     /// Remove a project from the registry (in-memory only).
-    pub async fn remove_project(&self, name: &str) -> bool {
+    pub async fn remove_company(&self, name: &str) -> bool {
         self.projects.write().await.remove(name).is_some()
     }
 
-    pub async fn register_project(&self, project: Arc<Project>, mut pool: WorkerPool) {
+    pub async fn register_company(&self, project: Arc<Company>, mut pool: WorkerPool) {
         let name = project.name.clone();
         // Inject cost ledger + metrics + v3 components into the worker pool.
         pool.cost_ledger = Some(self.cost_ledger.clone());
         pool.metrics = Some(self.metrics.clone());
         pool.audit_log = self.audit_log.clone();
         pool.expertise_ledger = self.expertise_ledger.clone();
-        pool.blackboard = self.blackboard.clone();
-        self.metrics.ensure_project(&name);
+        pool.notes = self.notes.clone();
+        self.metrics.ensure_company(&name);
         self.projects.write().await.insert(name.clone(), project);
         self.worker_pools
             .write()
@@ -360,7 +360,7 @@ impl ProjectRegistry {
                 None
             };
 
-            project_statuses.push(ProjectStatus {
+            project_statuses.push(CompanyStatus {
                 name: name.clone(),
                 open_tasks: open,
                 ready_tasks: ready,
@@ -393,15 +393,15 @@ impl ProjectRegistry {
         all
     }
 
-    pub async fn project_names(&self) -> Vec<String> {
+    pub async fn company_names(&self) -> Vec<String> {
         self.projects.read().await.keys().cloned().collect()
     }
 
-    pub async fn get_project(&self, name: &str) -> Option<Arc<Project>> {
+    pub async fn get_company(&self, name: &str) -> Option<Arc<Company>> {
         self.projects.read().await.get(name).cloned()
     }
 
-    pub async fn project_count(&self) -> usize {
+    pub async fn company_count(&self) -> usize {
         self.projects.read().await.len()
     }
 
@@ -414,7 +414,7 @@ impl ProjectRegistry {
             .sum()
     }
 
-    pub async fn project_worker_limits(&self) -> Vec<(String, u32)> {
+    pub async fn company_worker_limits(&self) -> Vec<(String, u32)> {
         self.projects
             .read()
             .await
@@ -423,7 +423,7 @@ impl ProjectRegistry {
             .collect()
     }
 
-    pub async fn projects_info(&self) -> Vec<serde_json::Value> {
+    pub async fn companies_info(&self) -> Vec<serde_json::Value> {
         self.projects
             .read()
             .await
@@ -477,9 +477,9 @@ impl ProjectRegistry {
     /// List all projects with summary stats (task counts, team info).
     /// Designed to minimize lock hold times — snapshot project list first, then read each
     /// project's task board independently without holding the registry-level RwLocks.
-    pub async fn list_project_summaries(&self) -> Vec<ProjectSummary> {
+    pub async fn list_company_summaries(&self) -> Vec<CompanySummary> {
         // Step 1: Snapshot project list + worker pool refs, then release RwLocks immediately.
-        let project_list: Vec<(String, Arc<Project>)> = {
+        let project_list: Vec<(String, Arc<Company>)> = {
             let projects = self.projects.read().await;
             projects
                 .iter()
@@ -529,7 +529,7 @@ impl ProjectRegistry {
                 (0, 0, 0, 0, 0, 0)
             };
 
-            summaries.push(ProjectSummary {
+            summaries.push(CompanySummary {
                 name: name.clone(),
                 prefix: project.prefix.clone(),
                 open_tasks,
@@ -558,12 +558,12 @@ impl ProjectRegistry {
 
 #[derive(Debug)]
 pub struct RegistryStatus {
-    pub projects: Vec<ProjectStatus>,
+    pub projects: Vec<CompanyStatus>,
     pub unread_dispatches: usize,
 }
 
 #[derive(Debug)]
-pub struct ProjectStatus {
+pub struct CompanyStatus {
     pub name: String,
     pub open_tasks: usize,
     pub ready_tasks: usize,
@@ -575,7 +575,7 @@ pub struct ProjectStatus {
 }
 
 #[derive(Debug, Clone)]
-pub struct ProjectSummary {
+pub struct CompanySummary {
     pub name: String,
     pub prefix: String,
     pub open_tasks: u32,
@@ -603,7 +603,7 @@ mod tests {
     #[tokio::test]
     async fn patrol_all_consumes_leader_dispatches() {
         let dispatch_bus = Arc::new(DispatchBus::new());
-        let registry = ProjectRegistry::new(dispatch_bus.clone(), "leader".to_string());
+        let registry = CompanyRegistry::new(dispatch_bus.clone(), "leader".to_string());
 
         dispatch_bus
             .send(Dispatch::new_typed(
@@ -627,7 +627,7 @@ mod tests {
     #[tokio::test]
     async fn patrol_all_acknowledges_processed_dispatches() {
         let dispatch_bus = Arc::new(DispatchBus::new());
-        let registry = ProjectRegistry::new(dispatch_bus.clone(), "leader".to_string());
+        let registry = CompanyRegistry::new(dispatch_bus.clone(), "leader".to_string());
 
         dispatch_bus
             .send(

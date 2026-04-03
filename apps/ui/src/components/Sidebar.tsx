@@ -138,10 +138,10 @@ export default function AgentNav() {
   }, [channel]);
 
   const filtered = channel
-    ? agents.filter((a) => a.project === channel || !a.project)
-    : agents.filter((a) => !a.project);
+    ? agents.filter((a) => a.company === channel || !a.company)
+    : agents.filter((a) => !a.company);
 
-  const filteredDepts = departments.filter((d) => !channel || d.project === channel);
+  const filteredDepts = departments.filter((d) => !channel || d.company === channel);
   const tree = buildTree(filteredDepts, filtered, null);
 
   // Root agents: not in any department

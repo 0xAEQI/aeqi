@@ -16,6 +16,7 @@ const DECISION_TYPE_COLORS: Record<string, string> = {
   expertise_update: "var(--info)",
   failure_analyzed: "var(--warning)",
   watchdog_triggered: "var(--warning)",
+  note_post: "var(--info)",
   blackboard_post: "var(--info)",
   reroute: "var(--warning)",
 };
@@ -76,8 +77,8 @@ export default function AuditEntryComponent({
           >
             {formatDecisionType(entry.decision_type)}
           </span>
-          <Link to={`/projects/${entry.project}`} className="audit-project">
-            {entry.project}
+          <Link to={`/companies/${entry.company}`} className="audit-project">
+            {entry.company}
           </Link>
         </div>
         <span className="audit-timestamp">

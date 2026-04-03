@@ -34,7 +34,7 @@ export default function MissionCard({ mission }: MissionCardProps) {
       <p className="mission-description">{mission.description}</p>
 
       <div className="mission-meta">
-        <span className="mission-project">{mission.project}</span>
+        <span className="mission-project">{mission.company}</span>
         {mission.skill && (
           <span className="mission-skill">{mission.skill}</span>
         )}

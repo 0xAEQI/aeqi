@@ -35,7 +35,7 @@ export interface RuntimeSession {
   session_id: string;
   task_id: string;
   worker_id: string;
-  project: string;
+  company: string;
   model?: string | null;
   status: string;
   phase: string;
@@ -54,7 +54,7 @@ export interface WorkerEvent {
   event_type: string;
   task_id?: string;
   agent?: string;
-  project?: string;
+  company?: string;
   turns?: number;
   cost_usd?: number;
   outcome?: string;

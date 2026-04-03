@@ -40,7 +40,7 @@ Systematic evidence gathering. Parallel where possible.
 2. **Delegate deep research** — `aeqi_delegate` with the researcher agent for parallel investigation paths. Each researcher gets ONE sub-question.
 3. **External sources** — if the question involves external systems, APIs, or dependencies, check docs and source
 4. **Collect evidence** — every claim needs a file:line reference or external source citation
-5. **Read delegate findings** — `aeqi_blackboard` query for researcher agents' posted findings
+5. **Read delegate findings** — `aeqi_notes` query for researcher agents' posted findings
 
 ### Investigation Discipline
 - Start with the code graph, not grep. Structure reveals intent; text matches reveal tokens.
@@ -62,11 +62,11 @@ Systematic evidence gathering. Parallel where possible.
 
 Turn raw findings into actionable knowledge.
 
-1. **Gather all findings** — `aeqi_blackboard` query for all `task:{id}:*` entries
+1. **Gather all findings** — `aeqi_notes` query for all `task:{id}:*` entries
 2. **Organize by theme** — group findings into coherent sections, not chronological order
 3. **Distinguish fact from inference** — clearly mark what's confirmed vs. what's extrapolated
 4. **Answer the original question** — directly. If the answer is "we don't know X because Y", that's a valid finding.
-5. **Post synthesis** — `aeqi_blackboard` post with key `task:{id}:findings`
+5. **Post synthesis** — `aeqi_notes` post with key `task:{id}:findings`
 
 ### Synthesis Quality Checklist
 - [ ] The original scoped question is answered directly
@@ -99,5 +99,5 @@ Research without a clear deliverable is exploration, not research. The synthesis
 | "This is too complex to scope narrowly" | Complex topics need MORE scoping, not less. Break it into sub-questions. |
 | "I think I understand it" | "Think" is not "know". Show the evidence. |
 | "The code is self-explanatory" | If it were, you wouldn't need research. Document the non-obvious. |
-| "I'll document this later" | Post to blackboard as you go. Findings lost to context compaction are findings lost. |
+| "I'll document this later" | Post to notes as you go. Findings lost to context compaction are findings lost. |
 | "One more rabbit hole" | Check your scope. If this tangent doesn't answer the original question, stop. |

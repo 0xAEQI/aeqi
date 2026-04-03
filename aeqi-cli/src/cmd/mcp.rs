@@ -213,7 +213,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
             }),
         },
         ToolDef {
-            name: "aeqi_blackboard".to_string(),
+            name: "aeqi_notes".to_string(),
             description: "Shared coordination surface. Post discoveries, claim resources, signal state, query entries, and coordinate across agents and projects.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -282,12 +282,12 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
         },
         ToolDef {
             name: "aeqi_delegate".to_string(),
-            description: "Delegate work to a AEQI agent. Loads the agent template, gathers task context from the blackboard, and returns a structured prompt ready to pass to a Claude Code subagent. One call replaces: aeqi_agents(get) + aeqi_blackboard(read) + manual prompt assembly.".to_string(),
+            description: "Delegate work to a AEQI agent. Loads the agent template, gathers task context from notes, and returns a structured prompt ready to pass to a Claude Code subagent. One call replaces: aeqi_agents(get) + aeqi_notes(read) + manual prompt assembly.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "agent": {"type": "string", "description": "Agent name (e.g. 'researcher', 'reviewer', 'architect')"},
-                    "task_id": {"type": "string", "description": "Task ID for blackboard context (e.g. 'sg-010')"},
+                    "task_id": {"type": "string", "description": "Task ID for notes context (e.g. 'sg-010')"},
                     "project": {"type": "string", "description": "Project name"},
                     "prompt": {"type": "string", "description": "Additional instructions for the agent"}
                 },
@@ -349,7 +349,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                     // ── Discovery ──
                     "aeqi_projects" => {
                         let projects: Vec<serde_json::Value> = config
-                            .projects
+                            .companies
                             .iter()
                             .map(|p| {
                                 serde_json::json!({
@@ -371,7 +371,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                             config.shared_primer.clone().unwrap_or_default()
                         } else {
                             config
-                                .projects
+                                .companies
                                 .iter()
                                 .find(|p| p.name == project)
                                 .and_then(|p| p.primer.clone())
@@ -603,7 +603,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                         }
                         ipc_request_sync(&data_dir, &ipc)
                     }
-                    "aeqi_blackboard" => {
+                    "aeqi_notes" | "aeqi_blackboard" => {
                         let action = args
                             .get("action")
                             .and_then(|v| v.as_str())
@@ -611,7 +611,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                         match action {
                             "post" => {
                                 let mut ipc = args.clone();
-                                ipc["cmd"] = serde_json::json!("post_blackboard");
+                                ipc["cmd"] = serde_json::json!("post_notes");
                                 ipc["agent"] = serde_json::json!("worker");
                                 if ipc.get("durability").and_then(|v| v.as_str()).is_none() {
                                     ipc["durability"] = serde_json::json!("durable");
@@ -620,7 +620,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                             }
                             "get" => {
                                 let ipc = serde_json::json!({
-                                    "cmd": "get_blackboard",
+                                    "cmd": "get_notes",
                                     "project": args.get("project").and_then(|v| v.as_str()).unwrap_or(""),
                                     "key": args.get("key").and_then(|v| v.as_str()).unwrap_or(""),
                                 });
@@ -628,7 +628,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                             }
                             "claim" => {
                                 let ipc = serde_json::json!({
-                                    "cmd": "claim_blackboard",
+                                    "cmd": "claim_notes",
                                     "project": args.get("project").and_then(|v| v.as_str()).unwrap_or(""),
                                     "resource": args.get("resource").and_then(|v| v.as_str()).unwrap_or(""),
                                     "content": args.get("content").and_then(|v| v.as_str()).unwrap_or(""),
@@ -638,7 +638,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                             }
                             "release" => {
                                 let ipc = serde_json::json!({
-                                    "cmd": "release_blackboard",
+                                    "cmd": "release_notes",
                                     "project": args.get("project").and_then(|v| v.as_str()).unwrap_or(""),
                                     "resource": args.get("resource").and_then(|v| v.as_str()).unwrap_or(""),
                                     "agent": "worker",
@@ -648,7 +648,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                             }
                             "delete" => {
                                 let ipc = serde_json::json!({
-                                    "cmd": "delete_blackboard",
+                                    "cmd": "delete_notes",
                                     "project": args.get("project").and_then(|v| v.as_str()).unwrap_or(""),
                                     "key": args.get("key").and_then(|v| v.as_str()).unwrap_or(""),
                                 });
@@ -657,7 +657,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                             _ => {
                                 let prefix_filter = args.get("prefix").and_then(|v| v.as_str());
                                 let mut ipc = serde_json::json!({
-                                    "cmd": "blackboard",
+                                    "cmd": "notes",
                                     "project": args.get("project").and_then(|v| v.as_str()).unwrap_or(""),
                                 });
                                 if let Some(tags) = args.get("tags") {
@@ -724,7 +724,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                         let mut bb_context = String::new();
                         if !task_id.is_empty() {
                             let bb_req = serde_json::json!({
-                                "cmd": "blackboard",
+                                "cmd": "notes",
                                 "project": project,
                                 "prefix": format!("task:{task_id}"),
                                 "limit": 10
@@ -754,14 +754,14 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                             prompt.push_str(&format!("Task: {task_id}\n"));
                         }
                         if !bb_context.is_empty() {
-                            prompt.push_str(&format!("\n# Blackboard Context\n{bb_context}\n"));
+                            prompt.push_str(&format!("\n# Notes Context\n{bb_context}\n"));
                         }
                         if !extra_prompt.is_empty() {
                             prompt.push_str(&format!("\n# Instructions\n{extra_prompt}\n"));
                         }
                         prompt.push_str(&format!(
-                            "\nWhen done, post your results to the blackboard:\n\
-                             aeqi_blackboard(action='post', project='{project}', key='task:{task_id}:{agent_name}', content='<your findings>')\n"
+                            "\nWhen done, post your results to notes:\n\
+                             aeqi_notes(action='post', project='{project}', key='task:{task_id}:{agent_name}', content='<your findings>')\n"
                         ));
 
                         Ok(serde_json::json!({
@@ -770,7 +770,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                             "project": project,
                             "task_id": task_id,
                             "prompt": prompt,
-                            "usage": "Pass the 'prompt' field to a Claude Code Agent subagent. The agent will read blackboard context and post results back."
+                            "usage": "Pass the 'prompt' field to a Claude Code Agent subagent. The agent will read notes context and post results back."
                         }))
                     }
 
@@ -800,7 +800,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                         {
                             let review_key = format!("task:{task_id}:review");
                             let bb_req = serde_json::json!({
-                                "cmd": "blackboard",
+                                "cmd": "notes",
                                 "project": project,
                                 "prefix": &review_key,
                                 "limit": 1
@@ -829,7 +829,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
 
                         // Find project repo path from config
                         let repo_path =
-                            config.projects.iter().find(|p| p.name == project).map(|p| {
+                            config.companies.iter().find(|p| p.name == project).map(|p| {
                                 let r = p.repo.replace(
                                     '~',
                                     &dirs::home_dir().unwrap_or_default().to_string_lossy(),

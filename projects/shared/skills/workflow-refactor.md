@@ -29,7 +29,7 @@ Analyze → Plan → Implement → Verify → Close
 No refactoring until you've mapped every caller of every symbol you plan to change. Changing a function signature without updating all call sites is not a refactor — it's a breakage.
 </HARD-GATE>
 
-**Post analysis** — `aeqi_blackboard` post with key `task:{id}:analysis` containing: symbols to change, blast radius, all affected files.
+**Post analysis** — `aeqi_notes` post with key `task:{id}:analysis` containing: symbols to change, blast radius, all affected files.
 
 **Terminal state:** Full blast radius mapped, proceed to Plan.
 
@@ -49,7 +49,7 @@ Break the refactor into atomic, independently-testable steps.
    - What changes and the mechanical transformation
    - Test command to verify behavior preservation
 4. **Validate with architect** — `aeqi_delegate` with the architect agent to review the plan
-5. **Post plan** — `aeqi_blackboard` post with key `task:{id}:plan`
+5. **Post plan** — `aeqi_notes` post with key `task:{id}:plan`
 
 ### Plan Quality Checklist
 - [ ] Every step compiles independently (no "fix compile errors in next step")
@@ -91,7 +91,7 @@ Prove the refactor is behavior-preserving.
 
 1. **Full test suite** — `cargo test --workspace` / `npm test` — zero failures, zero new warnings
 2. **Delegate verification** — `aeqi_delegate` with the reviewer agent to check ALL changes against the original plan
-3. **Read findings** — `aeqi_blackboard` query for reviewer's posted findings
+3. **Read findings** — `aeqi_notes` query for reviewer's posted findings
 4. **Impact re-check** — `aeqi_graph` impact on every changed symbol to confirm no missed call sites
 
 ### Verification Gate (MANDATORY)

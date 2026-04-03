@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PreToolUse hook for Edit/Write: check if the target file is claimed by another agent.
-# Queries the blackboard for active claims via Unix socket IPC.
+# Queries notes for active claims via Unix socket IPC.
 # Advisory only — warns but allows if claimed by a different agent.
 # Graceful degradation: allows if daemon is unreachable.
 
@@ -77,7 +77,7 @@ if [ ! -S "$SOCK" ]; then
     exit 0
 fi
 
-# --- Query blackboard for claim ---
+# --- Query notes for claim ---
 RESPONSE=$(printf '{"cmd":"check_claim","resource":"%s","project":"%s"}' "$RESOURCE" "$PROJECT" | socat -t2 - UNIX-CONNECT:"$SOCK" 2>/dev/null) || true
 
 if [ -z "$RESPONSE" ]; then

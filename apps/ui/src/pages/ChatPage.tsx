@@ -48,17 +48,17 @@ function formatApiError(error: unknown): string {
 }
 
 function parseChannelScope(channel: string | null): {
-  project?: string;
+  company?: string;
   department?: string;
   channelName?: string;
 } {
   if (!channel) {
     return { channelName: "aeqi" };
   }
-  const [project, department] = channel.split("/");
-  if (!project) return {};
+  const [company, department] = channel.split("/");
+  if (!company) return {};
   return {
-    project,
+    company,
     department: department || undefined,
     channelName: channel,
   };
@@ -132,12 +132,12 @@ function eventTone(event: ThreadEvent): NoticeMessage["tone"] {
 function eventMeta(event: ThreadEvent): string | undefined {
   const parts: string[] = [];
   const taskId = event.metadata?.task_id;
-  const project = event.metadata?.project;
+  const company = event.metadata?.company;
   const advisor = event.metadata?.advisor;
   const status = event.metadata?.status;
 
   if (typeof taskId === "string") parts.push(taskId);
-  if (typeof project === "string") parts.push(project);
+  if (typeof company === "string") parts.push(company);
   if (typeof advisor === "string") parts.push(advisor);
   if (typeof status === "string") parts.push(status);
 
@@ -404,7 +404,7 @@ export default function ChatPage() {
     try {
       const response = await api.chatTimeline({
         chatId: thread.chatId,
-        project: scope.project,
+        company: scope.company,
         department: scope.department,
         channelName: scope.channelName,
         limit: 200,
@@ -498,7 +498,7 @@ export default function ChatPage() {
     try {
       const response = await api.chatFull({
         message: msg,
-        project: scope.project,
+        company: scope.company,
         department: scope.department,
         channelName: scope.channelName,
         chatId: thread.chatId,
@@ -546,7 +546,7 @@ export default function ChatPage() {
   const activeWorkerEvents = (() => {
     const byTask = new Map<string, WorkerEvent>();
     for (const event of workerEvents) {
-      if (scope.project && event.project && event.project !== scope.project) continue;
+      if (scope.company && event.company && event.company !== scope.company) continue;
       if (event.task_id && (event.event_type === "TaskStarted" || event.event_type === "Progress")) {
         const existing = byTask.get(event.task_id);
         byTask.set(event.task_id, {
@@ -555,7 +555,7 @@ export default function ChatPage() {
           runtime_session: event.runtime_session ?? existing?.runtime_session,
           runtime: event.runtime ?? existing?.runtime,
           agent: event.agent ?? existing?.agent,
-          project: event.project ?? existing?.project,
+          company: event.company ?? existing?.company,
           turns: event.turns ?? existing?.turns,
           cost_usd: event.cost_usd ?? existing?.cost_usd,
         });

@@ -64,14 +64,14 @@ max_background_cost_usd = 0.50
 # dispatch_ttl_secs = 3600      # dispatch message TTL
 # council_max_rounds = 1        # max council debate rounds
 # expertise_routing = false     # enable expertise-based smart routing (v3)
-# blackboard_transient_ttl_hours = 24  # blackboard transient entry TTL
-# blackboard_durable_ttl_days = 7      # blackboard durable entry TTL
+# notes_transient_ttl_hours = 24  # notes transient entry TTL
+# notes_durable_ttl_days = 7      # notes durable entry TTL
 # adaptive_retry = false        # enable LLM failure analysis for retries (v3)
 # preflight_enabled = false     # enable pre-flight assessment before workers (v3)
 # infer_deps_threshold = 0.0    # confidence threshold for auto-inferred deps (0=disabled)
 
-# Projects (repos, tasks, knowledge)
-[[projects]]
+# Companies (repos, tasks, knowledge)
+[[companies]]
 name = "my-project"
 prefix = "mp"
 repo = "/path/to/your/project"

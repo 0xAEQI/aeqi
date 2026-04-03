@@ -90,9 +90,9 @@ pub enum EventPattern {
         #[serde(skip_serializing_if = "Option::is_none")]
         scope: Option<String>,
     },
-    /// Fire when a blackboard entry matching the key pattern is posted.
-    #[serde(rename = "blackboard_posted")]
-    BlackboardPosted {
+    /// Fire when a note entry matching the key pattern is posted.
+    #[serde(rename = "note_posted", alias = "blackboard_posted")]
+    NotePosted {
         #[serde(skip_serializing_if = "Option::is_none")]
         key_pattern: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -416,11 +416,11 @@ impl EventPattern {
                 key_match && scope_match
             }
             (
-                EventPattern::BlackboardPosted {
+                EventPattern::NotePosted {
                     key_pattern,
                     project: pattern_project,
                 },
-                ExecutionEvent::BlackboardPosted { key, project, .. },
+                ExecutionEvent::NotePosted { key, project, .. },
             ) => {
                 let key_match = key_pattern
                     .as_ref()

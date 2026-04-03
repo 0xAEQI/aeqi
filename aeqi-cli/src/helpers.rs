@@ -14,7 +14,7 @@ fn resolve_env_value(value: &str) -> String {
     }
 }
 use aeqi_memory::SqliteMemory;
-use aeqi_orchestrator::ProjectRegistry;
+use aeqi_orchestrator::CompanyRegistry;
 use aeqi_providers::{AnthropicProvider, OllamaProvider, OpenRouterEmbedder, OpenRouterProvider};
 use aeqi_tasks::TaskBoard;
 use aeqi_tools::{
@@ -212,8 +212,8 @@ pub(crate) fn build_provider_for_project(
     config: &AEQIConfig,
     project_name: &str,
 ) -> Result<Arc<dyn Provider>> {
-    let runtime = config.runtime_for_project(project_name);
-    let model = config.model_for_project(project_name);
+    let runtime = config.runtime_for_company(project_name);
+    let model = config.model_for_company(project_name);
     build_provider_for_runtime(config, runtime.provider, Some(&model))
 }
 
@@ -313,7 +313,7 @@ pub(crate) fn project_name_for_prefix(config: &AEQIConfig, prefix: &str) -> Opti
         }
     }
     config
-        .projects
+        .companies
         .iter()
         .find(|r| r.prefix == prefix)
         .map(|r| r.name.clone())
@@ -396,11 +396,11 @@ pub(crate) fn augment_identity_with_org_context(
     identity
 }
 
-pub(crate) async fn handle_fast_lane(text: &str, reg: &Arc<ProjectRegistry>) -> String {
+pub(crate) async fn handle_fast_lane(text: &str, reg: &Arc<CompanyRegistry>) -> String {
     let cmd = text.split_whitespace().next().unwrap_or("");
     match cmd {
         "/status" => {
-            let projects = reg.project_names().await;
+            let projects = reg.company_names().await;
             if projects.is_empty() {
                 return "No projects registered.".to_string();
             }

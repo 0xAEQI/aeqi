@@ -8,7 +8,7 @@ interface Session {
   subject: string;
   status: string;
   agent: string;
-  project: string;
+  company: string;
   skill?: string;
   created_at?: string;
   updated_at?: string;
@@ -58,7 +58,7 @@ export default function SessionsPage() {
         subject: t.subject,
         status: t.status,
         agent: t.assignee || t.agent_id || "—",
-        project: t.project || "—",
+        company: t.company || "—",
         skill: t.skill,
         created_at: t.created_at,
         updated_at: t.updated_at,
@@ -87,7 +87,7 @@ export default function SessionsPage() {
   // Load transcript for active session
   useEffect(() => {
     if (!activeSession) return;
-    api.getChatHistory({ chat_id: undefined, project: undefined, limit: 100 })
+    api.getChatHistory({ chat_id: undefined, company: undefined, limit: 100 })
       .then((d: any) => {
         // Filter messages that match this task's transcript channel
         setMessages(d.messages || []);

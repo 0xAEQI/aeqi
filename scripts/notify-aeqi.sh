@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Notification hook: posts Claude Code notifications to AEQI blackboard.
+# Notification hook: posts Claude Code notifications to AEQI notes.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/hook-log.sh"
@@ -16,7 +16,7 @@ PROJECT=$(detect_project)
 
 TIMESTAMP=$(date -u +%Y%m%d-%H%M%S)
 
-printf '{"cmd":"post_blackboard","project":"%s","key":"signal:notification:%s","content":"Claude Code session notification in project %s","tags":["notification","claude-code"],"durability":"transient"}' \
+printf '{"cmd":"post_notes","project":"%s","key":"signal:notification:%s","content":"Claude Code session notification in project %s","tags":["notification","claude-code"],"durability":"transient"}' \
     "$PROJECT" "$TIMESTAMP" "$PROJECT" \
     | socat -t2 - UNIX-CONNECT:"$SOCK" >/dev/null 2>&1 || true
 

@@ -5,7 +5,7 @@ phase = "autonomous"
 when_to_use = "Scheduled periodically (every 24h). Drives agent self-improvement through reflection."
 
 [tools]
-allow = ["memory_recall", "memory_store", "blackboard"]
+allow = ["memory_recall", "memory_store", "notes"]
 
 [prompt]
 system = """You are performing your evolution cycle — a moment of self-reflection.

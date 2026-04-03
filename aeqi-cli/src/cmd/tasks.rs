@@ -12,7 +12,7 @@ pub(crate) async fn cmd_assign(
     priority: Option<&str>,
 ) -> Result<()> {
     let (config, _) = load_config(config_path)?;
-    let prefix = if let Some(pcfg) = config.project(project_name) {
+    let prefix = if let Some(pcfg) = config.company(project_name) {
         pcfg.prefix.clone()
     } else if let Some(acfg) = config.agent(project_name) {
         acfg.prefix.clone()
@@ -52,7 +52,7 @@ pub(crate) async fn cmd_ready(
     let projects: Vec<&str> = if let Some(name) = project_name {
         vec![name]
     } else {
-        config.projects.iter().map(|r| r.name.as_str()).collect()
+        config.companies.iter().map(|r| r.name.as_str()).collect()
     };
 
     let mut found = false;
@@ -92,7 +92,7 @@ pub(crate) async fn cmd_tasks(
     let projects: Vec<&str> = if let Some(name) = project_name {
         vec![name]
     } else {
-        config.projects.iter().map(|r| r.name.as_str()).collect()
+        config.companies.iter().map(|r| r.name.as_str()).collect()
     };
 
     for name in projects {

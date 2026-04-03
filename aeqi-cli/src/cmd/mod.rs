@@ -1,6 +1,6 @@
 pub(crate) mod agent;
 pub(crate) mod audit;
-pub(crate) mod blackboard;
+pub(crate) mod notes;
 pub(crate) mod chat;
 // chat_tui replaced by tui/ module
 pub(crate) mod config;

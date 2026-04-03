@@ -261,7 +261,7 @@ export default function AgentDetailPage() {
                     <span className="task-subject">{task.subject}</span>
                     <div className="task-meta">
                       <StatusBadge status={task.status} size="sm" />
-                      <span>{task.project}</span>
+                      <span>{task.company}</span>
                     </div>
                   </div>
                 ))}

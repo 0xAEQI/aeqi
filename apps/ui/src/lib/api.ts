@@ -83,22 +83,22 @@ export const api = {
     return request<any>(`/worker/events${qs ? `?${qs}` : ""}`);
   },
 
-  // Projects
-  getProjects: () => request<any>("/projects"),
+  // Companies
+  getCompanies: () => request<any>("/companies"),
 
   // Tasks
-  getTasks: (params?: { status?: string; project?: string }) => {
+  getTasks: (params?: { status?: string; company?: string }) => {
     const query = new URLSearchParams();
     if (params?.status) query.set("status", params.status);
-    if (params?.project) query.set("project", params.project);
+    if (params?.company) query.set("company", params.company);
     const qs = query.toString();
     return request<any>(`/tasks${qs ? `?${qs}` : ""}`);
   },
 
   // Missions
-  getMissions: (params?: { project?: string }) => {
+  getMissions: (params?: { company?: string }) => {
     const query = new URLSearchParams();
-    if (params?.project) query.set("project", params.project);
+    if (params?.company) query.set("company", params.company);
     const qs = query.toString();
     return request<any>(`/missions${qs ? `?${qs}` : ""}`);
   },
@@ -107,21 +107,21 @@ export const api = {
   getAgents: () => request<any>("/agents/registry"),
 
   // Audit
-  getAudit: (params?: { last?: number; project?: string }) => {
+  getAudit: (params?: { last?: number; company?: string }) => {
     const query = new URLSearchParams();
     if (params?.last) query.set("last", String(params.last));
-    if (params?.project) query.set("project", params.project);
+    if (params?.company) query.set("company", params.company);
     const qs = query.toString();
     return request<any>(`/audit${qs ? `?${qs}` : ""}`);
   },
 
-  // Blackboard
-  getBlackboard: (params?: { project?: string; limit?: number }) => {
+  // Notes
+  getNotes: (params?: { company?: string; limit?: number }) => {
     const query = new URLSearchParams();
-    if (params?.project) query.set("project", params.project);
+    if (params?.company) query.set("company", params.company);
     if (params?.limit) query.set("limit", String(params.limit));
     const qs = query.toString();
-    return request<any>(`/blackboard${qs ? `?${qs}` : ""}`);
+    return request<any>(`/notes${qs ? `?${qs}` : ""}`);
   },
 
   // Expertise
@@ -139,9 +139,9 @@ export const api = {
   getBrief: () => request<any>("/brief"),
 
   // Memories
-  getMemories: (params?: { project?: string; query?: string; limit?: number }) => {
+  getMemories: (params?: { company?: string; query?: string; limit?: number }) => {
     const q = new URLSearchParams();
-    if (params?.project) q.set("project", params.project);
+    if (params?.company) q.set("company", params.company);
     if (params?.query) q.set("query", params.query);
     if (params?.limit) q.set("limit", String(params.limit));
     const qs = q.toString();
@@ -154,20 +154,20 @@ export const api = {
   // Pipelines
   getPipelines: () => request<any>("/pipelines"),
 
-  // Project Knowledge
-  getProjectKnowledge: (name: string) => request<any>(`/projects/${name}/knowledge`),
+  // Company Knowledge
+  getCompanyKnowledge: (name: string) => request<any>(`/companies/${name}/knowledge`),
 
   // Knowledge CRUD
-  storeKnowledge: (data: { project: string; key: string; content: string; category?: string; scope?: string }) =>
+  storeKnowledge: (data: { company: string; key: string; content: string; category?: string; scope?: string }) =>
     request<any>("/knowledge/store", { method: "POST", body: JSON.stringify(data) }),
 
-  deleteKnowledge: (data: { project: string; id: string }) =>
+  deleteKnowledge: (data: { company: string; id: string }) =>
     request<any>("/knowledge/delete", { method: "POST", body: JSON.stringify(data) }),
 
   // Channel Knowledge
-  getChannelKnowledge: (params: { project: string; query?: string; limit?: number }) => {
+  getChannelKnowledge: (params: { company: string; query?: string; limit?: number }) => {
     const q = new URLSearchParams();
-    q.set("project", params.project);
+    q.set("company", params.company);
     if (params.query) q.set("query", params.query);
     if (params.limit) q.set("limit", String(params.limit));
     return request<any>(`/knowledge/channel?${q.toString()}`);
@@ -194,7 +194,7 @@ export const api = {
   // Chat — canonical path
   chatFull: (params: {
     message: string;
-    project?: string | null;
+    company?: string | null;
     department?: string | null;
     channelName?: string | null;
     chatId?: number;
@@ -204,7 +204,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({
         message: params.message,
-        ...(params.project ? { project: params.project } : {}),
+        ...(params.company ? { company: params.company } : {}),
         ...(params.department ? { department: params.department } : {}),
         ...(params.channelName ? { channel_name: params.channelName } : {}),
         ...(params.chatId ? { chat_id: params.chatId } : {}),
@@ -215,14 +215,14 @@ export const api = {
   // Chat — typed thread timeline
   chatTimeline: (params?: {
     chatId?: number;
-    project?: string | null;
+    company?: string | null;
     department?: string | null;
     channelName?: string | null;
     limit?: number;
   }) => {
     const query = new URLSearchParams();
     if (params?.chatId) query.set("chat_id", String(params.chatId));
-    if (params?.project) query.set("project", params.project);
+    if (params?.company) query.set("company", params.company);
     if (params?.department) query.set("department", params.department);
     if (params?.channelName) query.set("channel_name", params.channelName);
     if (params?.limit) query.set("limit", String(params.limit));
@@ -231,43 +231,38 @@ export const api = {
   },
 
   // Write: Create Task
-  createTask: (data: { project: string; subject: string; description?: string }) =>
+  createTask: (data: { company: string; subject: string; description?: string }) =>
     request<any>("/tasks", {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
   // Write: Close Task
-  closeTask: (id: string, data?: { reason?: string; project?: string }) =>
+  closeTask: (id: string, data?: { reason?: string; company?: string }) =>
     request<any>(`/tasks/${id}/close`, {
       method: "POST",
       body: JSON.stringify(data || {}),
     }),
 
-  // Write: Post to Blackboard
-  postBlackboard: (data: { project: string; key: string; content: string; tags?: string[]; durability?: string }) =>
-    request<any>("/blackboard", {
+  // Write: Post Note
+  postNote: (data: { company: string; key: string; content: string; tags?: string[]; durability?: string }) =>
+    request<any>("/notes", {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
   // Chat channels & history
   getChatChannels: () => request<any>("/chat/channels"),
-  getChatHistory: (params: { chat_id?: number; project?: string; limit?: number }) => {
+  getChatHistory: (params: { chat_id?: number; company?: string; limit?: number }) => {
     const query = new URLSearchParams();
     if (params.chat_id) query.set("chat_id", String(params.chat_id));
-    if (params.project) query.set("project", params.project);
+    if (params.company) query.set("company", params.company);
     if (params.limit) query.set("limit", String(params.limit));
     const qs = query.toString();
     return request<any>(`/chat/history${qs ? `?${qs}` : ""}`);
   },
 
-  // Worker events (live sessions)
-  getWorkerEvents: (cursor?: number) =>
-    request<any>(`/worker/events${cursor ? `?cursor=${cursor}` : ""}`),
-
-  // Notes
-  getNotes: () => request<any>("/notes"),
+  // Context panel (per-channel)
   getNote: (channel: string) => request<any>(`/notes/${encodeURIComponent(channel)}`),
   saveNote: (data: { channel: string; content: string }) =>
     request<any>("/notes", { method: "POST", body: JSON.stringify(data) }),

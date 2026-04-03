@@ -1,4 +1,4 @@
-export interface Project {
+export interface Company {
   name: string;
   prefix: string;
   repo: string;
@@ -28,7 +28,7 @@ export interface Task {
   assignee?: string;
   skill?: string;
   mission_id?: string;
-  project: string;
+  company: string;
   labels: string[];
   cost_usd: number;
   created_at: string;
@@ -40,7 +40,7 @@ export interface Mission {
   name: string;
   description: string;
   status: "pending" | "in_progress" | "done" | "cancelled";
-  project: string;
+  company: string;
   skill?: string;
   schedule?: string;
   task_count: number;
@@ -51,7 +51,7 @@ export interface Mission {
 export interface AuditEntry {
   id: number;
   timestamp: string;
-  project: string;
+  company: string;
   decision_type: string;
   summary: string;
   agent?: string;
@@ -62,7 +62,7 @@ export interface AuditEntry {
 export interface DaemonStatus {
   running: boolean;
   uptime_secs: number;
-  projects: number;
+  companies: number;
   active_workers: number;
   total_cost_usd: number;
   cron_jobs: number;
@@ -72,7 +72,7 @@ export interface DashboardStats {
   active_workers: number;
   total_cost_today: number;
   tasks_completed_24h: number;
-  projects_tracked: number;
+  companies_tracked: number;
   recent_activity: AuditEntry[];
   active_agents: Agent[];
 }

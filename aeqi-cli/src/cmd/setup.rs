@@ -85,7 +85,7 @@ pub(crate) async fn cmd_setup(runtime: &str, service: bool, force: bool) -> Resu
         ),
         (
             shared_agents_dir.join("WORKFLOW.md"),
-            "# Shared Workflow\n\n1. Run `aeqi doctor --strict` before starting substantial work.\n2. Keep tasks small enough for a single worker handoff.\n3. Post durable discoveries to the blackboard.\n4. Use checkpoints and audits to resume instead of restarting from scratch.\n".to_string(),
+            "# Shared Workflow\n\n1. Run `aeqi doctor --strict` before starting substantial work.\n2. Keep tasks small enough for a single worker handoff.\n3. Post durable discoveries to notes.\n4. Use checkpoints and audits to resume instead of restarting from scratch.\n".to_string(),
         ),
     ];
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Outlet, NavLink } from "react-router-dom";
-import ProjectRail from "./ProjectRail";
+import CompanyRail from "./CompanyRail";
 import AgentNav from "./Sidebar";
 
 const NAV_ITEMS = [
@@ -46,7 +46,7 @@ export default function AppLayout() {
 
   return (
     <div className="shell">
-      <ProjectRail />
+      <CompanyRail />
       <AgentNav />
       <div className="content-area">
         <div className="content-scroll">

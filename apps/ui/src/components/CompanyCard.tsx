@@ -1,36 +1,36 @@
 import { Link } from "react-router-dom";
-import type { Project } from "@/lib/types";
+import type { Company } from "@/lib/types";
 
-interface ProjectCardProps {
-  project: Project;
+interface CompanyCardProps {
+  company: Company;
 }
 
-export default function ProjectCard({ project }: ProjectCardProps) {
+export default function CompanyCard({ company }: CompanyCardProps) {
   const total =
-    project.stats.pending +
-    project.stats.active +
-    project.stats.done +
-    project.stats.failed;
-  const completionPct = total > 0 ? (project.stats.done / total) * 100 : 0;
+    company.stats.pending +
+    company.stats.active +
+    company.stats.done +
+    company.stats.failed;
+  const completionPct = total > 0 ? (company.stats.done / total) * 100 : 0;
 
   return (
-    <Link to={`/projects/${project.name}`} className="project-card">
+    <Link to={`/companies/${company.name}`} className="project-card">
       <div className="project-card-header">
         <div>
           <div className="project-name-row">
-            <code className="project-prefix">{project.prefix}</code>
-            <span className="project-name">{project.name}</span>
+            <code className="project-prefix">{company.prefix}</code>
+            <span className="project-name">{company.name}</span>
           </div>
-          {project.description && (
-            <p className="project-description">{project.description}</p>
+          {company.description && (
+            <p className="project-description">{company.description}</p>
           )}
         </div>
       </div>
 
       <div className="project-team">
         <span className="project-team-label">Team:</span>
-        <span className="project-leader">{project.team.leader}</span>
-        {project.team.advisors.map((a) => (
+        <span className="project-leader">{company.team.leader}</span>
+        {company.team.advisors.map((a) => (
           <span key={a} className="project-advisor">
             {a}
           </span>
@@ -45,32 +45,32 @@ export default function ProjectCard({ project }: ProjectCardProps) {
           />
         </div>
         <span className="project-progress-text">
-          {project.stats.done}/{total} tasks
+          {company.stats.done}/{total} tasks
         </span>
       </div>
 
       <div className="project-stat-row">
         <div className="project-stat">
           <span className="project-stat-count project-stat-pending">
-            {project.stats.pending}
+            {company.stats.pending}
           </span>
           <span className="project-stat-label">pending</span>
         </div>
         <div className="project-stat">
           <span className="project-stat-count project-stat-active">
-            {project.stats.active}
+            {company.stats.active}
           </span>
           <span className="project-stat-label">active</span>
         </div>
         <div className="project-stat">
           <span className="project-stat-count project-stat-done">
-            {project.stats.done}
+            {company.stats.done}
           </span>
           <span className="project-stat-label">done</span>
         </div>
         <div className="project-stat">
           <span className="project-stat-count project-stat-failed">
-            {project.stats.failed}
+            {company.stats.failed}
           </span>
           <span className="project-stat-label">failed</span>
         </div>

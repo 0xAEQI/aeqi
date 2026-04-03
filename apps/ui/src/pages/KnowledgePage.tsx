@@ -14,9 +14,9 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 export default function KnowledgePage() {
-  const [projectList, setProjectList] = useState<any[]>([]);
-  const [allProjects, setAllProjects] = useState<any[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string>("");
+  const [companyList, setCompanyList] = useState<any[]>([]);
+  const [allCompanies, setAllCompanies] = useState<any[]>([]);
+  const [selectedCompany, setSelectedCompany] = useState<string>("");
   const [items, setItems] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [sourceFilter, setSourceFilter] = useState<string>("");
@@ -26,24 +26,24 @@ export default function KnowledgePage() {
   const [newEntry, setNewEntry] = useState({ key: "", content: "", category: "fact", scope: "domain" });
   const [creating, setCreating] = useState(false);
 
-  // Load project list with memory counts.
+  // Load company list with memory counts.
   useEffect(() => {
     api.getMemories().then((d) => {
-      setProjectList(d.projects || []);
-      const first = (d.projects || []).find((p: any) => p.count > 0);
-      if (first) setSelectedProject(first.project);
+      setCompanyList(d.companies || []);
+      const first = (d.companies || []).find((p: any) => p.count > 0);
+      if (first) setSelectedCompany(first.company);
     }).catch(() => {});
-    api.getProjects().then((d) => setAllProjects(d.projects || [])).catch(() => {});
+    api.getCompanies().then((d) => setAllCompanies(d.companies || [])).catch(() => {});
     setLoading(false);
   }, []);
 
-  // Load knowledge for selected project.
+  // Load knowledge for selected company.
   useEffect(() => {
-    if (!selectedProject) return;
+    if (!selectedCompany) return;
     setLoading(true);
-    // Fetch both memories and blackboard.
+    // Fetch both memories and notes.
     api.getChannelKnowledge({
-      project: selectedProject,
+      company: selectedCompany,
       query: search || undefined,
       limit: 100,
     }).then((d) => {
@@ -54,35 +54,35 @@ export default function KnowledgePage() {
       setItems(results);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [selectedProject, search, sourceFilter]);
+  }, [selectedCompany, search, sourceFilter]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProject || !newEntry.key || !newEntry.content) return;
+    if (!selectedCompany || !newEntry.key || !newEntry.content) return;
     setCreating(true);
     try {
       await api.storeKnowledge({
-        project: selectedProject,
+        company: selectedCompany,
         ...newEntry,
       });
       setNewEntry({ key: "", content: "", category: "fact", scope: "domain" });
       setShowCreate(false);
       // Refresh.
-      const d = await api.getChannelKnowledge({ project: selectedProject, limit: 100 });
+      const d = await api.getChannelKnowledge({ company: selectedCompany, limit: 100 });
       setItems(d.items || []);
     } catch { /* ignore */ }
     setCreating(false);
   };
 
   const handleDelete = async (id: string) => {
-    if (!selectedProject) return;
-    await api.deleteKnowledge({ project: selectedProject, id });
+    if (!selectedCompany) return;
+    await api.deleteKnowledge({ company: selectedCompany, id });
     setItems(items.filter((item) => item.id !== id));
     setExpanded(null);
   };
 
   const memoryCount = items.filter((i) => i.source === "memory").length;
-  const blackboardCount = items.filter((i) => i.source === "blackboard").length;
+  const notesCount = items.filter((i) => i.source === "notes" || i.source === "blackboard").length;
 
   return (
     <>
@@ -96,7 +96,7 @@ export default function KnowledgePage() {
       />
 
       {/* Create form */}
-      {showCreate && selectedProject && (
+      {showCreate && selectedCompany && (
         <form className="dash-panel" style={{ marginBottom: "var(--space-4)", padding: "var(--space-4)" }} onSubmit={handleCreate}>
           <div style={{ display: "flex", gap: "var(--space-3)", marginBottom: "var(--space-3)" }}>
             <input
@@ -137,13 +137,13 @@ export default function KnowledgePage() {
       <div className="filters">
         <select
           className="filter-select"
-          value={selectedProject}
-          onChange={(e) => setSelectedProject(e.target.value)}
+          value={selectedCompany}
+          onChange={(e) => setSelectedCompany(e.target.value)}
         >
-          <option value="">Select project...</option>
-          {(projectList.length > 0 ? projectList : allProjects).map((p: any) => (
-            <option key={p.project || p.name} value={p.project || p.name}>
-              {p.project || p.name} {p.count ? `(${p.count})` : ""}
+          <option value="">Select company...</option>
+          {(companyList.length > 0 ? companyList : allCompanies).map((p: any) => (
+            <option key={p.company || p.name} value={p.company || p.name}>
+              {p.company || p.name} {p.count ? `(${p.count})` : ""}
             </option>
           ))}
         </select>
@@ -154,7 +154,7 @@ export default function KnowledgePage() {
         >
           <option value="">All sources</option>
           <option value="memory">Memory ({memoryCount})</option>
-          <option value="blackboard">Blackboard ({blackboardCount})</option>
+          <option value="notes">Notes ({notesCount})</option>
         </select>
         <input
           className="filter-input"
@@ -168,8 +168,8 @@ export default function KnowledgePage() {
         </span>
       </div>
 
-      {!selectedProject ? (
-        <EmptyState title="Select a project" description="Choose a project to browse its knowledge base." />
+      {!selectedCompany ? (
+        <EmptyState title="Select a company" description="Choose a company to browse its knowledge base." />
       ) : loading ? (
         <div className="loading">Loading knowledge...</div>
       ) : items.length === 0 ? (

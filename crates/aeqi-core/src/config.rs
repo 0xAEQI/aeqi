@@ -24,9 +24,9 @@ pub struct AEQIConfig {
     /// Shared primer injected into ALL agents regardless of project.
     #[serde(default)]
     pub shared_primer: Option<String>,
-    /// Projects = repos, tasks, knowledge, budget.
-    #[serde(default)]
-    pub projects: Vec<ProjectConfig>,
+    /// Companies = repos, tasks, knowledge, budget.
+    #[serde(default, alias = "projects")]
+    pub companies: Vec<CompanyConfig>,
     /// Agents = personalities (equal peers).
     #[serde(default)]
     pub agents: Vec<PeerAgentConfig>,
@@ -577,15 +577,15 @@ pub struct OrchestratorConfig {
     /// Enable expertise-based routing (Phase 2).
     #[serde(default)]
     pub expertise_routing: bool,
-    /// Blackboard transient entry TTL in hours (Phase 3).
-    #[serde(default = "default_blackboard_transient_ttl_hours")]
-    pub blackboard_transient_ttl_hours: u64,
-    /// Blackboard durable entry TTL in days (Phase 3).
-    #[serde(default = "default_blackboard_durable_ttl_days")]
-    pub blackboard_durable_ttl_days: u64,
-    /// Blackboard claim TTL in hours.
-    #[serde(default = "default_blackboard_claim_ttl_hours")]
-    pub blackboard_claim_ttl_hours: u64,
+    /// Notes transient entry TTL in hours (Phase 3).
+    #[serde(default = "default_notes_transient_ttl_hours", alias = "blackboard_transient_ttl_hours")]
+    pub notes_transient_ttl_hours: u64,
+    /// Notes durable entry TTL in days (Phase 3).
+    #[serde(default = "default_notes_durable_ttl_days", alias = "blackboard_durable_ttl_days")]
+    pub notes_durable_ttl_days: u64,
+    /// Notes claim TTL in hours.
+    #[serde(default = "default_notes_claim_ttl_hours", alias = "blackboard_claim_ttl_hours")]
+    pub notes_claim_ttl_hours: u64,
     /// Enable adaptive retry with failure analysis (Phase 4).
     #[serde(default)]
     pub adaptive_retry: bool,
@@ -618,9 +618,9 @@ impl Default for OrchestratorConfig {
             dispatch_ttl_secs: default_dispatch_ttl_secs(),
             council_max_rounds: default_council_max_rounds(),
             expertise_routing: false,
-            blackboard_transient_ttl_hours: default_blackboard_transient_ttl_hours(),
-            blackboard_durable_ttl_days: default_blackboard_durable_ttl_days(),
-            blackboard_claim_ttl_hours: default_blackboard_claim_ttl_hours(),
+            notes_transient_ttl_hours: default_notes_transient_ttl_hours(),
+            notes_durable_ttl_days: default_notes_durable_ttl_days(),
+            notes_claim_ttl_hours: default_notes_claim_ttl_hours(),
             adaptive_retry: false,
             failure_analysis_model: String::new(),
             preflight_enabled: false,
@@ -694,13 +694,13 @@ fn default_dispatch_ttl_secs() -> u64 {
 fn default_council_max_rounds() -> u32 {
     1
 }
-fn default_blackboard_transient_ttl_hours() -> u64 {
+fn default_notes_transient_ttl_hours() -> u64 {
     24
 }
-fn default_blackboard_durable_ttl_days() -> u64 {
+fn default_notes_durable_ttl_days() -> u64 {
     7
 }
-fn default_blackboard_claim_ttl_hours() -> u64 {
+fn default_notes_claim_ttl_hours() -> u64 {
     2
 }
 fn default_preflight_max_cost_usd() -> f64 {
@@ -719,7 +719,7 @@ pub enum ExecutionMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProjectConfig {
+pub struct CompanyConfig {
     pub name: String,
     pub prefix: String,
     /// Repo path (absolute) or key into `[repos]`.
@@ -893,8 +893,8 @@ impl AEQIConfig {
         }
     }
 
-    pub fn runtime_for_project(&self, project_name: &str) -> RuntimePresetConfig {
-        let project = self.project(project_name);
+    pub fn runtime_for_company(&self, project_name: &str) -> RuntimePresetConfig {
+        let project = self.company(project_name);
         let fallback_mode = project
             .map(|p| p.execution_mode.clone())
             .unwrap_or_default();
@@ -914,7 +914,7 @@ impl AEQIConfig {
     }
 
     pub fn execution_mode_for_project(&self, project_name: &str) -> ExecutionMode {
-        self.runtime_for_project(project_name)
+        self.runtime_for_company(project_name)
             .execution_mode
             .unwrap_or_default()
     }
@@ -949,7 +949,7 @@ impl AEQIConfig {
         for path in config.repos.values_mut() {
             *path = expand_tilde(path);
         }
-        for project in &mut config.projects {
+        for project in &mut config.companies {
             project.repo = expand_tilde(&project.repo);
             if let Some(ref mut wt) = project.worktree_root {
                 *wt = expand_tilde(wt);
@@ -1027,9 +1027,9 @@ impl AEQIConfig {
         anyhow::bail!("No aeqi.toml found. Run 'aeqi setup' to create one.")
     }
 
-    /// Get project config by name.
-    pub fn project(&self, name: &str) -> Option<&ProjectConfig> {
-        self.projects.iter().find(|r| r.name == name)
+    /// Get company config by name.
+    pub fn company(&self, name: &str) -> Option<&CompanyConfig> {
+        self.companies.iter().find(|r| r.name == name)
     }
 
     /// Get agent config by name.
@@ -1038,9 +1038,9 @@ impl AEQIConfig {
     }
 
     /// Get the default model for a project, falling back to provider default.
-    pub fn model_for_project(&self, project_name: &str) -> String {
-        let runtime = self.runtime_for_project(project_name);
-        self.project(project_name)
+    pub fn model_for_company(&self, project_name: &str) -> String {
+        let runtime = self.runtime_for_company(project_name);
+        self.company(project_name)
             .and_then(|r| r.model.clone())
             .or(runtime.model)
             .unwrap_or_else(|| self.default_model_for_provider(runtime.provider))
@@ -1056,8 +1056,8 @@ impl AEQIConfig {
     }
 
     /// Get the effective orchestrator config for a project (project override or global).
-    pub fn orchestrator_for_project(&self, project_name: &str) -> OrchestratorConfig {
-        self.project(project_name)
+    pub fn orchestrator_for_company(&self, project_name: &str) -> OrchestratorConfig {
+        self.company(project_name)
             .and_then(|p| p.orchestrator.clone())
             .unwrap_or_else(|| self.orchestrator.clone())
     }
@@ -1139,7 +1139,7 @@ impl AEQIConfig {
         // Project validation.
         let mut seen_names = std::collections::HashSet::new();
         let mut seen_prefixes = std::collections::HashSet::new();
-        for d in &self.projects {
+        for d in &self.companies {
             if d.name.is_empty() {
                 errors.push("project with empty name".to_string());
             }
@@ -1218,7 +1218,7 @@ impl AEQIConfig {
         }
 
         // Repo refs resolve.
-        for d in &self.projects {
+        for d in &self.companies {
             if !d.repo.starts_with('/')
                 && !d.repo.starts_with('~')
                 && !self.repos.contains_key(&d.repo)
@@ -1413,8 +1413,8 @@ repo = "/tmp/test"
 "#;
         let config = AEQIConfig::parse(toml).unwrap();
         assert_eq!(config.aeqi.name, "test");
-        assert_eq!(config.projects.len(), 1);
-        assert_eq!(config.projects[0].name, "test-domain");
+        assert_eq!(config.companies.len(), 1);
+        assert_eq!(config.companies[0].name, "test-domain");
         assert!(config.web.ui_dist_dir.is_none());
     }
 
@@ -1839,14 +1839,14 @@ repo = "/tmp/aeqi"
 "#;
         let config = AEQIConfig::parse(toml).unwrap();
 
-        let project_runtime = config.runtime_for_project("aeqi");
+        let project_runtime = config.runtime_for_company("aeqi");
         assert_eq!(project_runtime.provider, ProviderKind::Anthropic);
         assert_eq!(
             config.execution_mode_for_project("aeqi"),
             ExecutionMode::Agent
         );
         assert_eq!(
-            config.model_for_project("aeqi"),
+            config.model_for_company("aeqi"),
             "claude-sonnet-4-20250514".to_string()
         );
 

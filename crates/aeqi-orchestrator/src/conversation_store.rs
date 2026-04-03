@@ -444,7 +444,7 @@ fn hashed_chat_id(key: &str, tag: u64) -> i64 {
 }
 
 /// Deterministic chat ID for a project-wide channel.
-pub fn project_chat_id(project_name: &str) -> i64 {
+pub fn company_chat_id(project_name: &str) -> i64 {
     hashed_chat_id(&format!("project:{project_name}"), 1)
 }
 
@@ -675,7 +675,7 @@ mod tests {
 
     #[test]
     fn test_deterministic_chat_ids_use_distinct_tags() {
-        let project = project_chat_id("alpha");
+        let project = company_chat_id("alpha");
         let department = department_chat_id("alpha", "backend");
         let named = named_channel_chat_id("ops");
         let agency = agency_chat_id();

@@ -4,8 +4,8 @@ use aeqi_core::{Identity, SecretStore};
 use aeqi_gates::TelegramChannel;
 use aeqi_orchestrator::tools::build_orchestration_tools;
 use aeqi_orchestrator::{
-    AgentRouter, AuditLog, Blackboard, ConversationStore, Daemon, DispatchBus, ExpertiseLedger,
-    Project, ProjectRegistry, WorkerPool,
+    AgentRouter, AuditLog, Notes, ConversationStore, Daemon, DispatchBus, ExpertiseLedger,
+    Company, CompanyRegistry, WorkerPool,
 };
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -51,9 +51,9 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 .map(|a| a.name.clone())
                 .unwrap_or_else(|| "leader".to_string());
             let mut registry_inner =
-                ProjectRegistry::new(dispatch_bus.clone(), leader_name.clone());
+                CompanyRegistry::new(dispatch_bus.clone(), leader_name.clone());
             registry_inner.config_project_names =
-                config.projects.iter().map(|p| p.name.clone()).collect();
+                config.companies.iter().map(|p| p.name.clone()).collect();
             registry_inner.set_cost_ledger(cost_ledger.clone());
 
             // Initialize v3 subsystems (SQLite-backed).
@@ -73,18 +73,18 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 }
                 Err(e) => warn!(error = %e, "failed to initialize expertise ledger"),
             }
-            match Blackboard::open(
-                &data_dir.join("blackboard.db"),
-                config.orchestrator.blackboard_transient_ttl_hours,
-                config.orchestrator.blackboard_durable_ttl_days,
-                config.orchestrator.blackboard_claim_ttl_hours,
+            match Notes::open(
+                &data_dir.join("notes.db"),
+                config.orchestrator.notes_transient_ttl_hours,
+                config.orchestrator.notes_durable_ttl_days,
+                config.orchestrator.notes_claim_ttl_hours,
             ) {
                 Ok(bb) => {
                     let bb = Arc::new(bb);
-                    registry_inner.blackboard = Some(bb);
-                    info!("blackboard initialized");
+                    registry_inner.notes = Some(bb);
+                    info!("notes initialized");
                 }
-                Err(e) => warn!(error = %e, "failed to initialize blackboard"),
+                Err(e) => warn!(error = %e, "failed to initialize notes"),
             }
             match ConversationStore::open(&data_dir.join("conversations.db")) {
                 Ok(cs) => {
@@ -102,14 +102,14 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             let mut skipped_advisors = Vec::new();
 
             // Set per-project budget ceilings from config.
-            for project_cfg in &config.projects {
+            for project_cfg in &config.companies {
                 if let Some(budget) = project_cfg.max_cost_per_day_usd {
-                    cost_ledger.set_project_budget(&project_cfg.name, budget);
+                    cost_ledger.set_company_budget(&project_cfg.name, budget);
                 }
             }
 
             // Register project rigs.
-            for project_cfg in &config.projects {
+            for project_cfg in &config.companies {
                 let project_dir = match find_project_dir(&project_cfg.name) {
                     Ok(d) => d,
                     Err(_) => {
@@ -121,9 +121,9 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                         continue;
                     }
                 };
-                let default_model = config.model_for_project(&project_cfg.name);
+                let default_model = config.model_for_company(&project_cfg.name);
 
-                let project = Arc::new(Project::from_config(
+                let project = Arc::new(Company::from_config(
                     project_cfg,
                     &project_dir,
                     &default_model,
@@ -144,7 +144,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     dispatch_bus.clone(),
                 );
                 pool.event_broadcaster = Some(event_broadcaster.clone());
-                let project_orch = config.orchestrator_for_project(&project_cfg.name);
+                let project_orch = config.orchestrator_for_company(&project_cfg.name);
 
                 // Wire memory + reflection for worker post-execution insight extraction.
                 if let Ok(mem) = open_memory(&config, Some(&project_cfg.name)) {
@@ -190,7 +190,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 pool.project_primer = project_cfg.primer.clone();
                 pool.shared_primer = config.shared_primer.clone();
 
-                registry.register_project(project.clone(), pool).await;
+                registry.register_company(project.clone(), pool).await;
             }
 
             // Build channels map for the leader agent.
@@ -223,7 +223,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     .map(|r| config.resolve_repo(r))
                     .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-                let agent_project = Arc::new(Project {
+                let agent_project = Arc::new(Company {
                     name: agent_cfg.name.clone(),
                     prefix: agent_cfg.prefix.clone(),
                     repo: agent_workdir.clone(),
@@ -231,7 +231,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     model: agent_model.clone(),
                     max_workers: agent_cfg.max_workers,
                     worker_timeout_secs: 300, // 5 min timeout for advisor responses
-                    project_identity: agent_identity,
+                    company_identity: agent_identity,
                     tasks: Arc::new(tokio::sync::Mutex::new(agent_task_board)),
                     task_notify: Arc::new(tokio::sync::Notify::new()),
                     departments: Vec::new(),
@@ -262,7 +262,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     }
                 }
 
-                registry.register_project(agent_project, agent_scout).await;
+                registry.register_company(agent_project, agent_scout).await;
                 info!(
                     agent = %agent_cfg.name,
                     model = %agent_model,
@@ -283,7 +283,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             // Build per-project memory stores for knowledge-aware chat.
             let mut chat_memory_stores: HashMap<String, Arc<dyn aeqi_core::traits::Memory>> =
                 HashMap::new();
-            for project_cfg in &config.projects {
+            for project_cfg in &config.companies {
                 if let Ok(mem) = open_memory(&config, Some(&project_cfg.name)) {
                     chat_memory_stores.insert(project_cfg.name.clone(), Arc::new(mem));
                 }
@@ -444,7 +444,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     .map(|r| config.resolve_repo(r))
                     .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-                let fa_rig = Arc::new(Project {
+                let fa_rig = Arc::new(Company {
                     name: leader_name.clone(),
                     prefix: fa_prefix.clone(),
                     repo: fa_workdir.clone(),
@@ -452,7 +452,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     model: fa_model,
                     max_workers: leader_cfg.max_workers,
                     worker_timeout_secs: 1800,
-                    project_identity: fa_identity,
+                    company_identity: fa_identity,
                     tasks: Arc::new(tokio::sync::Mutex::new(fa_task_board)),
                     task_notify: fa_task_notify.clone(),
                     departments: Vec::new(),
@@ -477,7 +477,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     channels.clone(),
                     get_api_key(&config).ok(),
                     fa_memory,
-                    registry.blackboard.clone(),
+                    registry.notes.clone(),
                     Some(event_broadcaster.clone()),
                 );
                 fa_tools.extend(orch_tools);
@@ -504,12 +504,12 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
 
                 fa_witness.worker_max_budget_usd = leader_cfg.max_budget_usd;
 
-                registry.register_project(fa_rig, fa_witness).await;
+                registry.register_company(fa_rig, fa_witness).await;
             } else {
                 warn!("no leader agent configured — daemon will run without one");
             }
 
-            let project_count = registry.project_count().await;
+            let project_count = registry.company_count().await;
             println!("AEQI daemon starting...");
             println!("Registered {} projects + agents", project_count);
 
@@ -523,7 +523,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             daemon.event_broadcaster = event_broadcaster;
             daemon.chat_engine = chat_engine;
             daemon.set_readiness_context(
-                config.projects.len(),
+                config.companies.len(),
                 advisor_agents.len(),
                 skipped_projects,
                 skipped_advisors,

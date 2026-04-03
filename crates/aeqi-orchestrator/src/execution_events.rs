@@ -97,8 +97,8 @@ pub enum ExecutionEvent {
         scope: String,
         project: Option<String>,
     },
-    /// A blackboard entry was posted.
-    BlackboardPosted {
+    /// A note entry was posted.
+    NotePosted {
         key: String,
         project: String,
         agent: String,

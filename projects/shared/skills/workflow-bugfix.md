@@ -29,7 +29,7 @@ Diagnose → Fix → Verify → Close
 No fix until root cause is identified. Fixing symptoms creates new bugs. If you can't explain WHY it's broken, you don't understand it yet.
 </HARD-GATE>
 
-**Post diagnosis** — `aeqi_blackboard` post with key `task:{id}:diagnosis` containing: symptom, root cause, affected code paths, proposed fix.
+**Post diagnosis** — `aeqi_notes` post with key `task:{id}:diagnosis` containing: symptom, root cause, affected code paths, proposed fix.
 
 **Terminal state:** Root cause identified and posted, proceed to Fix.
 

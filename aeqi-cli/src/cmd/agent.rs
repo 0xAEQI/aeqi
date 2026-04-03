@@ -85,13 +85,13 @@ pub(crate) async fn cmd_agent(
             }
             Ok(())
         }
-        crate::cli::AgentAction::Spawn { template, project } => {
+        crate::cli::AgentAction::Spawn { template, company } => {
             let (config, _) = load_config(config_path)?;
             let registry =
                 aeqi_orchestrator::agent_registry::AgentRegistry::open(&config.data_dir())?;
             let content = std::fs::read_to_string(&template)?;
             let agent = registry
-                .spawn_from_template(&content, project.as_deref())
+                .spawn_from_template(&content, company.as_deref())
                 .await?;
             println!("Spawned persistent agent:");
             println!("  ID:      {}", agent.id);
@@ -102,7 +102,7 @@ pub(crate) async fn cmd_agent(
             );
             println!(
                 "  Project: {}",
-                agent.project.as_deref().unwrap_or("(root)")
+                agent.company.as_deref().unwrap_or("(root)")
             );
             println!(
                 "  Model:   {}",
@@ -125,7 +125,7 @@ pub(crate) async fn cmd_agent(
                     println!("  Display:  {d}");
                 }
                 println!("  Status:   {}", a.status);
-                println!("  Project:  {}", a.project.as_deref().unwrap_or("(root)"));
+                println!("  Project:  {}", a.company.as_deref().unwrap_or("(root)"));
                 println!("  Model:    {}", a.model.as_deref().unwrap_or("(default)"));
                 println!("  Caps:     {:?}", a.capabilities);
                 println!("  Sessions: {}", a.session_count);
@@ -165,11 +165,11 @@ pub(crate) async fn cmd_agent(
             println!("Agent '{name}' activated.");
             Ok(())
         }
-        crate::cli::AgentAction::Registry { project } => {
+        crate::cli::AgentAction::Registry { company } => {
             let (config, _) = load_config(config_path)?;
             let registry =
                 aeqi_orchestrator::agent_registry::AgentRegistry::open(&config.data_dir())?;
-            let agents = registry.list(project.as_deref(), None).await?;
+            let agents = registry.list(company.as_deref(), None).await?;
             if agents.is_empty() {
                 println!("No persistent agents registered.");
                 println!("Spawn one: aeqi agent spawn <template.md>");
@@ -185,7 +185,7 @@ pub(crate) async fn cmd_agent(
                     "{:<20} {:<10} {:<15} {:<10} {:<8}",
                     a.name,
                     a.status.to_string(),
-                    a.project.as_deref().unwrap_or("(root)"),
+                    a.company.as_deref().unwrap_or("(root)"),
                     a.session_count,
                     a.total_tokens,
                 );

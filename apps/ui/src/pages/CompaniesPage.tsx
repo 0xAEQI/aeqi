@@ -5,33 +5,33 @@ import EmptyState from "@/components/EmptyState";
 import StatusBadge from "@/components/StatusBadge";
 import { api } from "@/lib/api";
 
-export default function ProjectsPage() {
-  const [projects, setProjects] = useState<any[]>([]);
+export default function CompaniesPage() {
+  const [companies, setCompanies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.getProjects().then((data) => {
-      setProjects(data.projects || []);
+    api.getCompanies().then((data) => {
+      setCompanies(data.companies || []);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
 
   return (
     <>
-      <Header title="Projects" />
+      <Header title="Companies" />
       {loading ? (
-        <div className="loading">Loading projects...</div>
-      ) : projects.length === 0 ? (
-        <EmptyState title="No projects" description="No projects registered." />
+        <div className="loading">Loading companies...</div>
+      ) : companies.length === 0 ? (
+        <EmptyState title="No companies" description="No companies registered." />
       ) : (
         <div className="cards-grid">
-          {projects.map((p: any) => {
+          {companies.map((p: any) => {
             const total = p.total_tasks || 0;
             const done = p.done_tasks || 0;
             const pct = total > 0 ? (done / total) * 100 : 0;
 
             return (
-              <Link key={p.name} to={`/projects/${p.name}`} className="project-card">
+              <Link key={p.name} to={`/companies/${p.name}`} className="project-card">
                 <div className="project-name">{p.name}</div>
                 <div className="project-desc">
                   {p.prefix && <code style={{ color: "var(--accent)", marginRight: "var(--space-2)" }}>{p.prefix}</code>}

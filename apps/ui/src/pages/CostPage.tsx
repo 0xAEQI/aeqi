@@ -17,7 +17,7 @@ export default function CostPage() {
   if (loading) return <div className="loading">Loading cost data...</div>;
   if (!cost) return <div className="loading">Failed to load cost data</div>;
 
-  const projectBudgets = cost.project_budgets || {};
+  const companyBudgets = cost.company_budgets || {};
 
   return (
     <>
@@ -56,10 +56,10 @@ export default function CostPage() {
       </div>
 
       <h2 style={{ fontSize: "var(--font-size-lg)", marginBottom: "var(--space-4)" }}>
-        Per-Project Breakdown
+        Per-Company Breakdown
       </h2>
       <div className="cost-breakdown">
-        {Object.entries(projectBudgets).map(([name, budget]: [string, any]) => (
+        {Object.entries(companyBudgets).map(([name, budget]: [string, any]) => (
           <div key={name} className="cost-item">
             <div className="cost-item-name">{name}</div>
             <div className="cost-item-value">${Number(budget.spent_usd || 0).toFixed(3)}</div>

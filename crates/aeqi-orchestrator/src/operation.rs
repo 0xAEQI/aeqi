@@ -20,7 +20,8 @@ pub struct Operation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperationTask {
     pub task_id: TaskId,
-    pub project: String,
+    #[serde(alias = "project")]
+    pub company: String,
     pub closed: bool,
 }
 
@@ -34,7 +35,7 @@ impl Operation {
                 .into_iter()
                 .map(|(task_id, project)| OperationTask {
                     task_id,
-                    project,
+                    company: project,
                     closed: false,
                 })
                 .collect(),

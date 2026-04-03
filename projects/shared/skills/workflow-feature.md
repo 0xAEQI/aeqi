@@ -29,7 +29,7 @@ Brainstorm → Plan → Implement → Review → Finish
 No implementation until the approach is approved. Not "probably fine." Not "seems reasonable." Explicitly approved.
 </HARD-GATE>
 
-**Terminal state:** Post approved approach to `aeqi_blackboard`, proceed to Plan.
+**Terminal state:** Post approved approach to `aeqi_notes`, proceed to Plan.
 
 ---
 
@@ -43,7 +43,7 @@ Break the approved approach into bite-sized tasks.
    - Exact file paths
    - What to change and why
    - Expected test command and output
-4. **Post plan to blackboard** — `aeqi_blackboard` post with key `task:{id}:plan`
+4. **Post plan to notes** — `aeqi_notes` post with key `task:{id}:plan`
 
 ### Plan Quality Checklist
 - [ ] Every task has exact file paths (no "the relevant files")
@@ -51,7 +51,7 @@ Break the approved approach into bite-sized tasks.
 - [ ] No task depends on another task's uncommitted changes
 - [ ] No "TBD", "TODO", "as appropriate", or "similar to Task N"
 
-**Terminal state:** Plan posted to blackboard, proceed to Implement.
+**Terminal state:** Plan posted to notes, proceed to Implement.
 
 ---
 
@@ -89,7 +89,7 @@ If 3 fix attempts for the same issue fail: **STOP.** Don't attempt fix #4. Quest
 Full-scope review of the entire implementation.
 
 1. **Delegate final review** — `aeqi_delegate` with the reviewer agent, checks ALL changes against the original plan
-2. **Read findings** — `aeqi_blackboard` query for the reviewer's posted findings
+2. **Read findings** — `aeqi_notes` query for the reviewer's posted findings
 3. **Handle review result:**
    - **Approved** → proceed to Finish
    - **Issues found** → fix issues, re-review (but respect the 3-fix rule)

@@ -45,10 +45,10 @@ export default function FinancePage() {
 
       {projects.length > 0 && (
         <div className="finance-projects">
-          <h3 className="finance-section-title">Per Project</h3>
+          <h3 className="finance-section-title">Per Company</h3>
           {projects.map((p: any) => (
-            <div key={p.project} className="finance-project-row">
-              <span className="finance-project-name">{p.project}</span>
+            <div key={p.company} className="finance-project-row">
+              <span className="finance-project-name">{p.company}</span>
               <span className="finance-project-spent">${(p.spent_usd ?? 0).toFixed(2)}</span>
             </div>
           ))}

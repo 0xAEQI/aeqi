@@ -2,22 +2,22 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useChatStore } from "@/store/chat";
 import { api } from "@/lib/api";
-import ProjectPatternIcon from "./ProjectPatternIcon";
+import CompanyPatternIcon from "./CompanyPatternIcon";
 
-export default function ProjectRail() {
+export default function CompanyRail() {
   const navigate = useNavigate();
   const channel = useChatStore((s) => s.channel);
   const setChannel = useChatStore((s) => s.setChannel);
-  const [projects, setProjects] = useState<any[]>([]);
+  const [companies, setCompanies] = useState<any[]>([]);
   const [activeCounts, setActiveCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const load = () => {
-      api.getProjects().then((d) => setProjects(d.projects || [])).catch(() => {});
+      api.getCompanies().then((d) => setCompanies(d.companies || [])).catch(() => {});
       api.getTasks({ status: "in_progress" }).then((d) => {
         const counts: Record<string, number> = {};
         for (const t of d.tasks || []) {
-          counts[t.project] = (counts[t.project] || 0) + 1;
+          counts[t.company] = (counts[t.company] || 0) + 1;
         }
         setActiveCounts(counts);
       }).catch(() => {});
@@ -27,7 +27,7 @@ export default function ProjectRail() {
     return () => clearInterval(interval);
   }, []);
 
-  const selectedProject = channel ?? null;
+  const selectedCompany = channel ?? null;
 
   return (
     <div className="rail">
@@ -42,10 +42,10 @@ export default function ProjectRail() {
 
       <div className="rail-separator" />
 
-      {/* Project icons */}
+      {/* Company icons */}
       <div className="rail-projects">
-        {projects.map((p) => {
-          const isSelected = selectedProject === p.name;
+        {companies.map((p) => {
+          const isSelected = selectedCompany === p.name;
           const hasActive = (activeCounts[p.name] || 0) > 0;
 
           return (
@@ -56,7 +56,7 @@ export default function ProjectRail() {
                 onClick={() => { setChannel(p.name); navigate("/"); }}
                 title={p.name}
               >
-                <ProjectPatternIcon name={p.name} selected={isSelected} />
+                <CompanyPatternIcon name={p.name} selected={isSelected} />
                 {hasActive && (
                   <span className="rail-live-dot">
                     <span className="rail-live-dot-pulse" />
@@ -72,7 +72,7 @@ export default function ProjectRail() {
       {/* Bottom — pinned */}
       <div className="rail-bottom">
         <div className="rail-separator" />
-        <div className="rail-add" title="New project" onClick={() => {}}>+</div>
+        <div className="rail-add" title="New company" onClick={() => {}}>+</div>
         <div className="rail-settings" title="Settings">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="8" cy="8" r="2" />

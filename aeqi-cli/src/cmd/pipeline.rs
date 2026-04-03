@@ -54,13 +54,13 @@ pub(crate) async fn cmd_pipeline(
     match action {
         PipelineAction::Pour {
             template,
-            project,
+            company,
             vars,
         } => {
             let project_cfg = config
-                .project(&project)
-                .context(format!("project not found: {project}"))?;
-            let project_dir = find_project_dir(&project)?;
+                .company(&company)
+                .context(format!("company not found: {company}"))?;
+            let project_dir = find_project_dir(&company)?;
             let pipelines = discover_project_pipelines(&project_dir)?;
             let pipeline = pipelines
                 .get(&template)
@@ -81,7 +81,7 @@ pub(crate) async fn cmd_pipeline(
                 .collect();
 
             // Instantiate into task store.
-            let mut store = open_tasks_for_project(&project)?;
+            let mut store = open_tasks_for_project(&company)?;
             let parent_id = pipeline.pour(&mut store, &project_cfg.prefix, &var_map)?;
 
             println!("Poured pipeline '{template}' as {parent_id}");
@@ -108,11 +108,11 @@ pub(crate) async fn cmd_pipeline(
             }
         }
 
-        PipelineAction::List { project } => {
-            let projects: Vec<&str> = if let Some(ref name) = project {
+        PipelineAction::List { company } => {
+            let projects: Vec<&str> = if let Some(ref name) = company {
                 vec![name.as_str()]
             } else {
-                config.projects.iter().map(|r| r.name.as_str()).collect()
+                config.companies.iter().map(|r| r.name.as_str()).collect()
             };
 
             for name in projects {

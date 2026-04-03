@@ -106,7 +106,7 @@ interface Props {
   selected?: boolean;
 }
 
-export default function ProjectPatternIcon({ name, selected }: Props) {
+export default function CompanyPatternIcon({ name, selected }: Props) {
   const initial = name.trim().charAt(0).toUpperCase() || "?";
   const patternDataUrl = useMemo(
     () => makePatternDataUrl(name.trim().toLowerCase()),

@@ -13,15 +13,15 @@ interface KnowledgeItem {
   id: string;
   key: string;
   content: string;
-  source: "memory" | "blackboard";
+  source: "memory" | "notes" | "blackboard";
   category?: string;
   scope?: string;
   tags?: string[];
   created_at: string;
-  project: string;
+  company: string;
 }
 
-export default function KnowledgeSidebar({ project }: { project: string }) {
+export default function KnowledgeSidebar({ company }: { company: string }) {
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -31,7 +31,7 @@ export default function KnowledgeSidebar({ project }: { project: string }) {
   const fetchKnowledge = (query?: string) => {
     setLoading(true);
     api.getChannelKnowledge({
-      project,
+      company,
       query: query || undefined,
       limit: 20,
     }).then((d) => {
@@ -44,7 +44,7 @@ export default function KnowledgeSidebar({ project }: { project: string }) {
     setSearch("");
     setExpanded(null);
     fetchKnowledge();
-  }, [project]);
+  }, [company]);
 
   const handleSearch = (value: string) => {
     setSearch(value);

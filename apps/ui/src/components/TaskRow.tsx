@@ -62,8 +62,8 @@ export default function TaskRow({ task }: TaskRowProps) {
           <span className="task-unassigned">unassigned</span>
         )}
 
-        <Link to={`/projects/${task.project}`} className="task-project">
-          {task.project}
+        <Link to={`/companies/${task.company}`} className="task-project">
+          {task.company}
         </Link>
 
         {task.cost_usd > 0 && (

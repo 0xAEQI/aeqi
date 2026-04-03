@@ -39,17 +39,17 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
       ];
 
       try {
-        const [projectsData, agentsData] = await Promise.all([
-          api.getProjects().catch(() => ({ projects: [] })),
+        const [companiesData, agentsData] = await Promise.all([
+          api.getCompanies().catch(() => ({ companies: [] })),
           api.getAgents().catch(() => ({ agents: [] })),
         ]);
 
-        const projectItems: PaletteItem[] = (projectsData.projects || []).map((p: any) => ({
-          id: `proj-${p.name}`,
+        const companyItems: PaletteItem[] = (companiesData.companies || []).map((p: any) => ({
+          id: `comp-${p.name}`,
           label: p.name,
           hint: `${p.open_tasks || 0} open tasks`,
-          section: "Projects",
-          action: () => go(`/projects/${p.name}`),
+          section: "Companies",
+          action: () => go(`/companies/${p.name}`),
         }));
 
         const agentItems: PaletteItem[] = (agentsData.agents || []).map((a: any) => ({
@@ -60,7 +60,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
           action: () => go(`/agents/${a.name}`),
         }));
 
-        setItems([...navItems, ...projectItems, ...agentItems]);
+        setItems([...navItems, ...companyItems, ...agentItems]);
       } catch {
         setItems(navItems);
       }

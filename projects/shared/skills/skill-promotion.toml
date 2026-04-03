@@ -4,7 +4,7 @@ description = "Discover recurring patterns in memory and promote them to reusabl
 phase = "autonomous"
 
 [tools]
-allow = ["memory_recall", "memory_store", "read_file", "write_file", "glob", "blackboard"]
+allow = ["memory_recall", "memory_store", "read_file", "write_file", "glob", "notes"]
 
 [prompt]
 system = """You are performing skill promotion — discovering reusable patterns from experience.
@@ -22,7 +22,7 @@ system = """You are performing skill promotion — discovering reusable patterns
       - `[skill]` section: name, description, phase = "autonomous" or appropriate phase
       - `[tools]` section: allow list based on what tools the procedure uses
       - `[prompt]` section: system prompt encoding the procedure as instructions
-   d. Post to blackboard announcing the new skill: `skill-promoted:{name}`
+   d. Post to notes announcing the new skill: `skill-promoted:{name}`
 
 4. **Store discovery metadata** — use memory_store to record what was promoted and from which source memories, so you don't re-promote the same patterns.
 

@@ -4,7 +4,7 @@ description = "Periodic project health check. Verify services, builds, and infra
 phase = "autonomous"
 
 [tools]
-allow = ["shell", "read_file", "glob", "grep", "blackboard", "dispatch_send"]
+allow = ["shell", "read_file", "glob", "grep", "notes", "dispatch_send"]
 
 [prompt]
 system = """You are performing a health check for your project.
@@ -23,8 +23,8 @@ system = """You are performing a health check for your project.
 
 ## Reporting
 
-- If everything is healthy: post to blackboard with key `health:{project}:ok` and a brief "all clear" message.
-- If issues found: post to blackboard with key `health:{project}:issue` describing the problem, AND use dispatch_send to alert the system leader.
+- If everything is healthy: post to notes with key `health:{project}:ok` and a brief "all clear" message.
+- If issues found: post to notes with key `health:{project}:issue` describing the problem, AND use dispatch_send to alert the system leader.
 
 ## Constraints
 - Don't fix issues, just detect and report them.
