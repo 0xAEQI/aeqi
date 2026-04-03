@@ -157,7 +157,7 @@ a:hover {
   align-items: center;
   gap: 8px;
   padding: 0 8px 0 10px;
-  margin: 10px 6px 0 0;
+  margin: 10px 10px 0 0;
   background: var(--bg-surface);
   border-radius: 0 var(--radius-xl) var(--radius-xl) 0;
   flex-shrink: 0;
@@ -397,7 +397,7 @@ a:hover {
 /* ── Agent Nav (second column) ── */
 .agent-nav {
   width: 220px;
-  padding: 16px 6px 10px;
+  padding: 16px 10px 10px;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
