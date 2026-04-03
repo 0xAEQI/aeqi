@@ -203,13 +203,12 @@ export default function SessionsPage() {
   return (
     <div className="sessions-split">
       <div className="sessions-list-pane">
-        {/* Agent perpetual session — just the name */}
+        {/* Agent perpetual session — styled like agent row */}
         <div
-          className={`session-list-item${activeSessionId === "perpetual" ? " active" : ""}`}
+          className={`agent-row${activeSessionId === "perpetual" ? " active" : ""}`}
           onClick={() => setActiveSessionId("perpetual")}
         >
-          <span className="session-list-dot">●</span>
-          <span className="session-list-name">{scope}</span>
+          {scope}
         </div>
 
         {/* New session button */}
