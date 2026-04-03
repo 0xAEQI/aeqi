@@ -2269,6 +2269,7 @@ a:hover {
 
 .session-msg-user {
   align-self: stretch;
+  text-align: right;
 }
 
 .session-msg-user .session-msg-content {
