@@ -3369,9 +3369,13 @@ impl Daemon {
                             > = Arc::new(
                                 tokio::sync::RwLock::new(std::collections::HashMap::new()),
                             );
-                            let memory_for_agent = chat_engine
-                                .as_ref()
-                                .and_then(|e| e.memory_stores.get(&agent_hint).cloned());
+                            // Memory keyed by company name — fall back to first available.
+                            let memory_for_agent = chat_engine.as_ref().and_then(|e| {
+                                e.memory_stores
+                                    .get(&agent_hint)
+                                    .or_else(|| e.memory_stores.values().next())
+                                    .cloned()
+                            });
                             let orch_tools = crate::tools::build_orchestration_tools(
                                 registry.clone(),
                                 dispatch_bus.clone(),
