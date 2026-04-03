@@ -1542,7 +1542,7 @@ mod tests {
             task_notify: Arc::new(tokio::sync::Notify::new()),
             memory_stores: HashMap::new(),
             intent_classifier: None,
-                    default_company: "test".to_string(),
+            default_company: "test".to_string(),
         };
 
         (engine, project, registry, project_dir, conv_dir, conv_path)
@@ -1761,7 +1761,7 @@ mod tests {
             task_notify: Arc::new(tokio::sync::Notify::new()),
             memory_stores: HashMap::new(),
             intent_classifier: None,
-                    default_company: "test".to_string(),
+            default_company: "test".to_string(),
         };
 
         let msg = ChatMessage {
@@ -1960,7 +1960,7 @@ mod tests {
             task_notify: Arc::new(tokio::sync::Notify::new()),
             memory_stores: HashMap::new(),
             intent_classifier: None,
-                    default_company: "test".to_string(),
+            default_company: "test".to_string(),
         };
 
         // Without a department hint, project-only scope returns None (no restriction).
