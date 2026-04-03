@@ -328,7 +328,7 @@ export default function SessionsPage() {
                 {msg.role === "assistant" ? (
                   <Markdown>{msg.content}</Markdown>
                 ) : (
-                  <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{msg.content}</pre>
+                  <span>{msg.content}</span>
                 )}
               </div>
             </div>
