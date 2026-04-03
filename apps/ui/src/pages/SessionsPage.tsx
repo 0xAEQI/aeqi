@@ -190,76 +190,64 @@ export default function SessionsPage() {
     );
   }
 
-  const activeSessions = sessions.filter((s) => s.type === "active");
-  const historySessions = sessions.filter((s) => s.type === "history");
+  const allSessions = sessions
+    .filter((s) => s.type !== "perpetual")
+    .sort((a, b) => {
+      const aActive = a.type === "active";
+      const bActive = b.type === "active";
+      if (aActive && !bActive) return -1;
+      if (!aActive && bActive) return 1;
+      return (b.time || "").localeCompare(a.time || "");
+    });
 
   return (
     <div className="sessions-split">
-      {/* Session list */}
       <div className="sessions-list-pane">
-        <div className="sessions-list-section">
-          {sessions.filter((s) => s.type === "perpetual").map((s) => (
-            <div
-              key={s.id}
-              className={`session-list-item${activeSessionId === s.id ? " active" : ""}`}
-              onClick={() => setActiveSessionId(s.id)}
-            >
-              <span className="session-list-dot">●</span>
-              <span className="session-list-name">{s.name}</span>
-            </div>
-          ))}
+        {/* Agent perpetual session — just the name */}
+        <div
+          className={`session-list-item${activeSessionId === "perpetual" ? " active" : ""}`}
+          onClick={() => setActiveSessionId("perpetual")}
+        >
+          <span className="session-list-dot">●</span>
+          <span className="session-list-name">{scope}</span>
         </div>
 
-        {activeSessions.length > 0 && (
-          <div className="sessions-list-section">
-            <div className="sessions-list-header">active</div>
-            {activeSessions.map((s) => (
-              <div
-                key={s.id}
-                className={`session-list-item${activeSessionId === s.id ? " active" : ""}`}
-                onClick={() => setActiveSessionId(s.id)}
-              >
-                <span className="session-list-dot">●</span>
-                <span className="session-list-name">{s.name}</span>
-                {s.time && <span className="session-list-time">{timeAgo(s.time)}</span>}
-              </div>
-            ))}
-          </div>
-        )}
-
+        {/* New session button */}
         <div className="session-list-add" onClick={() => {
           const id = `new-${Date.now()}`;
           const num = sessionCounter + 1;
           setSessionCounter(num);
-          setSessions((prev) => [
-            ...prev.filter((s) => s.type !== "history"),
-            {
-              id,
-              name: `session ${num}`,
-              type: "active" as const,
-              status: "new",
-            },
-            ...prev.filter((s) => s.type === "history"),
-          ]);
+          setSessions((prev) => [...prev, {
+            id,
+            name: `session ${num}`,
+            type: "active" as const,
+            status: "new",
+          }]);
           setActiveSessionId(id);
           setMessages([]);
           setStreamText("");
         }}>+</div>
 
-        {historySessions.length > 0 && (
+        {/* All other sessions — active + history */}
+        {allSessions.length > 0 && (
           <div className="sessions-list-section">
-            <div className="sessions-list-header">history</div>
-            {historySessions.map((s) => (
-              <div
-                key={s.id}
-                className={`session-list-item${activeSessionId === s.id ? " active" : ""}`}
-                onClick={() => setActiveSessionId(s.id)}
-              >
-                <span className="session-list-dot dim">○</span>
-                <span className="session-list-name">{s.name}</span>
-                {s.time && <span className="session-list-time">{timeAgo(s.time)}</span>}
-              </div>
-            ))}
+            <div className="sessions-list-header">sessions</div>
+            {allSessions.map((s) => {
+              const isActive = s.type === "active";
+              return (
+                <div
+                  key={s.id}
+                  className={`session-list-item${activeSessionId === s.id ? " active" : ""}`}
+                  onClick={() => setActiveSessionId(s.id)}
+                >
+                  <span className={`session-list-dot${isActive ? "" : " dim"}`}>
+                    {isActive ? "●" : "○"}
+                  </span>
+                  <span className="session-list-name">{s.name}</span>
+                  {s.time && <span className="session-list-time">{timeAgo(s.time)}</span>}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
