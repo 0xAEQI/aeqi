@@ -2268,16 +2268,19 @@ a:hover {
 }
 
 .session-msg-user {
-  align-self: stretch;
-  text-align: right;
+  align-self: flex-end;
+  max-width: 80%;
 }
 
 .session-msg-user .session-msg-content {
-  color: var(--text-secondary);
-  padding: 2px 0;
+  background: var(--text-primary);
+  color: var(--bg-base);
+  border-radius: 14px;
+  padding: 10px 14px;
 }
 
 .session-msg-user .session-msg-role {
+  text-align: right;
   color: var(--text-muted);
 }
 
