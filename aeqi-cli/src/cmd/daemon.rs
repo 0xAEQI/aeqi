@@ -308,6 +308,11 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     council_advisors: council_advisors.clone(),
                     auto_council_enabled,
                     leader_name: leader_name.clone(),
+                    default_company: config
+                        .companies
+                        .first()
+                        .map(|c| c.name.clone())
+                        .unwrap_or_default(),
                     pending_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                     task_notify: fa_task_notify.clone(),
                     memory_stores: chat_memory_stores,

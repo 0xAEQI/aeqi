@@ -197,6 +197,8 @@ pub struct ChatEngine {
     /// If false, only explicit `/council` requests fan out to advisors.
     pub auto_council_enabled: bool,
     pub leader_name: String,
+    /// Default company to route messages to when no project_hint is given.
+    pub default_company: String,
     pub pending_tasks: Arc<Mutex<HashMap<String, PendingChatTask>>>,
     pub task_notify: Arc<tokio::sync::Notify>,
     /// Per-project memory stores for knowledge-aware chat.
@@ -503,7 +505,7 @@ impl ChatEngine {
         let scoped_project = msg
             .project_hint
             .clone()
-            .unwrap_or_else(|| self.leader_name.clone());
+            .unwrap_or_else(|| self.default_company.clone());
 
         // Register channel.
         self.ensure_channel_registered(msg).await;
@@ -1540,6 +1542,7 @@ mod tests {
             task_notify: Arc::new(tokio::sync::Notify::new()),
             memory_stores: HashMap::new(),
             intent_classifier: None,
+                    default_company: "test".to_string(),
         };
 
         (engine, project, registry, project_dir, conv_dir, conv_path)
@@ -1758,6 +1761,7 @@ mod tests {
             task_notify: Arc::new(tokio::sync::Notify::new()),
             memory_stores: HashMap::new(),
             intent_classifier: None,
+                    default_company: "test".to_string(),
         };
 
         let msg = ChatMessage {
@@ -1956,6 +1960,7 @@ mod tests {
             task_notify: Arc::new(tokio::sync::Notify::new()),
             memory_stores: HashMap::new(),
             intent_classifier: None,
+                    default_company: "test".to_string(),
         };
 
         // Without a department hint, project-only scope returns None (no restriction).

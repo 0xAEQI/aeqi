@@ -91,8 +91,8 @@ aeqi-graph = "/home/claudedev/aeqi-graph"
 unifutures = "/home/claudedev/unifutures"
 
 [team]
-leader = "shadow"
-agents = ["shadow"]
+leader = "assistant"
+agents = ["assistant"]
 router_model = "stepfun/step-3.5-flash:free"
 router_cooldown_secs = 60
 max_background_cost_usd = 0.0
