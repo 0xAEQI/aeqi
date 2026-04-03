@@ -1,5 +1,7 @@
 import { motion } from "framer-motion";
 import { Check } from "lucide-react";
+import { GlowCard } from "./GlowCard";
+import { WordReveal } from "./TextReveal";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 24 },
@@ -79,13 +81,7 @@ const tiers: Tier[] = [
   },
 ];
 
-function PricingCard({
-  tier,
-  index,
-}: {
-  tier: Tier;
-  index: number;
-}) {
+function PricingCard({ tier, index }: { tier: Tier; index: number }) {
   const staggerBase = 0.15;
   const delay = tier.highlighted
     ? staggerBase
@@ -93,21 +89,10 @@ function PricingCard({
       ? staggerBase + 0.08
       : staggerBase + 0.16;
 
-  const card = (
-    <motion.div
-      className={`relative flex flex-col rounded-2xl p-8 transition-transform duration-300 hover:scale-[1.02] ${
-        tier.highlighted
-          ? "bg-white/[0.03] shadow-2xl shadow-indigo-500/5"
-          : "bg-white/[0.02] border border-white/[0.06]"
-      }`}
-      variants={fadeUp}
-      initial="hidden"
-      whileInView="visible"
-      viewport={{ once: true, margin: "-60px" }}
-      custom={delay}
-    >
+  const cardContent = (
+    <div className="p-8 flex flex-col h-full">
       {tier.badge && (
-        <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-20">
           <span className="px-3 py-1 text-[10px] font-medium tracking-[0.15em] uppercase bg-gradient-to-r from-indigo-500 to-teal-400 text-white rounded-full">
             {tier.badge}
           </span>
@@ -136,9 +121,7 @@ function PricingCard({
           <li key={feature} className="flex items-start gap-3">
             <Check
               className={`w-4 h-4 mt-0.5 shrink-0 ${
-                tier.highlighted
-                  ? "text-teal-400/70"
-                  : "text-white/20"
+                tier.highlighted ? "text-teal-400/70" : "text-white/20"
               }`}
               strokeWidth={2}
             />
@@ -152,9 +135,10 @@ function PricingCard({
       {tier.highlighted ? (
         <a
           href={tier.href}
-          className="relative block w-full py-3 rounded-lg text-center text-[13px] font-medium text-white overflow-hidden transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98]"
+          className="group relative block w-full py-3 rounded-lg text-center text-[13px] font-medium text-white overflow-hidden transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98]"
         >
           <span className="absolute inset-0 bg-gradient-to-r from-indigo-500 to-teal-400 rounded-lg" />
+          <span className="absolute inset-0 bg-gradient-to-r from-indigo-400 to-teal-300 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
           <span className="relative z-10">{tier.cta}</span>
         </a>
       ) : (
@@ -165,18 +149,44 @@ function PricingCard({
           {tier.cta}
         </a>
       )}
-    </motion.div>
+    </div>
   );
 
   if (tier.highlighted) {
     return (
-      <div className="relative rounded-2xl p-px bg-gradient-to-br from-indigo-500 to-teal-400 lg:-mt-4 lg:mb-4">
-        {card}
-      </div>
+      <motion.div
+        className="relative lg:-mt-4 lg:mb-4"
+        variants={fadeUp}
+        initial="hidden"
+        whileInView="visible"
+        viewport={{ once: true, margin: "-60px" }}
+        custom={delay}
+      >
+        <div className="rounded-2xl p-px bg-gradient-to-br from-indigo-500 to-teal-400">
+          <GlowCard
+            className="shadow-2xl shadow-indigo-500/5"
+            glowColor="rgba(45, 212, 191, 0.12)"
+          >
+            {cardContent}
+          </GlowCard>
+        </div>
+      </motion.div>
     );
   }
 
-  return card;
+  return (
+    <motion.div
+      variants={fadeUp}
+      initial="hidden"
+      whileInView="visible"
+      viewport={{ once: true, margin: "-60px" }}
+      custom={delay}
+    >
+      <GlowCard>
+        {cardContent}
+      </GlowCard>
+    </motion.div>
+  );
 }
 
 function FlowDiagram() {
@@ -189,15 +199,15 @@ function FlowDiagram() {
       viewport={{ once: true, margin: "-40px" }}
       custom={0.3}
     >
-      <span className="px-3 py-1.5 border border-white/[0.06] rounded">
+      <span className="px-3 py-1.5 border border-white/[0.06] rounded bg-white/[0.02]">
         Your Credits
       </span>
       <span className="text-white/10">&rarr;</span>
-      <span className="px-3 py-1.5 border border-white/[0.06] rounded">
+      <span className="px-3 py-1.5 border border-white/[0.06] rounded bg-white/[0.02]">
         AEQI Runtime
       </span>
       <span className="text-white/10">&rarr;</span>
-      <span className="px-3 py-1.5 border border-white/[0.06] rounded">
+      <span className="px-3 py-1.5 border border-white/[0.06] rounded bg-white/[0.02]">
         Direct Provider API
       </span>
     </motion.div>
@@ -217,25 +227,27 @@ function TokenCalculator() {
       <h3 className="text-[13px] tracking-[0.15em] uppercase text-white/25 mb-6 text-center">
         Estimate your usage
       </h3>
-      <div className="border border-white/[0.06] bg-white/[0.02] rounded-xl p-6">
-        <div className="space-y-3 font-mono text-[13px] text-white/15">
-          <div className="flex items-center justify-between py-1.5 border-b border-white/[0.04]">
-            <span>1 credit</span>
-            <span className="text-white/25">=</span>
-            <span>1 LLM token</span>
-          </div>
-          <div className="flex items-center justify-between py-1.5 border-b border-white/[0.04]">
-            <span>Average agent task</span>
-            <span className="text-white/25">&asymp;</span>
-            <span>5,000 credits</span>
-          </div>
-          <div className="flex items-center justify-between py-1.5">
-            <span>Pro plan</span>
-            <span className="text-white/25">&asymp;</span>
-            <span>100 agent tasks/month</span>
+      <GlowCard glowColor="rgba(99, 102, 241, 0.08)">
+        <div className="p-6">
+          <div className="space-y-3 font-mono text-[13px] text-white/15">
+            <div className="flex items-center justify-between py-1.5 border-b border-white/[0.04]">
+              <span>1 credit</span>
+              <span className="text-white/25">=</span>
+              <span>1 LLM token</span>
+            </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-white/[0.04]">
+              <span>Average agent task</span>
+              <span className="text-white/25">&asymp;</span>
+              <span>5,000 credits</span>
+            </div>
+            <div className="flex items-center justify-between py-1.5">
+              <span>Pro plan</span>
+              <span className="text-white/25">&asymp;</span>
+              <span>100 agent tasks/month</span>
+            </div>
           </div>
         </div>
-      </div>
+      </GlowCard>
     </motion.div>
   );
 }
@@ -254,16 +266,13 @@ export function Pricing() {
         >
           Credits
         </motion.p>
-        <motion.h2
-          className="text-3xl sm:text-4xl font-light text-white/90 leading-snug mb-6"
-          variants={fadeUp}
-          initial="hidden"
-          whileInView="visible"
-          viewport={{ once: true, margin: "-40px" }}
-          custom={0.1}
-        >
-          Pay for what you use
-        </motion.h2>
+        <h2 className="text-3xl sm:text-4xl font-light leading-snug mb-6">
+          <WordReveal
+            text="Pay for what you use"
+            className="text-white/90"
+            stagger={0.07}
+          />
+        </h2>
         <motion.p
           className="text-[15px] text-white/30 leading-relaxed max-w-lg mx-auto"
           variants={fadeUp}

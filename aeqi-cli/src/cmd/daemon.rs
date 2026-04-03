@@ -86,7 +86,14 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 }
                 Err(e) => warn!(error = %e, "failed to initialize notes"),
             }
-            match SessionStore::open(&data_dir.join("conversations.db")) {
+            // Try sessions.db first, fall back to conversations.db for migration.
+            let sessions_path = data_dir.join("sessions.db");
+            let legacy_path = data_dir.join("conversations.db");
+            if !sessions_path.exists() && legacy_path.exists() {
+                let _ = std::fs::rename(&legacy_path, &sessions_path);
+                info!("migrated conversations.db → sessions.db");
+            }
+            match SessionStore::open(&sessions_path) {
                 Ok(cs) => {
                     let cs = Arc::new(cs);
                     registry_inner.session_store = Some(cs);

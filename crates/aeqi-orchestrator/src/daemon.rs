@@ -3405,22 +3405,7 @@ impl Daemon {
                                 None
                             };
 
-                            // Session file for checkpoint persistence.
-                            let session_dir = std::env::var("AEQI_DATA_DIR").unwrap_or_else(|_| {
-                                dirs::home_dir()
-                                    .unwrap_or_else(|| PathBuf::from("/tmp"))
-                                    .join(".aeqi")
-                                    .to_string_lossy()
-                                    .to_string()
-                            });
-                            let session_file = PathBuf::from(&session_dir)
-                                .join("sessions")
-                                .join(format!("{}.json", agent_hint));
-                            let _ = std::fs::create_dir_all(
-                                session_file.parent().unwrap_or(&PathBuf::from("/tmp")),
-                            );
-
-                            // Build agent config with entity_id + session_file.
+                            // Session state persists via session store (DB), not files.
                             let context_window =
                                 aeqi_providers::context_window_for_model(&default_model);
                             let agent_config = aeqi_core::AgentConfig {
@@ -3429,7 +3414,6 @@ impl Daemon {
                                 name: agent_hint.clone(),
                                 context_window,
                                 entity_id: agent_uuid.clone(),
-                                session_file: Some(session_file),
                                 ..Default::default()
                             };
 

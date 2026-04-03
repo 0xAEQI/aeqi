@@ -8,6 +8,8 @@ import {
   Network,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { GlowCard, GlowCardGrid } from "./GlowCard";
+import { WordReveal } from "./TextReveal";
 
 const PROBLEMS = [
   "Stateless sessions, no continuity",
@@ -70,36 +72,33 @@ const FEATURES: Feature[] = [
   },
 ];
 
-function FeatureCard({
-  feature,
-  index,
-}: {
-  feature: Feature;
-  index: number;
-}) {
+function FeatureCard({ feature, index }: { feature: Feature; index: number }) {
   const Icon = feature.icon;
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 30 }}
       whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: "-100px" }}
+      viewport={{ once: true, margin: "-80px" }}
       transition={{
         duration: 0.6,
-        ease: [0.25, 0.46, 0.45, 0.94],
-        delay: index * 0.1,
+        ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number],
+        delay: index * 0.08,
       }}
-      className="group bg-white/[0.02] border border-white/[0.06] rounded-xl p-8 hover:bg-white/[0.04] hover:border-white/[0.1] transition-all duration-300"
     >
-      <div className="relative mb-6 inline-flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500/10 to-teal-400/10 border border-white/[0.06] group-hover:shadow-[0_0_20px_rgba(99,102,241,0.15)] transition-shadow duration-300">
-        <Icon className="w-5 h-5 text-white/40 group-hover:text-white/60 transition-colors duration-300" />
-      </div>
-      <h3 className="text-[15px] font-medium text-white/60 mb-3">
-        {feature.title}
-      </h3>
-      <p className="text-[14px] text-white/25 leading-relaxed">
-        {feature.description}
-      </p>
+      <GlowCard className="h-full" glowColor="rgba(99, 102, 241, 0.12)">
+        <div className="p-8">
+          <div className="relative mb-6 inline-flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500/10 to-teal-400/10 border border-white/[0.06]">
+            <Icon className="w-5 h-5 text-white/40" />
+          </div>
+          <h3 className="text-[15px] font-medium text-white/60 mb-3">
+            {feature.title}
+          </h3>
+          <p className="text-[14px] text-white/25 leading-relaxed">
+            {feature.description}
+          </p>
+        </div>
+      </GlowCard>
     </motion.div>
   );
 }
@@ -118,17 +117,19 @@ export function Features() {
           The Problem
         </motion.p>
 
-        <motion.h2
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-100px" }}
-          transition={{ duration: 0.6, delay: 0.1 }}
-          className="text-3xl sm:text-4xl font-light text-white/90 leading-snug mb-16"
-        >
-          AI agents forget everything
-          <br />
-          <span className="text-white/30">between sessions</span>
-        </motion.h2>
+        <h2 className="text-3xl sm:text-4xl font-light leading-snug mb-16">
+          <WordReveal
+            text="AI agents forget everything"
+            className="text-white/90 block"
+            stagger={0.06}
+          />
+          <WordReveal
+            text="between sessions"
+            className="text-white/30 block"
+            delay={0.3}
+            stagger={0.06}
+          />
+        </h2>
 
         <motion.div
           initial={{ opacity: 0, y: 30 }}
@@ -157,7 +158,7 @@ export function Features() {
             <ul className="space-y-3">
               {SOLUTIONS.map((item) => (
                 <li key={item} className="text-white/50 flex items-start gap-3">
-                  <span className="mt-[7px] block w-1 h-1 rounded-full bg-gradient-to-r from-indigo-500 to-teal-400 shrink-0" />
+                  <span className="mt-[7px] block w-1.5 h-1.5 rounded-full bg-gradient-to-r from-indigo-500 to-teal-400 shrink-0" />
                   {item}
                 </li>
               ))}
@@ -179,15 +180,9 @@ export function Features() {
           Capabilities
         </motion.p>
 
-        <motion.h2
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-100px" }}
-          transition={{ duration: 0.6, delay: 0.1 }}
-          className="text-3xl font-light text-white/90 mb-3"
-        >
-          Built for production
-        </motion.h2>
+        <h2 className="text-3xl font-light text-white/90 mb-3">
+          <WordReveal text="Built for production" stagger={0.07} />
+        </h2>
 
         <motion.p
           initial={{ opacity: 0, y: 20 }}
@@ -199,11 +194,11 @@ export function Features() {
           Four primitives. Infinite compositions.
         </motion.p>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <GlowCardGrid columns={3} className="gap-5">
           {FEATURES.map((feature, i) => (
             <FeatureCard key={feature.title} feature={feature} index={i} />
           ))}
-        </div>
+        </GlowCardGrid>
       </div>
     </section>
   );
