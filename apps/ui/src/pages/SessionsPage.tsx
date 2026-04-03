@@ -52,10 +52,13 @@ export default function SessionsPage() {
   useEffect(() => {
     const list: SessionInfo[] = [];
 
-    // Perpetual session is always first
+    // Perpetual session is always first — use display name if available
+    const perpetualName = scope
+      ? scope.charAt(0).toUpperCase() + scope.slice(1)
+      : "Assistant";
     list.push({
       id: "perpetual",
-      name: scope || "Assistant",
+      name: perpetualName,
       type: "perpetual",
       status: "live",
     });

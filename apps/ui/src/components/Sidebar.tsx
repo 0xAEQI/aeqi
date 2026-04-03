@@ -85,15 +85,18 @@ function DeptGroupView({
       </div>
       {!isCollapsed && (
         <>
-          {node.agents.map((agent) => (
-            <div
-              key={agent.id}
-              className={`agent-row dept-agent${selectedAgent === agent.name ? " active" : ""}`}
-              onClick={() => onSelectAgent(agent.name)}
-            >
-              {agent.display_name || agent.name}
-            </div>
-          ))}
+          {node.agents.map((agent) => {
+            const label = agent.display_name || agent.name;
+            return (
+              <div
+                key={agent.id}
+                className={`agent-row dept-agent${selectedAgent === label ? " active" : ""}`}
+                onClick={() => onSelectAgent(label)}
+              >
+                {label}
+              </div>
+            );
+          })}
           {node.children.map((child) => (
             <DeptGroupView
               key={child.dept.id}
@@ -194,15 +197,18 @@ export default function AgentNav() {
         <div className="agent-nav-panel-title">Agents</div>
         <div className="agent-nav-panel-add" onClick={() => navigate("/agents")}>+</div>
 
-        {rootAgents.map((agent) => (
-          <div
-            key={agent.id}
-            className={`agent-row${selectedAgent === agent.name ? " active" : ""}`}
-            onClick={() => handleSelectAgent(agent.name)}
-          >
-            {agent.display_name || agent.name}
-          </div>
-        ))}
+        {rootAgents.map((agent) => {
+          const label = agent.display_name || agent.name;
+          return (
+            <div
+              key={agent.id}
+              className={`agent-row${selectedAgent === label ? " active" : ""}`}
+              onClick={() => handleSelectAgent(label)}
+            >
+              {label}
+            </div>
+          );
+        })}
 
         {tree.map((node) => (
           <DeptGroupView
