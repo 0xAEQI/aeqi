@@ -767,7 +767,11 @@ pub fn build_orchestration_tools(
     event_broadcaster: Option<Arc<crate::EventBroadcaster>>,
 ) -> Vec<Arc<dyn Tool>> {
     let leader_name = registry.leader_agent_name.clone();
-    let default_project = registry.config_project_names.first().cloned().unwrap_or_else(|| "*".to_string());
+    let default_project = registry
+        .config_project_names
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "*".to_string());
     let mut delegate_tool =
         crate::unified_delegate::UnifiedDelegateTool::new(dispatch_bus, leader_name.clone());
     if let Some(broadcaster) = event_broadcaster {

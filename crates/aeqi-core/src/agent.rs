@@ -1578,7 +1578,8 @@ impl Agent {
                     // Search both domain and entity scopes, merge results
                     let mut all_entries = Vec::new();
 
-                    let domain_q = MemoryQuery::new(&tool_output, 3).with_scope(MemoryScope::Domain);
+                    let domain_q =
+                        MemoryQuery::new(&tool_output, 3).with_scope(MemoryScope::Domain);
                     if let Ok(entries) = mem.search(&domain_q).await {
                         all_entries.extend(entries);
                     }
@@ -1591,7 +1592,11 @@ impl Agent {
                     }
 
                     // Deduplicate by id, keep highest score, truncate to 5
-                    all_entries.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+                    all_entries.sort_by(|a, b| {
+                        b.score
+                            .partial_cmp(&a.score)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
                     all_entries.dedup_by(|a, b| a.id == b.id);
                     all_entries.truncate(5);
 
@@ -1746,7 +1751,11 @@ impl Agent {
         }
 
         // Deduplicate by id, keep highest score, truncate to 5
-        all_entries.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        all_entries.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         all_entries.dedup_by(|a, b| a.id == b.id);
         all_entries.truncate(5);
 
