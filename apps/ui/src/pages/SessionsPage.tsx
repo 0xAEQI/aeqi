@@ -4,31 +4,15 @@ import { api } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
 import { useAuthStore } from "@/store/auth";
 
-const THINKING_WORDS = [
-  "thinking",
-  "reasoning",
-  "analyzing",
-  "considering",
-  "processing",
-  "evaluating",
-  "composing",
-  "reflecting",
-];
-
-function ThinkingIndicator() {
-  const [wordIndex, setWordIndex] = useState(0);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setWordIndex((i) => (i + 1) % THINKING_WORDS.length);
-    }, 2000);
-    return () => clearInterval(interval);
-  }, []);
+function ThinkingIndicator({ tools }: { tools: string[] }) {
+  const label = tools.length > 0
+    ? tools[tools.length - 1]
+    : "";
 
   return (
     <div className="session-thinking">
       <span className="session-thinking-dot" />
-      <span className="session-thinking-word">{THINKING_WORDS[wordIndex]}</span>
+      {label && <span className="session-thinking-word">{label}</span>}
     </div>
   );
 }
@@ -313,7 +297,7 @@ export default function SessionsPage() {
           ))}
 
           {/* Thinking indicator — shows when streaming but no text yet */}
-          {streaming && !streamText && <ThinkingIndicator />}
+          {streaming && !streamText && <ThinkingIndicator tools={activeTools} />}
 
           {/* Streaming text */}
           {streamText && (
