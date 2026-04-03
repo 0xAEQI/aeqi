@@ -372,7 +372,6 @@ a:hover {
 .agent-nav {
   width: 200px;
   background: rgba(255,255,255,0.01);
-  border-right: 1px solid rgba(255,255,255,0.04);
   padding: 10px 6px;
   display: flex;
   flex-direction: column;
@@ -616,6 +615,8 @@ a:hover {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: #121212;
+  border-radius: 12px 0 0 12px;
 }
 
 /* ── Floating Nav Bar (inside content scroll) ── */
@@ -624,12 +625,11 @@ a:hover {
   align-items: center;
   justify-content: space-between;
   height: 40px;
-  background: rgba(255,255,255,0.02);
-  border: 1px solid rgba(255,255,255,0.04);
-  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 10px;
   padding: 0 4px;
   gap: 2px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   position: sticky;
   top: 0;
   z-index: 10;
@@ -2059,9 +2059,6 @@ a:hover {
 }
 
 .content-panel {
-  background: rgba(255,255,255,0.015);
-  border-radius: 12px;
-  padding: 24px;
   flex: 1;
   min-height: 0;
   display: flex;
