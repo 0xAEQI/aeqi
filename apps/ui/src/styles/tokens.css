@@ -391,8 +391,8 @@ a:hover {
 
 .agent-nav-bar {
   background: var(--bg-surface);
-  border-radius: 10px;
-  height: 40px;
+  border-radius: 14px;
+  height: 52px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -701,10 +701,10 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 40px;
-  background: var(--bg-base);
-  border-radius: 10px;
-  padding: 0 4px;
+  height: 52px;
+  background: var(--bg-surface);
+  border-radius: 14px;
+  padding: 0 6px;
   gap: 2px;
   margin-bottom: 16px;
   position: sticky;
@@ -745,13 +745,13 @@ a:hover {
 }
 
 .floating-nav-btn {
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-muted);
-  border-radius: 8px;
+  border-radius: 12px;
   cursor: pointer;
   transition: all 0.12s ease;
   flex-shrink: 0;
