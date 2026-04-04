@@ -43,19 +43,17 @@
   background: var(--bg-elevated);
 }
 
-.sidebar-logo {
-  font-size: var(--font-size-lg);
+.sidebar-brand {
+  font-size: 17px;
   font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: -0.02em;
+  letter-spacing: 0.05em;
+  text-decoration: none;
+  transition: opacity 0.15s;
 }
-
-.sidebar-title {
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  color: var(--text-secondary);
-  letter-spacing: 0.04em;
-}
+.sidebar-brand:hover { opacity: 0.8; }
+.brand-red { color: #c0392b; }
+.brand-dot { color: rgba(255,255,255,0.25); }
+.brand-white { color: var(--text-primary); }
 
 .left-sidebar-body {
   flex: 1;

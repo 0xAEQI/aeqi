@@ -45,8 +45,9 @@ export default function AppLayout() {
         {/* Left sidebar: Agent tree */}
         <div className="left-sidebar">
           <div className="sidebar-header">
-            <span className="sidebar-logo">AE</span>
-            <span className="sidebar-title">AEQI</span>
+            <a href="/" className="sidebar-brand">
+              <span className="brand-red">aeqi</span><span className="brand-dot">.</span><span className="brand-white">ai</span>
+            </a>
             <span className="sidebar-search-btn" onClick={openSearch} title="Search (Cmd+K)">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="7" cy="7" r="4.5" />
