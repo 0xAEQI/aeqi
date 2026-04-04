@@ -567,21 +567,26 @@
   background: var(--bg-surface);
 }
 
-/* User profile — avatar & text (used in footer bar) */
+/* User profile — avatar, name & token count (used in footer bar) */
 
 .user-profile-avatar {
   width: 28px;
   height: 28px;
   border-radius: var(--radius-full);
-  background: var(--bg-overlay);
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-2xs);
-  font-weight: 600;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  transition: box-shadow 0.15s ease;
+}
+
+.left-sidebar-footer:hover .user-profile-avatar {
+  box-shadow: 0 0 0 2px var(--bg-base), 0 0 8px rgba(255, 255, 255, 0.12);
+}
+
+.user-avatar-svg {
+  display: block;
 }
 
 .user-profile-name {
@@ -593,55 +598,13 @@
   text-overflow: ellipsis;
 }
 
-.user-profile-chevron {
+.user-profile-tokens {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
   color: var(--text-muted);
+  white-space: nowrap;
   flex-shrink: 0;
-}
-
-.user-profile-menu {
-  position: absolute;
-  bottom: 100%;
-  left: 8px;
-  right: 8px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 4px;
-  margin-bottom: 4px;
-  box-shadow: var(--shadow-md);
-  z-index: 100;
-}
-
-.user-profile-menu-item {
-  display: block;
-  width: 100%;
-  padding: 6px 10px;
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary);
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  text-align: left;
-  font-family: var(--font-sans);
-  text-decoration: none;
-  transition: all 0.1s ease;
-}
-.user-profile-menu-item:hover {
-  background: var(--accent-bg);
-  color: var(--text-primary);
-}
-.user-profile-menu-item.danger {
-  color: var(--error);
-}
-.user-profile-menu-item.danger:hover {
-  background: rgba(248, 113, 113, 0.1);
-}
-
-.user-profile-menu-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 4px 0;
+  letter-spacing: 0.01em;
 }
 
 /* ── Content Area ── */

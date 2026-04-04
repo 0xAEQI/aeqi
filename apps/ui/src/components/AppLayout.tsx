@@ -2,10 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import CompanyRail from "./CompanyRail";
 import AgentNav from "./Sidebar";
-import CompanyPatternIcon from "./CompanyPatternIcon";
+import UserAvatar from "./UserAvatar";
 import CommandPalette from "./CommandPalette";
-import { useChatStore } from "@/store/chat";
-import { useAuthStore } from "@/store/auth";
 import { useDaemonStore } from "@/store/daemon";
 import { useDaemonSocket } from "@/hooks/useDaemonSocket";
 
@@ -21,18 +19,13 @@ const NAV_ITEMS = [
 
 export default function AppLayout() {
   const navigate = useNavigate();
-  const channel = useChatStore((s) => s.channel);
-  const setChannel = useChatStore((s) => s.setChannel);
-  const logout = useAuthStore((s) => s.logout);
   const [searching, setSearching] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
 
   const fetchAll = useDaemonStore((s) => s.fetchAll);
   useEffect(() => { fetchAll(); const i = setInterval(fetchAll, 30000); return () => clearInterval(i); }, [fetchAll]);
   useDaemonSocket();
 
   const userName = localStorage.getItem("aeqi_user_name") || "Operator";
-  const initials = userName.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2) || "U";
 
   const openSearch = useCallback(() => {
     setSearching(true);
@@ -61,53 +54,20 @@ export default function AppLayout() {
   <>
     <div className="shell">
       <div className="left-sidebar">
-        <div className="left-sidebar-bar">
-          <div className="left-sidebar-bar-icon">
-            <div
-              className={`rail-icon rail-home${!channel ? " active" : ""}`}
-              onClick={() => { setChannel(null); navigate("/"); }}
-              title="AEQI"
-            >Æ</div>
-          </div>
-          {channel && (
-            <div className="left-sidebar-company" onClick={() => navigate("/")}>
-              <CompanyPatternIcon name={channel} selected />
-              <span className="scope-header-text">{channel}</span>
-            </div>
-          )}
-        </div>
         <div className="left-sidebar-body">
           <CompanyRail />
           <AgentNav />
         </div>
-        <div className="left-sidebar-footer" onClick={() => setProfileOpen(!profileOpen)}>
+        <div className="left-sidebar-footer" onClick={() => navigate("/settings")}>
           <div className="left-sidebar-bar-icon">
-            <div className="user-profile-avatar">{initials}</div>
+            <div className="user-profile-avatar">
+              <UserAvatar name={userName} size={28} />
+            </div>
           </div>
           <div className="left-sidebar-footer-info">
             <span className="user-profile-name">{userName}</span>
           </div>
-          <svg className="user-profile-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none"
-            style={{ transform: profileOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.15s ease" }}>
-            <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          {profileOpen && (
-            <div className="user-profile-menu" onClick={(e) => e.stopPropagation()}>
-              <button className="user-profile-menu-item" onClick={() => { setProfileOpen(false); navigate("/settings"); }}>
-                Settings
-              </button>
-              <button className="user-profile-menu-item" onClick={() => { setProfileOpen(false); navigate("/finance"); }}>
-                Billing
-              </button>
-              <a className="user-profile-menu-item" href="https://github.com/0xAEQI/aeqi" target="_blank" rel="noopener">
-                Docs
-              </a>
-              <div className="user-profile-menu-divider" />
-              <button className="user-profile-menu-item danger" onClick={() => { logout(); navigate("/login"); }}>
-                Log out
-              </button>
-            </div>
-          )}
+          <span className="user-profile-tokens">1.2M tokens</span>
         </div>
       </div>
       <div className="content-area">

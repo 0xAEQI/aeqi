@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useChatStore } from "@/store/chat";
 import { useDaemonStore } from "@/store/daemon";
+import CompanyPatternIcon from "./CompanyPatternIcon";
 import type { AgentRef, PersistentAgent, Department } from "@/lib/types";
 
 function Chevron({ expanded }: { expanded: boolean }) {
@@ -49,6 +50,15 @@ function buildTree(
     .filter((n) => n.agents.length > 0 || n.children.length > 0);
 }
 
+function countAgents(nodes: DeptNode[]): number {
+  let count = 0;
+  for (const n of nodes) {
+    count += n.agents.length;
+    count += countAgents(n.children);
+  }
+  return count;
+}
+
 function DeptGroupView({
   node,
   depth,
@@ -68,20 +78,19 @@ function DeptGroupView({
 }) {
   const isCollapsed = collapsed[node.dept.id] ?? false;
   const isDeptActive = selectedAgent?.id === `dept:${node.dept.id}`;
-
-  // Each depth level gets slightly more bg opacity
-  const bg = `rgba(255,255,255,${0.02 + depth * 0.01})`;
+  const totalAgents = node.agents.length + countAgents(node.children);
 
   return (
-    <div className="dept-group" style={{ background: bg }}>
+    <div className="dept-group">
       <div
         className={`dept-name${isDeptActive ? " active" : ""}`}
         onClick={() => onSelectDept(node.dept.id, node.dept.name)}
       >
-        <span className="dept-name-label">{node.dept.name}</span>
         <span className="dept-chevron" onClick={(e) => onToggle(node.dept.id, e)}>
           <Chevron expanded={!isCollapsed} />
         </span>
+        <span className="dept-name-label">{node.dept.name}</span>
+        <span className="dept-count">{totalAgents}</span>
       </div>
       {!isCollapsed && (
         <>
@@ -93,6 +102,7 @@ function DeptGroupView({
                 className={`agent-row dept-agent${selectedAgent?.id === agent.id ? " active" : ""}`}
                 onClick={() => onSelectAgent({ id: agent.id, name: agent.name, display_name: agent.display_name, project: agent.project, model: agent.model })}
               >
+                <span className="agent-dot" />
                 {label}
               </div>
             );
@@ -142,11 +152,19 @@ export default function AgentNav() {
   collectIds(tree);
   const rootAgents = filtered.filter((a) => !allDeptAgentIds.has(a.id));
 
-  const scopeName = channel || "AEQI";
+  const companyName = channel || "AEQI";
+  const isCompanyCollapsed = collapsed["__company__"] ?? false;
+  const isCompanyActive = !selectedAgent;
+  const totalAgentCount = filtered.length;
 
   const toggleDept = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setCollapsed((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const toggleCompany = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCollapsed((prev) => ({ ...prev, __company__: !prev.__company__ }));
   };
 
   const currentPath = () => {
@@ -164,40 +182,65 @@ export default function AgentNav() {
     navigate(`${currentPath()}?dept=${encodeURIComponent(name)}`);
   };
 
+  const handleSelectCompany = () => {
+    setSelectedAgent(null);
+    navigate("/");
+  };
+
   return (
     <nav className="agent-nav">
-      {/* Agents list */}
       <div className="agent-nav-panel">
-        <div className="agent-nav-panel-title">Agents</div>
-        <div className="agent-nav-panel-add" onClick={() => navigate("/agents")}>+</div>
+        {/* Company as root group */}
+        <div className="company-root-group">
+          <div
+            className={`company-root-header${isCompanyActive ? " active" : ""}`}
+            onClick={handleSelectCompany}
+          >
+            <span className="company-root-toggle" onClick={toggleCompany}>
+              <Chevron expanded={!isCompanyCollapsed} />
+            </span>
+            <CompanyPatternIcon name={companyName} selected={isCompanyActive} />
+            <span className="company-root-name">{companyName}</span>
+            <span className="dept-count">{totalAgentCount}</span>
+          </div>
 
-        {rootAgents.map((agent) => {
-          const label = agent.display_name || agent.name;
-          return (
-            <div
-              key={agent.id}
-              className={`agent-row${selectedAgent?.id === agent.id ? " active" : ""}`}
-              onClick={() => handleSelectAgent({ id: agent.id, name: agent.name, display_name: agent.display_name, project: agent.project, model: agent.model })}
-            >
-              {label}
+          {!isCompanyCollapsed && (
+            <div className="company-root-body">
+              {/* Department groups */}
+              {tree.map((node) => (
+                <DeptGroupView
+                  key={node.dept.id}
+                  node={node}
+                  depth={0}
+                  selectedAgent={selectedAgent}
+                  collapsed={collapsed}
+                  onSelectAgent={handleSelectAgent}
+                  onSelectDept={handleSelectDept}
+                  onToggle={toggleDept}
+                />
+              ))}
+
+              {/* Root agents (no department) */}
+              {rootAgents.map((agent) => {
+                const label = agent.display_name || agent.name;
+                return (
+                  <div
+                    key={agent.id}
+                    className={`agent-row${selectedAgent?.id === agent.id ? " active" : ""}`}
+                    onClick={() => handleSelectAgent({ id: agent.id, name: agent.name, display_name: agent.display_name, project: agent.project, model: agent.model })}
+                  >
+                    <span className="agent-dot" />
+                    {label}
+                  </div>
+                );
+              })}
+
+              {/* Add agent button */}
+              <div className="agent-nav-panel-add" onClick={() => navigate("/agents")}>+</div>
             </div>
-          );
-        })}
-
-        {tree.map((node) => (
-          <DeptGroupView
-            key={node.dept.id}
-            node={node}
-            depth={0}
-            selectedAgent={selectedAgent}
-            collapsed={collapsed}
-            onSelectAgent={handleSelectAgent}
-            onSelectDept={handleSelectDept}
-            onToggle={toggleDept}
-          />
-        ))}
+          )}
+        </div>
       </div>
-
     </nav>
   );
 }
