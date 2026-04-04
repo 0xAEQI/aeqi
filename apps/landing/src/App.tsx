@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { Hero } from "./components/Hero";
 import { Terminal } from "./components/Terminal";
-import { Process } from "./components/Process";
 import { CallToAction } from "./components/CallToAction";
 import { VerticalLines } from "./components/VerticalLines";
 import { motion } from "framer-motion";
@@ -103,18 +102,18 @@ function Backdrop() {
         className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat"
         style={{
           backgroundImage: "url('/bg.jpg')",
-          filter: "blur(8px) saturate(0.4) brightness(0.45)",
+          filter: "blur(6px) saturate(1.4) brightness(0.3) contrast(1.3)",
           transform: "scale(1.03)",
         }}
       />
       <div
         className="fixed inset-0 z-0"
-        style={{ background: "rgba(6, 6, 18, 0.35)", mixBlendMode: "multiply" }}
+        style={{ background: "rgba(6, 6, 18, 0.5)", mixBlendMode: "multiply" }}
       />
       <div
         className="fixed inset-0 z-0"
         style={{
-          background: "radial-gradient(ellipse 70% 60% at 50% 45%, transparent 0%, rgba(6,6,18,0.7) 100%)",
+          background: "radial-gradient(ellipse 70% 60% at 50% 45%, transparent 0%, rgba(6,6,18,0.85) 100%)",
         }}
       />
       <div
@@ -136,7 +135,6 @@ export default function App() {
       <Nav />
       <Hero />
       <Terminal />
-      <Process />
       <CallToAction />
     </div>
   );
