@@ -43,12 +43,12 @@ export function Process() {
     <section className="relative z-10 max-w-5xl mx-auto px-8 py-24">
       <motion.div {...fadeUp()} className="text-center mb-16">
         <p
-          className="text-[11px] uppercase tracking-[0.25em] text-white/15 mb-5"
+          className="text-[11px] uppercase tracking-[0.25em] text-white/25 mb-5"
           style={{ fontFamily: "'Space Grotesk', sans-serif" }}
         >
           Four Tables
         </p>
-        <p className="text-[15px] text-white/25 max-w-sm mx-auto leading-relaxed">
+        <p className="text-[15px] text-white/35 max-w-sm mx-auto leading-relaxed">
           The entire system. No schema for what you're building.
         </p>
       </motion.div>
@@ -78,7 +78,7 @@ export function Process() {
                 </span>
                 {p.word.slice(1)}
               </h3>
-              <p className="text-[13px] leading-relaxed text-white/20">
+              <p className="text-[13px] leading-relaxed text-white/35">
                 {p.desc}
               </p>
             </div>

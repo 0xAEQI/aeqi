@@ -28,7 +28,7 @@ export function Terminal() {
           <div className="w-[7px] h-[7px] rounded-full bg-white/[0.08]" />
           <div className="w-[7px] h-[7px] rounded-full bg-white/[0.08]" />
           <span
-            className="ml-2 text-[11px] text-white/15"
+            className="ml-2 text-[11px] text-white/25"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             aeqi
@@ -51,14 +51,14 @@ export function Terminal() {
               >
                 <span
                   className="text-[11px] w-7 shrink-0 text-right"
-                  style={{ color: line.who === "you" ? "rgba(255,255,255,0.35)" : "#c0392b80" }}
+                  style={{ color: line.who === "you" ? "rgba(255,255,255,0.5)" : "#c0392b99" }}
                 >
                   {line.who}
                 </span>
                 <span
                   className="text-[12px]"
                   style={{
-                    color: line.who === "you" ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.2)",
+                    color: line.who === "you" ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.35)",
                   }}
                 >
                   {line.text}

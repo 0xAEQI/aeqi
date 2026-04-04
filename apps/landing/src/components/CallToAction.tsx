@@ -29,7 +29,7 @@ export function CallToAction() {
           </a>
           <a
             href="https://github.com/0xAEQI/aeqi"
-            className="text-white/30 hover:text-white/60 transition-colors text-[14px]"
+            className="text-white/40 hover:text-white/70 transition-colors text-[14px]"
           >
             Source
           </a>
@@ -37,7 +37,7 @@ export function CallToAction() {
 
         <motion.p
           {...fadeUp(0.1)}
-          className="text-[13px] text-white/15 tracking-wide"
+          className="text-[13px] text-white/30 tracking-wide"
         >
           Open source · Self-hosted · Built in Rust
         </motion.p>
@@ -45,7 +45,7 @@ export function CallToAction() {
 
       <div className="h-px bg-white/[0.04] mb-6" />
       <footer
-        className="flex items-center justify-between text-[11px] text-white/12 pb-6"
+        className="flex items-center justify-between text-[11px] text-white/20 pb-6"
         style={{ fontFamily: "'Space Grotesk', sans-serif" }}
       >
         <span className="tracking-[0.08em]">aeqi.ai</span>

@@ -56,14 +56,14 @@ export function Hero() {
             <span style={{ color: w.color, textShadow: `0 0 30px ${w.color}40` }}>
               {w.text[0]}
             </span>
-            <span className="text-white/25">{w.text.slice(1)}</span>
+            <span className="text-white/40">{w.text.slice(1)}</span>
           </motion.span>
         ))}
       </motion.h1>
 
       {/* Tagline */}
       <motion.p
-        className="mt-10 text-[15px] md:text-[17px] text-white/30 tracking-wide text-center relative z-10"
+        className="mt-10 text-[15px] md:text-[17px] text-white/45 tracking-wide text-center relative z-10"
         style={{ fontFamily: "'Inter', sans-serif" }}
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}

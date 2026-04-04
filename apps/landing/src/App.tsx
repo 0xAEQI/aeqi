@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Hero } from "./components/Hero";
 import { Terminal } from "./components/Terminal";
 import { Process } from "./components/Process";
@@ -127,57 +127,11 @@ function Backdrop() {
   );
 }
 
-/**
- * Cursor reveal — a clear version of bg.jpg masked to a radial gradient
- * that follows the mouse. Sits BELOW the vertical lines canvas (z-[1] vs z-2),
- * so the lines occlude the reveal and you only see the image between the lines.
- */
-function CursorReveal() {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-
-    const update = (e: MouseEvent) => {
-      const mask = `radial-gradient(circle 220px at ${e.clientX}px ${e.clientY}px, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.4) 40%, transparent 100%)`;
-      el.style.maskImage = mask;
-      el.style.webkitMaskImage = mask;
-    };
-
-    const hide = () => {
-      el.style.maskImage = "radial-gradient(circle 220px at -1000px -1000px, black 0%, transparent 100%)";
-      el.style.webkitMaskImage = el.style.maskImage;
-    };
-
-    window.addEventListener("mousemove", update);
-    window.addEventListener("mouseleave", hide);
-    return () => {
-      window.removeEventListener("mousemove", update);
-      window.removeEventListener("mouseleave", hide);
-    };
-  }, []);
-
-  return (
-    <div
-      ref={ref}
-      className="fixed inset-0 z-[1] bg-cover bg-center bg-no-repeat pointer-events-none"
-      style={{
-        backgroundImage: "url('/bg.jpg')",
-        filter: "saturate(0.55) brightness(0.65)",
-        transform: "scale(1.03)",
-        maskImage: "radial-gradient(circle 220px at -1000px -1000px, black 0%, transparent 100%)",
-        WebkitMaskImage: "radial-gradient(circle 220px at -1000px -1000px, black 0%, transparent 100%)",
-      }}
-    />
-  );
-}
 
 export default function App() {
   return (
     <div className="relative min-h-screen">
       <Backdrop />
-      <CursorReveal />
       <VerticalLines />
       <Nav />
       <Hero />
