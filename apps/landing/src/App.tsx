@@ -16,8 +16,8 @@ function Nav() {
       {...fade(0.1)}
     >
       <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-        <a href="/" className="text-[22px] font-bold tracking-tighter text-black">
-          æ
+        <a href="/" className="text-[16px] font-medium tracking-tight text-black/40">
+          aeqi.ai
         </a>
         <div className="flex items-center gap-5">
           <a
@@ -57,18 +57,11 @@ function Hero() {
   return (
     <section className="pt-36 pb-24 px-6">
       <div className="max-w-3xl mx-auto text-center">
-        <motion.div {...fade(0.1)} className="mb-8">
+        <motion.div {...fade(0.1)}>
           <span className="text-[120px] md:text-[180px] font-bold tracking-tighter leading-none text-black select-none">
             æ
           </span>
         </motion.div>
-
-        <motion.h1
-          className="text-3xl md:text-5xl font-bold tracking-tight text-black leading-[1.08]"
-          {...fade(0.2)}
-        >
-          aeqi
-        </motion.h1>
 
         <motion.p
           className="mt-5 text-lg md:text-xl text-black/40 tracking-wide"
@@ -110,7 +103,7 @@ function Footer() {
   return (
     <footer className="border-t border-black/5 py-8 px-6">
       <div className="max-w-5xl mx-auto flex items-center justify-between text-[13px] text-black/25">
-        <span className="font-medium tracking-tight">aeqi</span>
+        <span className="font-medium tracking-tight">aeqi.ai</span>
         <div className="flex items-center gap-5">
           <a
             href="https://github.com/0xAEQI/aeqi"
