@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 use tracing::{debug, info, warn};
 
-use crate::registry::CompanyRegistry;
 use aeqi_core::traits::{Channel, OutgoingMessage};
 
 /// Session alarm and progress heartbeat system.
@@ -19,7 +18,7 @@ use aeqi_core::traits::{Channel, OutgoingMessage};
 pub struct ProgressTracker {
     pub channel: Arc<dyn Channel>,
     pub chat_id: i64,
-    pub registry: Arc<CompanyRegistry>,
+    pub scheduler: Arc<crate::scheduler::Scheduler>,
     pub checkin_interval: Duration,
     pub alarm_interval: Duration,
     pub min_flood_interval: Duration,
@@ -50,9 +49,21 @@ impl ProgressTracker {
                 _ = ticker.tick() => {}
             }
 
-            let status = self.registry.status().await;
             let elapsed = session_start.elapsed();
-            let (total_working, total_pending, active_projects) = aggregate_status(&status);
+
+            let (total_working, total_pending, active_projects) = {
+                let active = self.scheduler.active_count().await;
+                let counts = self.scheduler.agent_counts().await;
+                let project_str = match counts.len() {
+                    0 => "no agents".to_string(),
+                    1 => counts.keys().next().unwrap().clone(),
+                    n => format!("{n} agents"),
+                };
+                // Scheduler only tracks running workers; treat active as "working",
+                // pending is 0 (tasks are managed elsewhere now).
+                (active, 0usize, project_str)
+            };
+
             let is_active = total_working > 0 || total_pending > 0;
 
             let can_send = last_sent.is_none_or(|t| t.elapsed() >= self.min_flood_interval);
@@ -149,31 +160,6 @@ impl ProgressTracker {
 
         info!("session tracker stopped");
     }
-}
-
-/// Summarise total working/pending counts and active project names.
-fn aggregate_status(status: &crate::registry::RegistryStatus) -> (usize, usize, String) {
-    let mut total_working = 0usize;
-    let mut total_pending = 0usize;
-    let mut active_names: Vec<&str> = Vec::new();
-
-    for d in &status.projects {
-        let working = d.workers_working + d.workers_bonded;
-        let pending = d.open_tasks + d.ready_tasks;
-        if working > 0 || pending > 0 {
-            active_names.push(&d.name);
-        }
-        total_working += working;
-        total_pending += pending;
-    }
-
-    let projects_str = match active_names.len() {
-        0 => "no projects".to_string(),
-        1 => active_names[0].to_string(),
-        n => format!("{n} projects"),
-    };
-
-    (total_working, total_pending, projects_str)
 }
 
 fn fmt_duration(d: Duration) -> String {

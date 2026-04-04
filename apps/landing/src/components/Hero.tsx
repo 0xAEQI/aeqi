@@ -1,10 +1,10 @@
 import { motion } from "framer-motion";
 
-const words = [
-  { text: "Ask", color: "#818cf8", direction: 1 },
-  { text: "Execute", color: "#67e8f9", direction: -1 },
-  { text: "Question", color: "#c084fc", direction: 1 },
-  { text: "Improve", color: "#34d399", direction: -1 },
+const primitives = [
+  { text: "Agent", color: "#818cf8", direction: 1 },
+  { text: "Event", color: "#67e8f9", direction: -1 },
+  { text: "Quest", color: "#c084fc", direction: 1 },
+  { text: "Insight", color: "#34d399", direction: -1 },
 ];
 
 export function Hero() {
@@ -21,7 +21,7 @@ export function Hero() {
         }
       `}</style>
 
-      {/* Ambient glow orb behind hero */}
+      {/* Ambient glow orb */}
       <div
         className="absolute w-[600px] h-[600px] rounded-full pointer-events-none"
         style={{
@@ -37,7 +37,7 @@ export function Hero() {
         animate={{ opacity: 1 }}
         transition={{ duration: 1, ease: "easeOut" }}
       >
-        {words.map((w, i) => (
+        {primitives.map((w, i) => (
           <motion.span
             className="block whitespace-nowrap text-5xl md:text-7xl lg:text-[88px] font-bold tracking-tight"
             key={i}
@@ -61,46 +61,15 @@ export function Hero() {
         ))}
       </motion.h1>
 
-      {/* AEQI acronym reveal */}
-      <motion.div
-        className="mt-8 flex items-center gap-1 relative z-10"
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8, delay: 0.8, ease: "easeOut" }}
-      >
-        {words.map((w, i) => (
-          <span
-            key={i}
-            className="text-[22px] font-bold tracking-[0.04em]"
-            style={{
-              color: w.color,
-              fontFamily: "'Space Grotesk', sans-serif",
-              textShadow: `0 0 20px ${w.color}30`,
-            }}
-          >
-            {w.text[0]}
-          </span>
-        ))}
-      </motion.div>
-
+      {/* Tagline */}
       <motion.p
-        className="mt-6 text-[15px] md:text-[17px] text-white/30 tracking-wide text-center max-w-md relative z-10"
+        className="mt-10 text-[15px] md:text-[17px] text-white/30 tracking-wide text-center relative z-10"
         style={{ fontFamily: "'Inter', sans-serif" }}
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, delay: 1.0, ease: "easeOut" }}
       >
-        An agent orchestration kernel that grows from conversation.
-      </motion.p>
-
-      <motion.p
-        className="mt-2 text-[13px] text-white/15 tracking-wide relative z-10"
-        style={{ fontFamily: "'Inter', sans-serif" }}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.8, delay: 1.2 }}
-      >
-        Open source · Self-hosted · Built in Rust
+        Intelligence from four primitives.
       </motion.p>
 
       {/* Scroll indicator */}

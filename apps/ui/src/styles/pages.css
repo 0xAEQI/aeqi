@@ -293,7 +293,8 @@
   overflow: hidden;
   padding: 16px;
   background: var(--bg-elevated);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-2xl);
+  border: 1px solid rgba(255, 255, 255, 0.03);
 }
 
 .session-meta-bar {
@@ -418,10 +419,11 @@
 }
 
 .sessions-empty {
-  padding: 40px 0;
+  padding: 60px 20px;
   text-align: center;
   font-size: var(--font-size-sm);
-  color: var(--border);
+  color: var(--text-muted);
+  line-height: 1.6;
 }
 
 /* Session detail / chat */
@@ -977,9 +979,9 @@
   gap: 10px;
   width: 100%;
   max-width: 720px;
-  padding: 8px 12px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.06));
+  padding: 10px 16px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   flex-shrink: 0;
 }
 

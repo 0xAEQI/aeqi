@@ -1,14 +1,20 @@
-//! Persistent Agent Registry — lifecycle management for long-lived agent identities.
+//! Agent Registry — the unified agent tree.
 //!
-//! Each persistent agent has a stable UUID, entity-scoped memory, and can be
-//! attached to a project (project-scoped) or run at root (cross-project).
-//! The registry stores agent metadata in SQLite alongside the daemon's other state.
+//! Everything is an agent. A "company" is an agent. A "department" is an agent.
+//! A "worker" is an agent. The root agent (parent_id IS NULL) is the user's
+//! workspace — the single point of contact. Structure is emergent, not typed.
+//!
+//! The agent tree IS the process tree:
+//! - Spawn = create a child agent
+//! - Delegate = parent→child or sibling→sibling message passing
+//! - Memory = walk parent_id chain (self → parent → grandparent → root)
+//! - Identity = per-agent (system_prompt, model, capabilities)
 //!
 //! Persistent agents are NOT running processes — they are identities that get
 //! loaded into fresh sessions on demand. Their "persistence" comes from:
 //! 1. Stable UUID → entity-scoped memory accumulates across sessions
 //! 2. Registry metadata → survives daemon restarts
-//! 3. Org chart position → project/department scoping
+//! 3. Tree position → parent_id chain for memory scoping and delegation
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -19,22 +25,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, info};
 
-/// A department — a named group of agents within a project.
-///
-/// Departments form a hierarchy (via `parent_id`) used for escalation chains.
-/// Each department may have a manager agent and belongs to an optional project.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Department {
-    pub id: String,
-    pub name: String,
-    pub project: Option<String>,
-    pub project_id: Option<String>,
-    pub manager_id: Option<String>,
-    pub parent_id: Option<String>,
-    pub created_at: DateTime<Utc>,
-}
-
-/// A persistent agent identity — one record = one agent ready to go.
+/// A persistent agent identity — one record = one node in the agent tree.
 ///
 /// Created from a template with YAML frontmatter:
 /// ```text
@@ -42,7 +33,7 @@ pub struct Department {
 /// name: shadow
 /// display_name: "Shadow — Your Dark Butler"
 /// model: anthropic/claude-sonnet-4.6
-/// capabilities: [spawn_agents, spawn_projects]
+/// capabilities: [spawn_agents]
 /// ---
 ///
 /// You are Shadow, the user's personal assistant...
@@ -50,31 +41,23 @@ pub struct Department {
 ///
 /// Frontmatter → DB columns (searchable). Body → system_prompt field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PersistentAgent {
-    /// Stable UUID — used as entity_id for memory scoping.
+pub struct Agent {
+    /// Stable UUID — the true identity. Used for memory scoping, delegation, everything.
     pub id: String,
     /// Human-readable name (NOT unique — multiple agents can share a name).
-    /// The UUID is the true identity. Name is a display label.
     pub name: String,
     /// Display name shown in UI.
     pub display_name: Option<String>,
     /// Template file this agent was created from (e.g., "shadow", "analyst").
-    /// Tracks origin. Multiple agents can share the same template.
     pub template: String,
-    /// The full system prompt — the agent's identity, personality, role,
-    /// instructions. Stored in DB. This IS the agent.
+    /// The full system prompt — the agent's identity, personality, role, instructions.
     pub system_prompt: String,
-    /// Project scope (name). None = root (cross-project).
-    pub project: Option<String>,
-    /// Foreign key to projects table (UUID).
-    pub project_id: Option<String>,
-    /// Foreign key to departments table. None = unassigned.
-    pub department_id: Option<String>,
-    /// Preferred model.
+    /// Parent agent UUID. None = root agent (the user's workspace).
+    pub parent_id: Option<String>,
+    /// Preferred model. None = inherit from parent.
     pub model: Option<String>,
     /// Capabilities beyond normal tools.
-    /// "spawn_agents" = can create persistent agents (system leader).
-    /// "spawn_projects" = can create projects (system leader).
+    /// "spawn_agents" = can create child agents.
     pub capabilities: Vec<String>,
     /// Agent status.
     pub status: AgentStatus,
@@ -82,21 +65,36 @@ pub struct PersistentAgent {
     pub last_active: Option<DateTime<Utc>>,
     pub session_count: u32,
     pub total_tokens: u64,
-    // --- Visual identity for TUI ---
-    /// TUI color (CSS hex like "#FFD700" or named like "gold", "crimson").
+    // --- Visual identity ---
     pub color: Option<String>,
-    /// ASCII avatar/emoji shown in response headers and status bar.
-    /// e.g., "⚕", "🔮", "⚔", or a kaomoji face like "(◕‿◕)".
     pub avatar: Option<String>,
     /// Emotional faces shown during different states.
-    /// Keys: "greeting", "thinking", "working", "error", "complete", "idle"
     pub faces: Option<std::collections::HashMap<String, String>>,
     /// Maximum concurrent workers for this agent (default: 1).
     #[serde(default = "default_max_concurrent")]
     pub max_concurrent: u32,
-    /// Current session ID — links to the sessions table.
+    /// Current session ID.
     #[serde(default)]
     pub session_id: Option<String>,
+    // --- Operational fields (the "agent OS" columns) ---
+    /// Working directory for this agent (repo path). None = inherit from parent.
+    #[serde(default)]
+    pub workdir: Option<String>,
+    /// Budget in USD. None = inherit from parent's budget_policies.
+    #[serde(default)]
+    pub budget_usd: Option<f64>,
+    /// Execution mode: "agent" (native loop) or "claude_code" (CLI delegation).
+    #[serde(default)]
+    pub execution_mode: Option<String>,
+    /// Task ID prefix (e.g., "sg" for sigil). None = derived from name.
+    #[serde(default)]
+    pub task_prefix: Option<String>,
+    /// Worker timeout in seconds. None = inherit from parent or use global default.
+    #[serde(default)]
+    pub worker_timeout_secs: Option<u64>,
+    /// Ordered prompt entries — replaces system_prompt, primers, skills.
+    #[serde(default)]
+    pub prompts: Vec<aeqi_core::PromptEntry>,
 }
 
 fn default_max_concurrent() -> u32 {
@@ -111,15 +109,13 @@ pub struct AgentTemplateFrontmatter {
     pub model: Option<String>,
     #[serde(default)]
     pub capabilities: Vec<String>,
-    pub company: Option<String>,
+    /// Parent agent name — resolved to parent_id at spawn time.
+    pub parent: Option<String>,
     #[serde(default)]
     pub triggers: Vec<TemplateTrigger>,
-    // --- Visual identity for TUI ---
-    /// TUI color (CSS hex or named).
+    // --- Visual identity ---
     pub color: Option<String>,
-    /// ASCII avatar/emoji for response headers.
     pub avatar: Option<String>,
-    /// Emotional faces by state: greeting, thinking, working, error, complete, idle.
     #[serde(default)]
     pub faces: std::collections::HashMap<String, String>,
 }
@@ -128,29 +124,17 @@ pub struct AgentTemplateFrontmatter {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TemplateTrigger {
     pub name: String,
-    /// Schedule expression: cron ("0 9 * * *") or interval ("every 1h").
     pub schedule: Option<String>,
-    /// One-shot timestamp (ISO 8601).
     pub at: Option<String>,
-    /// Event pattern name: "task_completed", "task_failed", "tool_call_completed".
     pub event: Option<String>,
-    /// Event project filter (optional, for task_completed/task_failed).
     pub event_project: Option<String>,
-    /// Event tool filter (optional, for tool_call_completed).
     pub event_tool: Option<String>,
-    /// Event from_agent filter (optional, for dispatch_received/channel_message).
     pub event_from: Option<String>,
-    /// Event to_agent filter (optional, for dispatch_received).
     pub event_to: Option<String>,
-    /// Event kind filter (optional, for dispatch_received).
     pub event_kind: Option<String>,
-    /// Event channel filter (optional, for channel_message).
     pub event_channel: Option<String>,
-    /// Cooldown in seconds for event triggers (required for event type).
     pub cooldown_secs: Option<u64>,
-    /// Skill to run when triggered.
     pub skill: String,
-    /// Maximum budget per execution in USD.
     pub max_budget_usd: Option<f64>,
 }
 
@@ -175,8 +159,6 @@ pub fn parse_agent_template(content: &str) -> (AgentTemplateFrontmatter, String)
 }
 
 /// Minimal YAML-like parser for frontmatter key: value pairs.
-/// Supports flat key: value, inline arrays [a, b], and list-of-objects
-/// (indented `- key: value` blocks under a parent key like `triggers:`).
 fn parse_simple_yaml(text: &str) -> serde_json::Value {
     let mut map = serde_json::Map::new();
     let lines: Vec<&str> = text.lines().collect();
@@ -194,7 +176,6 @@ fn parse_simple_yaml(text: &str) -> serde_json::Value {
             let val = val.trim();
 
             if val.is_empty() {
-                // Peek ahead: "  - key:" → list-of-objects, "  key:" → nested map
                 let next_line = lines.get(i + 1).map(|l| l.trim()).unwrap_or("");
                 let is_list = next_line.starts_with("- ");
 
@@ -242,7 +223,6 @@ fn parse_simple_yaml(text: &str) -> serde_json::Value {
                     }
                     map.insert(key, serde_json::Value::Array(items));
                 } else {
-                    // Nested map (e.g., `faces:` followed by `  greeting: "..."`)
                     let mut nested = serde_json::Map::new();
                     i += 1;
                     while i < lines.len() {
@@ -282,7 +262,6 @@ fn parse_simple_yaml(text: &str) -> serde_json::Value {
     serde_json::Value::Object(map)
 }
 
-/// Insert a value into a JSON map, trying to preserve numeric types.
 fn insert_typed_value(map: &mut serde_json::Map<String, serde_json::Value>, key: &str, val: &str) {
     let key = key.to_string();
     if let Ok(n) = val.parse::<u64>() {
@@ -294,15 +273,12 @@ fn insert_typed_value(map: &mut serde_json::Map<String, serde_json::Value>, key:
     }
 }
 
-/// Lifecycle status of a persistent agent.
+/// Lifecycle status of an agent.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentStatus {
-    /// Active — available for sessions.
     Active,
-    /// Paused — not available but retains memory.
     Paused,
-    /// Retired — soft-deleted, memory preserved but agent won't be loaded.
     Retired,
 }
 
@@ -316,7 +292,7 @@ impl std::fmt::Display for AgentStatus {
     }
 }
 
-/// SQLite-backed registry for persistent agents.
+/// SQLite-backed registry — the single source of truth for the agent tree.
 pub struct AgentRegistry {
     db: Arc<Mutex<Connection>>,
 }
@@ -331,14 +307,13 @@ impl AgentRegistry {
             "PRAGMA journal_mode = WAL;
              PRAGMA busy_timeout = 5000;
              PRAGMA foreign_keys = ON;
+
              CREATE TABLE IF NOT EXISTS agents (
                  id TEXT PRIMARY KEY,
                  name TEXT NOT NULL,
                  display_name TEXT,
                  template TEXT NOT NULL DEFAULT '',
                  system_prompt TEXT NOT NULL DEFAULT '',
-                 project TEXT,
-                 department TEXT,
                  parent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
                  model TEXT,
                  capabilities TEXT NOT NULL DEFAULT '[]',
@@ -346,12 +321,17 @@ impl AgentRegistry {
                  created_at TEXT NOT NULL,
                  last_active TEXT,
                  session_count INTEGER NOT NULL DEFAULT 0,
-                 total_tokens INTEGER NOT NULL DEFAULT 0
+                 total_tokens INTEGER NOT NULL DEFAULT 0,
+                 color TEXT,
+                 avatar TEXT,
+                 faces TEXT,
+                 max_concurrent INTEGER NOT NULL DEFAULT 1,
+                 session_id TEXT
              );
-             CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project);
+             CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_id);
              CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
              CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
-             CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_id);
+
              CREATE TABLE IF NOT EXISTS triggers (
                  id TEXT PRIMARY KEY,
                  agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -370,66 +350,9 @@ impl AgentRegistry {
              CREATE INDEX IF NOT EXISTS idx_triggers_agent ON triggers(agent_id);
              CREATE INDEX IF NOT EXISTS idx_triggers_enabled ON triggers(enabled);
 
-             -- Idempotent migration: add public_id column for webhook triggers.
-             -- ALTER TABLE … ADD COLUMN is a no-op if the column already exists
-             -- in SQLite 3.35+, but we guard with a pragma check for older versions.
-             ",
-        )?;
-
-        // Idempotent migration: add public_id column + index for O(1) webhook lookups.
-        let has_public_id: bool = conn
-            .prepare("PRAGMA table_info(triggers)")?
-            .query_map([], |row| row.get::<_, String>(1))?
-            .filter_map(|r| r.ok())
-            .any(|col| col == "public_id");
-        if !has_public_id {
-            conn.execute_batch(
-                "ALTER TABLE triggers ADD COLUMN public_id TEXT;
-                 CREATE INDEX IF NOT EXISTS idx_triggers_public_id ON triggers(public_id);",
-            )?;
-            // Backfill public_id from JSON config for existing webhook triggers.
-            let mut stmt =
-                conn.prepare("SELECT id, config FROM triggers WHERE trigger_type = 'webhook'")?;
-            let rows: Vec<(String, String)> = stmt
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
-                .filter_map(|r| r.ok())
-                .collect();
-            for (id, config_json) in rows {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&config_json)
-                    && let Some(pid) = v.get("public_id").and_then(|p| p.as_str())
-                {
-                    conn.execute(
-                        "UPDATE triggers SET public_id = ?1 WHERE id = ?2",
-                        rusqlite::params![pid, id],
-                    )?;
-                }
-            }
-        } else {
-            // Ensure index exists even if column was added by a previous version.
-            conn.execute_batch(
-                "CREATE INDEX IF NOT EXISTS idx_triggers_public_id ON triggers(public_id);",
-            )?;
-        }
-
-        conn.execute_batch(
-            "
-             CREATE TABLE IF NOT EXISTS departments (
-                 id TEXT PRIMARY KEY,
-                 name TEXT NOT NULL,
-                 project TEXT,
-                 manager_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
-                 parent_id TEXT REFERENCES departments(id) ON DELETE SET NULL,
-                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-             );
-             CREATE INDEX IF NOT EXISTS idx_departments_project ON departments(project);
-             CREATE INDEX IF NOT EXISTS idx_departments_parent ON departments(parent_id);
-
              CREATE TABLE IF NOT EXISTS budget_policies (
                  id TEXT PRIMARY KEY,
-                 scope_type TEXT NOT NULL,
-                 scope_id TEXT NOT NULL,
+                 agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
                  window TEXT NOT NULL,
                  amount_usd REAL NOT NULL,
                  warn_pct REAL DEFAULT 0.8,
@@ -449,86 +372,132 @@ impl AgentRegistry {
                  decision_note TEXT,
                  created_at TEXT NOT NULL,
                  decided_at TEXT
-             );
-
-             CREATE TABLE IF NOT EXISTS projects (
-                 id TEXT PRIMARY KEY,
-                 name TEXT NOT NULL UNIQUE,
-                 prefix TEXT NOT NULL,
-                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
              );",
         )?;
 
-        // Step 2: Add department_id column to agents table if missing.
-        {
-            let has_col = conn
+        // Idempotent migration: add agent OS columns.
+        let agent_columns = [
+            ("workdir", "TEXT"),
+            ("budget_usd", "REAL"),
+            ("execution_mode", "TEXT"),
+            ("task_prefix", "TEXT"),
+            ("worker_timeout_secs", "INTEGER"),
+            ("prompts", "TEXT DEFAULT '[]'"),
+        ];
+        for (col, typ) in &agent_columns {
+            let has_col: bool = conn
                 .prepare("PRAGMA table_info(agents)")?
                 .query_map([], |row| row.get::<_, String>(1))?
                 .filter_map(|r| r.ok())
-                .any(|col| col == "department_id");
+                .any(|c| c == *col);
             if !has_col {
-                conn.execute_batch(
-                    "ALTER TABLE agents ADD COLUMN department_id TEXT REFERENCES departments(id) ON DELETE SET NULL;",
-                )?;
+                conn.execute_batch(&format!("ALTER TABLE agents ADD COLUMN {col} {typ};"))?;
             }
         }
 
-        // Step 3: Add max_concurrent column to agents table if missing.
-        {
-            let has_col = conn
-                .prepare("PRAGMA table_info(agents)")?
-                .query_map([], |row| row.get::<_, String>(1))?
+        // Create unified tasks table (replaces per-project JSONL TaskBoards).
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS tasks (
+                 id TEXT PRIMARY KEY,
+                 subject TEXT NOT NULL,
+                 description TEXT NOT NULL DEFAULT '',
+                 status TEXT NOT NULL DEFAULT 'pending',
+                 priority TEXT NOT NULL DEFAULT 'normal',
+                 assignee TEXT,
+                 agent_id TEXT REFERENCES agents(id),
+                 skill TEXT,
+                 labels TEXT NOT NULL DEFAULT '[]',
+                 retry_count INTEGER NOT NULL DEFAULT 0,
+                 checkpoints TEXT NOT NULL DEFAULT '[]',
+                 metadata TEXT NOT NULL DEFAULT '{}',
+                 depends_on TEXT NOT NULL DEFAULT '[]',
+                 blocks TEXT NOT NULL DEFAULT '[]',
+                 acceptance_criteria TEXT,
+                 locked_by TEXT,
+                 locked_at TEXT,
+                 created_at TEXT NOT NULL,
+                 updated_at TEXT,
+                 closed_at TEXT,
+                 closed_reason TEXT
+             );
+             CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+             CREATE INDEX IF NOT EXISTS idx_tasks_agent ON tasks(agent_id);
+             CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee);
+             CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
+
+             CREATE TABLE IF NOT EXISTS task_sequences (
+                 prefix TEXT PRIMARY KEY,
+                 next_seq INTEGER NOT NULL DEFAULT 1
+             );",
+        )?;
+
+        // Idempotent migration: add prompts column to tasks table.
+        let has_task_prompts: bool = conn
+            .prepare("PRAGMA table_info(tasks)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(|r| r.ok())
+            .any(|col| col == "prompts");
+        if !has_task_prompts {
+            conn.execute_batch("ALTER TABLE tasks ADD COLUMN prompts TEXT DEFAULT '[]';")?;
+        }
+
+        // Idempotent migration: add public_id column for webhook triggers.
+        let has_public_id: bool = conn
+            .prepare("PRAGMA table_info(triggers)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(|r| r.ok())
+            .any(|col| col == "public_id");
+        if !has_public_id {
+            conn.execute_batch(
+                "ALTER TABLE triggers ADD COLUMN public_id TEXT;
+                 CREATE INDEX IF NOT EXISTS idx_triggers_public_id ON triggers(public_id);",
+            )?;
+            let mut stmt =
+                conn.prepare("SELECT id, config FROM triggers WHERE trigger_type = 'webhook'")?;
+            let rows: Vec<(String, String)> = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
                 .filter_map(|r| r.ok())
-                .any(|col| col == "max_concurrent");
-            if !has_col {
-                conn.execute_batch(
-                    "ALTER TABLE agents ADD COLUMN max_concurrent INTEGER NOT NULL DEFAULT 1;",
-                )?;
+                .collect();
+            for (id, config_json) in rows {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&config_json)
+                    && let Some(pid) = v.get("public_id").and_then(|p| p.as_str())
+                {
+                    conn.execute(
+                        "UPDATE triggers SET public_id = ?1 WHERE id = ?2",
+                        rusqlite::params![pid, id],
+                    )?;
+                }
             }
+        } else {
+            conn.execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_triggers_public_id ON triggers(public_id);",
+            )?;
         }
 
-        // Step 4: Add session_id column to agents table if missing.
-        {
-            let has_col = conn
-                .prepare("PRAGMA table_info(agents)")?
-                .query_map([], |row| row.get::<_, String>(1))?
-                .filter_map(|r| r.ok())
-                .any(|col| col == "session_id");
-            if !has_col {
-                conn.execute_batch("ALTER TABLE agents ADD COLUMN session_id TEXT DEFAULT NULL;")?;
-            }
+        // Idempotent migration: add prompts column to triggers table.
+        let has_trigger_prompts: bool = conn
+            .prepare("PRAGMA table_info(triggers)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(|r| r.ok())
+            .any(|col| col == "prompts");
+        if !has_trigger_prompts {
+            conn.execute_batch("ALTER TABLE triggers ADD COLUMN prompts TEXT DEFAULT '[]';")?;
         }
 
-        // Step 5: Add project_id column to departments table if missing.
-        {
-            let has_col = conn
-                .prepare("PRAGMA table_info(departments)")?
-                .query_map([], |row| row.get::<_, String>(1))?
-                .filter_map(|r| r.ok())
-                .any(|col| col == "project_id");
-            if !has_col {
-                conn.execute_batch("ALTER TABLE departments ADD COLUMN project_id TEXT;")?;
-            }
-        }
+        // Create events table (unified event store).
+        crate::event_store::EventStore::create_tables(&conn)?;
 
-        // Step 6: Add project_id column to agents table if missing.
-        {
-            let has_col = conn
-                .prepare("PRAGMA table_info(agents)")?
-                .query_map([], |row| row.get::<_, String>(1))?
-                .filter_map(|r| r.ok())
-                .any(|col| col == "project_id");
-            if !has_col {
-                conn.execute_batch(
-                    "ALTER TABLE agents ADD COLUMN project_id TEXT;
-                     CREATE INDEX IF NOT EXISTS idx_agents_project_id ON agents(project_id);",
-                )?;
-            }
-        }
-
-        // Step 7: Drop legacy `department` column if present (SQLite 3.35+).
-        // No code reads this column — `department_id` replaced it.
-        let _ = conn.execute_batch("ALTER TABLE agents DROP COLUMN department;");
+        // Backfill: populate prompts from system_prompt for existing agents.
+        conn.execute_batch(
+            "UPDATE agents SET prompts = json_array(json_object(
+                'content', system_prompt,
+                'position', 'system',
+                'scope', 'self'
+             ))
+             WHERE (prompts IS NULL OR prompts = '[]') AND system_prompt != '';",
+        )?;
 
         info!(path = %db_path.display(), "agent registry opened");
         Ok(Self {
@@ -536,45 +505,16 @@ impl AgentRegistry {
         })
     }
 
-    /// Insert or update a project record in the projects table.
-    pub async fn upsert_project(&self, id: &str, name: &str, prefix: &str) -> Result<()> {
-        let db = self.db.lock().await;
-        db.execute(
-            "INSERT OR REPLACE INTO projects (id, name, prefix) VALUES (?1, ?2, ?3)",
-            params![id, name, prefix],
-        )?;
-        Ok(())
-    }
+    // -----------------------------------------------------------------------
+    // Core CRUD
+    // -----------------------------------------------------------------------
 
-    /// Backfill the `project_id` column on departments from the projects table.
-    pub async fn backfill_department_project_ids(&self) -> Result<()> {
-        let db = self.db.lock().await;
-        db.execute(
-            "UPDATE departments SET project_id = (SELECT id FROM projects WHERE projects.name = departments.project) WHERE project_id IS NULL",
-            [],
-        )?;
-        Ok(())
-    }
-
-    /// Backfill the `project_id` column on agents from the projects table.
-    pub async fn backfill_agent_project_ids(&self) -> Result<()> {
-        let db = self.db.lock().await;
-        db.execute(
-            "UPDATE agents SET project_id = (
-                SELECT id FROM projects WHERE projects.name = agents.project
-            ) WHERE project IS NOT NULL AND project_id IS NULL",
-            [],
-        )?;
-        Ok(())
-    }
-
-    /// Spawn a new persistent agent from a template string (frontmatter + prompt body).
-    /// Also creates any triggers defined in the template frontmatter.
+    /// Spawn a new agent from a template string (frontmatter + prompt body).
     pub async fn spawn_from_template(
         &self,
         template_content: &str,
-        project_override: Option<&str>,
-    ) -> Result<PersistentAgent> {
+        parent_id: Option<&str>,
+    ) -> Result<Agent> {
         let (fm, system_prompt) = parse_agent_template(template_content);
         let template_name = fm.name.clone().unwrap_or_else(|| "custom".to_string());
         let name = fm
@@ -582,19 +522,28 @@ impl AgentRegistry {
             .unwrap_or_else(|| format!("agent-{}", &uuid::Uuid::new_v4().to_string()[..8]));
         let triggers = fm.triggers.clone();
 
+        // Resolve parent: explicit parent_id > frontmatter parent name > None (root).
+        let resolved_parent = if parent_id.is_some() {
+            parent_id.map(|s| s.to_string())
+        } else if let Some(ref parent_name) = fm.parent {
+            self.get_active_by_name(parent_name).await?.map(|a| a.id)
+        } else {
+            None
+        };
+
         let mut agent = self
             .spawn(
                 &name,
                 fm.display_name.as_deref(),
                 &template_name,
                 &system_prompt,
-                project_override.or(fm.company.as_deref()),
+                resolved_parent.as_deref(),
                 fm.model.as_deref(),
                 &fm.capabilities,
             )
             .await?;
 
-        // Apply visual identity from template frontmatter.
+        // Apply visual identity from template.
         if fm.color.is_some() || fm.avatar.is_some() || !fm.faces.is_empty() {
             agent.color = fm.color;
             agent.avatar = fm.avatar;
@@ -603,7 +552,6 @@ impl AgentRegistry {
             } else {
                 Some(fm.faces)
             };
-            // Persist visual identity to DB.
             let db = self.db.lock().await;
             let faces_json = agent
                 .faces
@@ -641,48 +589,29 @@ impl AgentRegistry {
         Ok(agent)
     }
 
-    /// Spawn a new persistent agent directly.
+    /// Spawn a new agent directly.
     pub async fn spawn(
         &self,
         name: &str,
         display_name: Option<&str>,
         template: &str,
         system_prompt: &str,
-        project: Option<&str>,
+        parent_id: Option<&str>,
         model: Option<&str>,
         capabilities: &[String],
-    ) -> Result<PersistentAgent> {
+    ) -> Result<Agent> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now();
         let caps_json = serde_json::to_string(capabilities)?;
-
         let session_id = uuid::Uuid::new_v4().to_string();
 
-        // Resolve project UUID from project name.
-        let project_id = if let Some(p) = project {
-            let db = self.db.lock().await;
-            let pid: Option<String> = db
-                .query_row(
-                    "SELECT id FROM projects WHERE name = ?1",
-                    params![p],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            drop(db);
-            pid
-        } else {
-            None
-        };
-
-        let agent = PersistentAgent {
+        let agent = Agent {
             id: id.clone(),
             name: name.to_string(),
             display_name: display_name.map(|s| s.to_string()),
             template: template.to_string(),
             system_prompt: system_prompt.to_string(),
-            project: project.map(|s| s.to_string()),
-            project_id: project_id.clone(),
-            department_id: None,
+            parent_id: parent_id.map(|s| s.to_string()),
             model: model.map(|s| s.to_string()),
             capabilities: capabilities.to_vec(),
             status: AgentStatus::Active,
@@ -695,52 +624,107 @@ impl AgentRegistry {
             faces: None,
             max_concurrent: 1,
             session_id: Some(session_id.clone()),
+            workdir: None,
+            budget_usd: None,
+            execution_mode: None,
+            task_prefix: None,
+            worker_timeout_secs: None,
+            prompts: if system_prompt.is_empty() {
+                Vec::new()
+            } else {
+                vec![aeqi_core::PromptEntry::system(system_prompt)]
+            },
         };
 
         let db = self.db.lock().await;
+        let prompts_json =
+            serde_json::to_string(&agent.prompts).unwrap_or_else(|_| "[]".to_string());
         db.execute(
-            "INSERT INTO agents (id, name, display_name, template, system_prompt, project, project_id, model, capabilities, status, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO agents (id, name, display_name, template, system_prompt, parent_id, model, capabilities, status, created_at, session_id, prompts)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 agent.id,
                 agent.name,
                 agent.display_name,
                 agent.template,
                 agent.system_prompt,
-                agent.project,
-                agent.project_id,
+                agent.parent_id,
                 agent.model,
                 caps_json,
                 agent.status.to_string(),
                 agent.created_at.to_rfc3339(),
+                session_id,
+                prompts_json,
             ],
         )?;
 
-        // Link the session_id to the agent record.
-        // The actual session row is created in the sessions table by the daemon
-        // via session_store.create_session() after spawn completes.
-        db.execute(
-            "UPDATE agents SET session_id = ?1 WHERE id = ?2",
-            params![session_id, agent.id],
-        )?;
-
-        info!(id = %agent.id, name = %agent.name, session_id = %session_id, "persistent agent spawned");
+        info!(id = %agent.id, name = %agent.name, parent_id = ?parent_id, "agent spawned");
         Ok(agent)
     }
 
-    /// List all agents, optionally filtered by project and/or status.
+    /// Get a specific agent by UUID.
+    pub async fn get(&self, id: &str) -> Result<Option<Agent>> {
+        let db = self.db.lock().await;
+        let agent = db
+            .query_row("SELECT * FROM agents WHERE id = ?1", params![id], |row| {
+                Ok(row_to_agent(row))
+            })
+            .optional()?;
+        Ok(agent)
+    }
+
+    /// Get agents by name (multiple can share a name).
+    pub async fn get_by_name(&self, name: &str) -> Result<Vec<Agent>> {
+        let db = self.db.lock().await;
+        let mut stmt =
+            db.prepare("SELECT * FROM agents WHERE name = ?1 ORDER BY created_at DESC")?;
+        let agents = stmt
+            .query_map(params![name], |row| Ok(row_to_agent(row)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(agents)
+    }
+
+    /// Get the first active agent with this name.
+    pub async fn get_active_by_name(&self, name: &str) -> Result<Option<Agent>> {
+        let db = self.db.lock().await;
+        let agent = db
+            .query_row(
+                "SELECT * FROM agents WHERE name = ?1 AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+                params![name],
+                |row| Ok(row_to_agent(row)),
+            )
+            .optional()?;
+        Ok(agent)
+    }
+
+    /// Resolve an agent by hint — tries name first, then UUID.
+    pub async fn resolve_by_hint(&self, hint: &str) -> Result<Option<Agent>> {
+        if let Some(agent) = self.get_active_by_name(hint).await? {
+            return Ok(Some(agent));
+        }
+        self.get(hint).await
+    }
+
+    /// List all agents, optionally filtered by parent and/or status.
     pub async fn list(
         &self,
-        project: Option<&str>,
+        parent_id: Option<Option<&str>>,
         status: Option<AgentStatus>,
-    ) -> Result<Vec<PersistentAgent>> {
+    ) -> Result<Vec<Agent>> {
         let db = self.db.lock().await;
         let mut sql = "SELECT * FROM agents WHERE 1=1".to_string();
         let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
-        if let Some(p) = project {
-            sql.push_str(" AND project = ?");
-            params_vec.push(Box::new(p.to_string()));
+        if let Some(pid) = parent_id {
+            match pid {
+                Some(id) => {
+                    sql.push_str(" AND parent_id = ?");
+                    params_vec.push(Box::new(id.to_string()));
+                }
+                None => {
+                    sql.push_str(" AND parent_id IS NULL");
+                }
+            }
         }
         if let Some(s) = status {
             sql.push_str(" AND status = ?");
@@ -758,68 +742,155 @@ impl AgentRegistry {
         Ok(agents)
     }
 
-    /// Get agents by name (multiple can share a name).
-    /// Returns all matches sorted by created_at descending (newest first).
-    pub async fn get_by_name(&self, name: &str) -> Result<Vec<PersistentAgent>> {
+    /// List all active agents.
+    pub async fn list_active(&self) -> Result<Vec<Agent>> {
         let db = self.db.lock().await;
-        let mut stmt =
-            db.prepare("SELECT * FROM agents WHERE name = ?1 ORDER BY created_at DESC")?;
+        let mut stmt = db.prepare(
+            "SELECT * FROM agents WHERE status = 'active' \
+             ORDER BY COALESCE(last_active, created_at) DESC",
+        )?;
         let agents = stmt
-            .query_map(params![name], |row| Ok(row_to_agent(row)))?
+            .query_map([], |row| Ok(row_to_agent(row)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(agents)
+    }
+
+    // -----------------------------------------------------------------------
+    // Tree operations
+    // -----------------------------------------------------------------------
+
+    /// Get the root agent (parent_id IS NULL). Every workspace has exactly one.
+    pub async fn get_root(&self) -> Result<Option<Agent>> {
+        let db = self.db.lock().await;
+        let agent = db
+            .query_row(
+                "SELECT * FROM agents WHERE parent_id IS NULL AND status = 'active' ORDER BY created_at ASC LIMIT 1",
+                [],
+                |row| Ok(row_to_agent(row)),
+            )
+            .optional()?;
+        Ok(agent)
+    }
+
+    /// Get direct children of an agent.
+    pub async fn get_children(&self, agent_id: &str) -> Result<Vec<Agent>> {
+        let db = self.db.lock().await;
+        let mut stmt = db.prepare(
+            "SELECT * FROM agents WHERE parent_id = ?1 AND status = 'active' ORDER BY name ASC",
+        )?;
+        let agents = stmt
+            .query_map(params![agent_id], |row| Ok(row_to_agent(row)))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(agents)
     }
 
-    /// Get the first active agent with this name (convenience for unambiguous lookups).
-    pub async fn get_active_by_name(&self, name: &str) -> Result<Option<PersistentAgent>> {
-        let db = self.db.lock().await;
-        let agent = db
-            .query_row(
-                "SELECT * FROM agents WHERE name = ?1 AND status = 'active' ORDER BY created_at DESC LIMIT 1",
-                params![name],
-                |row| Ok(row_to_agent(row)),
-            )
-            .optional()?;
-        Ok(agent)
-    }
+    /// Walk the parent_id chain from an agent up to root.
+    /// Returns the chain starting from the given agent (inclusive).
+    /// Includes cycle detection.
+    pub async fn get_ancestors(&self, agent_id: &str) -> Result<Vec<Agent>> {
+        let mut chain = Vec::new();
+        let mut current_id = Some(agent_id.to_string());
+        let mut visited = std::collections::HashSet::new();
 
-    /// Resolve an agent by hint — tries name first, then company/project, then UUID.
-    /// Used by web chat where the frontend sends a project name like "aeqi".
-    pub async fn resolve_by_hint(&self, hint: &str) -> Result<Option<PersistentAgent>> {
-        // 1. Try exact name match.
-        if let Some(agent) = self.get_active_by_name(hint).await? {
-            return Ok(Some(agent));
+        while let Some(id) = current_id {
+            if !visited.insert(id.clone()) {
+                tracing::warn!(agent_id = %id, "cycle detected in agent hierarchy");
+                break;
+            }
+            match self.get(&id).await? {
+                Some(agent) => {
+                    current_id = agent.parent_id.clone();
+                    chain.push(agent);
+                }
+                None => break,
+            }
         }
-        // 2. Try project match — find the default agent for that project.
+
+        Ok(chain)
+    }
+
+    /// Get the ancestor IDs for an agent (for memory scoping).
+    /// Returns [self_id, parent_id, grandparent_id, ..., root_id].
+    pub async fn get_ancestor_ids(&self, agent_id: &str) -> Result<Vec<String>> {
         let db = self.db.lock().await;
-        let agent = db
-            .query_row(
-                "SELECT * FROM agents WHERE project = ?1 AND status = 'active' \
-                 ORDER BY created_at ASC LIMIT 1",
-                params![hint],
-                |row| Ok(row_to_agent(row)),
-            )
-            .optional()?;
-        if agent.is_some() {
-            return Ok(agent);
+        let mut ids = Vec::new();
+        let mut current_id = Some(agent_id.to_string());
+        let mut visited = std::collections::HashSet::new();
+
+        while let Some(id) = current_id {
+            if !visited.insert(id.clone()) {
+                break;
+            }
+            ids.push(id.clone());
+            current_id = db
+                .query_row(
+                    "SELECT parent_id FROM agents WHERE id = ?1",
+                    params![id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .flatten();
         }
-        // 3. Try UUID.
-        drop(db);
-        self.get(hint).await
+
+        Ok(ids)
     }
 
-    /// Get a specific agent by UUID.
-    pub async fn get(&self, id: &str) -> Result<Option<PersistentAgent>> {
+    /// Get the full subtree rooted at an agent (recursive CTE).
+    pub async fn get_subtree(&self, agent_id: &str) -> Result<Vec<Agent>> {
         let db = self.db.lock().await;
-        let agent = db
-            .query_row("SELECT * FROM agents WHERE id = ?1", params![id], |row| {
-                Ok(row_to_agent(row))
-            })
-            .optional()?;
-        Ok(agent)
+        let mut stmt = db.prepare(
+            "WITH RECURSIVE subtree AS (
+                 SELECT * FROM agents WHERE id = ?1
+                 UNION ALL
+                 SELECT a.* FROM agents a
+                 JOIN subtree s ON a.parent_id = s.id
+             )
+             SELECT * FROM subtree ORDER BY created_at ASC",
+        )?;
+        let agents = stmt
+            .query_map(params![agent_id], |row| Ok(row_to_agent(row)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(agents)
     }
 
-    /// Record a session for this agent (increment count, update last_active, add tokens).
+    /// Move an agent to a new parent (reparent).
+    pub async fn move_agent(&self, agent_id: &str, new_parent_id: Option<&str>) -> Result<()> {
+        // Prevent cycles: new parent must not be a descendant of agent_id.
+        if let Some(pid) = new_parent_id {
+            let subtree = self.get_subtree(agent_id).await?;
+            if subtree.iter().any(|a| a.id == pid) {
+                anyhow::bail!("cannot move agent under its own subtree (would create cycle)");
+            }
+        }
+
+        let db = self.db.lock().await;
+        let updated = db.execute(
+            "UPDATE agents SET parent_id = ?1 WHERE id = ?2",
+            params![new_parent_id, agent_id],
+        )?;
+        if updated == 0 {
+            anyhow::bail!("agent '{agent_id}' not found");
+        }
+        info!(agent_id = %agent_id, new_parent_id = ?new_parent_id, "agent reparented");
+        Ok(())
+    }
+
+    /// Find the default agent to talk to — the root, or a named child.
+    pub async fn default_agent(&self, hint: Option<&str>) -> Result<Option<Agent>> {
+        if let Some(h) = hint {
+            if let Some(agent) = self.resolve_by_hint(h).await? {
+                return Ok(Some(agent));
+            }
+        }
+        self.get_root().await
+    }
+
+    // -----------------------------------------------------------------------
+    // Stats & lifecycle
+    // -----------------------------------------------------------------------
+
+    /// Record a session for this agent.
     pub async fn record_session(&self, id: &str, tokens: u64) -> Result<()> {
         let db = self.db.lock().await;
         db.execute(
@@ -835,17 +906,145 @@ impl AgentRegistry {
     }
 
     /// Change agent status.
-    pub async fn set_status(&self, name: &str, status: AgentStatus) -> Result<()> {
+    pub async fn set_status(&self, id: &str, status: AgentStatus) -> Result<()> {
         let db = self.db.lock().await;
         let updated = db.execute(
-            "UPDATE agents SET status = ?1 WHERE name = ?2",
-            params![status.to_string(), name],
+            "UPDATE agents SET status = ?1 WHERE id = ?2",
+            params![status.to_string(), id],
         )?;
         if updated == 0 {
-            anyhow::bail!("agent '{name}' not found");
+            anyhow::bail!("agent '{id}' not found");
         }
-        info!(name = %name, status = %status, "agent status updated");
+        info!(id = %id, status = %status, "agent status updated");
         Ok(())
+    }
+
+    /// Update the prompts array for an agent.
+    pub async fn update_prompts(&self, id: &str, prompts_json: &str) -> Result<()> {
+        let db = self.db.lock().await;
+        let updated = db.execute(
+            "UPDATE agents SET prompts = ?1 WHERE id = ?2",
+            params![prompts_json, id],
+        )?;
+        if updated == 0 {
+            anyhow::bail!("agent '{id}' not found");
+        }
+        debug!(id = %id, "agent prompts updated");
+        Ok(())
+    }
+
+    /// Update the model for an agent.
+    pub async fn update_model(&self, id: &str, model: &str) -> Result<()> {
+        let db = self.db.lock().await;
+        let updated = db.execute(
+            "UPDATE agents SET model = ?1 WHERE id = ?2",
+            params![model, id],
+        )?;
+        if updated == 0 {
+            anyhow::bail!("agent '{id}' not found");
+        }
+        info!(id = %id, model = %model, "agent model updated");
+        Ok(())
+    }
+
+    /// Update the system prompt for an agent.
+    pub async fn update_system_prompt(&self, id: &str, system_prompt: &str) -> Result<()> {
+        let db = self.db.lock().await;
+        let updated = db.execute(
+            "UPDATE agents SET system_prompt = ?1 WHERE id = ?2",
+            params![system_prompt, id],
+        )?;
+        if updated == 0 {
+            anyhow::bail!("agent '{id}' not found");
+        }
+        Ok(())
+    }
+
+    /// Update operational fields on an agent.
+    pub async fn update_agent_ops(
+        &self,
+        id: &str,
+        workdir: Option<&str>,
+        budget_usd: Option<f64>,
+        execution_mode: Option<&str>,
+        task_prefix: Option<&str>,
+        worker_timeout_secs: Option<u64>,
+    ) -> Result<()> {
+        let db = self.db.lock().await;
+        let updated = db.execute(
+            "UPDATE agents SET workdir = ?1, budget_usd = ?2, execution_mode = ?3, task_prefix = ?4, worker_timeout_secs = ?5 WHERE id = ?6",
+            params![
+                workdir,
+                budget_usd,
+                execution_mode,
+                task_prefix,
+                worker_timeout_secs.map(|v| v as i64),
+                id,
+            ],
+        )?;
+        if updated == 0 {
+            anyhow::bail!("agent '{id}' not found");
+        }
+        info!(id = %id, "agent operational fields updated");
+        Ok(())
+    }
+
+    /// Resolve workdir for an agent — walks ancestor chain to find first non-None.
+    pub async fn resolve_workdir(&self, agent_id: &str) -> Result<Option<String>> {
+        let ancestors = self.get_ancestors(agent_id).await?;
+        for a in &ancestors {
+            if let Some(ref wd) = a.workdir {
+                return Ok(Some(wd.clone()));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Resolve execution mode for an agent — walks ancestor chain.
+    pub async fn resolve_execution_mode(&self, agent_id: &str) -> Result<String> {
+        let ancestors = self.get_ancestors(agent_id).await?;
+        for a in &ancestors {
+            if let Some(ref mode) = a.execution_mode {
+                return Ok(mode.clone());
+            }
+        }
+        Ok("agent".to_string())
+    }
+
+    /// Resolve worker timeout for an agent — walks ancestor chain.
+    pub async fn resolve_worker_timeout(&self, agent_id: &str) -> Result<u64> {
+        let ancestors = self.get_ancestors(agent_id).await?;
+        for a in &ancestors {
+            if let Some(timeout) = a.worker_timeout_secs {
+                return Ok(timeout);
+            }
+        }
+        Ok(3600) // Default: 1 hour.
+    }
+
+    /// Resolve model for an agent — walks ancestor chain, falls back to default.
+    pub async fn resolve_model(&self, agent_id: &str, default_model: &str) -> String {
+        if let Ok(ancestors) = self.get_ancestors(agent_id).await {
+            for a in &ancestors {
+                if let Some(ref model) = a.model {
+                    return model.clone();
+                }
+            }
+        }
+        default_model.to_string()
+    }
+
+    /// Get max_concurrent for an agent by ID. Returns 1 if not found.
+    pub async fn get_max_concurrent(&self, id: &str) -> Result<u32> {
+        let db = self.db.lock().await;
+        let max_concurrent: Option<u32> = db
+            .query_row(
+                "SELECT max_concurrent FROM agents WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(max_concurrent.unwrap_or(1))
     }
 
     /// Get a TriggerStore sharing this registry's database connection.
@@ -853,274 +1052,36 @@ impl AgentRegistry {
         crate::trigger::TriggerStore::new(self.db.clone())
     }
 
-    /// List all active agents, sorted by most recently active first.
-    pub async fn list_active(&self) -> Result<Vec<PersistentAgent>> {
-        let db = self.db.lock().await;
-        let mut stmt = db.prepare(
-            "SELECT * FROM agents WHERE status = 'active' \
-             ORDER BY COALESCE(last_active, created_at) DESC",
-        )?;
-        let agents = stmt
-            .query_map([], |row| Ok(row_to_agent(row)))?
-            .filter_map(|r| r.ok())
-            .collect();
-        Ok(agents)
-    }
-
-    pub async fn default_for_project(
-        &self,
-        project: Option<&str>,
-    ) -> Result<Option<PersistentAgent>> {
-        let db = self.db.lock().await;
-
-        // Try project-scoped first.
-        if let Some(p) = project
-            && let Some(agent) = db
-                .query_row(
-                    "SELECT * FROM agents WHERE project = ?1 AND status = 'active' ORDER BY created_at ASC LIMIT 1",
-                    params![p],
-                    |row| Ok(row_to_agent(row)),
-                )
-                .optional()?
-            {
-                return Ok(Some(agent));
-            }
-
-        // Fall back to root-scoped.
-        let agent = db
-            .query_row(
-                "SELECT * FROM agents WHERE project IS NULL AND status = 'active' ORDER BY created_at ASC LIMIT 1",
-                [],
-                |row| Ok(row_to_agent(row)),
-            )
-            .optional()?;
-
-        Ok(agent)
-    }
-
-    // -----------------------------------------------------------------------
-    // Department operations
-    // -----------------------------------------------------------------------
-
-    /// Create a new department.
-    pub async fn create_department(
-        &self,
-        name: &str,
-        project: Option<&str>,
-        manager_id: Option<&str>,
-        parent_id: Option<&str>,
-    ) -> Result<Department> {
-        let id = uuid::Uuid::new_v4().to_string();
-        let now = Utc::now();
-
-        // Resolve project UUID from project name.
-        let project_id = if let Some(p) = project {
-            let db = self.db.lock().await;
-            let pid: Option<String> = db
-                .query_row(
-                    "SELECT id FROM projects WHERE name = ?1",
-                    params![p],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            drop(db);
-            pid
-        } else {
-            None
-        };
-
-        let dept = Department {
-            id: id.clone(),
-            name: name.to_string(),
-            project: project.map(|s| s.to_string()),
-            project_id: project_id.clone(),
-            manager_id: manager_id.map(|s| s.to_string()),
-            parent_id: parent_id.map(|s| s.to_string()),
-            created_at: now,
-        };
-
-        let db = self.db.lock().await;
-        db.execute(
-            "INSERT INTO departments (id, name, project, project_id, manager_id, parent_id, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                dept.id,
-                dept.name,
-                dept.project,
-                dept.project_id,
-                dept.manager_id,
-                dept.parent_id,
-                dept.created_at.to_rfc3339(),
-            ],
-        )?;
-
-        info!(id = %dept.id, name = %dept.name, "department created");
-        Ok(dept)
-    }
-
-    /// Get a department by UUID.
-    pub async fn get_department(&self, id: &str) -> Result<Option<Department>> {
-        let db = self.db.lock().await;
-        let dept = db
-            .query_row(
-                "SELECT * FROM departments WHERE id = ?1",
-                params![id],
-                |row| Ok(row_to_department(row)),
-            )
-            .optional()?;
-        Ok(dept)
-    }
-
-    /// Get a department by name (and optionally project).
-    pub async fn get_department_by_name(
-        &self,
-        name: &str,
-        project: Option<&str>,
-    ) -> Result<Option<Department>> {
-        let db = self.db.lock().await;
-        let dept = match project {
-            Some(p) => db
-                .query_row(
-                    "SELECT * FROM departments WHERE name = ?1 AND project = ?2 LIMIT 1",
-                    params![name, p],
-                    |row| Ok(row_to_department(row)),
-                )
-                .optional()?,
-            None => db
-                .query_row(
-                    "SELECT * FROM departments WHERE name = ?1 AND project IS NULL LIMIT 1",
-                    params![name],
-                    |row| Ok(row_to_department(row)),
-                )
-                .optional()?,
-        };
-        Ok(dept)
-    }
-
-    /// List departments, optionally filtered by project.
-    pub async fn list_departments(&self, project: Option<&str>) -> Result<Vec<Department>> {
-        let db = self.db.lock().await;
-        match project {
-            Some(p) => {
-                let mut stmt =
-                    db.prepare("SELECT * FROM departments WHERE project = ?1 ORDER BY name ASC")?;
-                let depts = stmt
-                    .query_map(params![p], |row| Ok(row_to_department(row)))?
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(depts)
-            }
-            None => {
-                let mut stmt = db.prepare("SELECT * FROM departments ORDER BY name ASC")?;
-                let depts = stmt
-                    .query_map([], |row| Ok(row_to_department(row)))?
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(depts)
-            }
-        }
-    }
-
-    /// Set (or clear) the manager of a department.
-    pub async fn set_department_manager(
-        &self,
-        dept_id: &str,
-        manager_id: Option<&str>,
-    ) -> Result<()> {
-        let db = self.db.lock().await;
-        let updated = db.execute(
-            "UPDATE departments SET manager_id = ?1 WHERE id = ?2",
-            params![manager_id, dept_id],
-        )?;
-        if updated == 0 {
-            anyhow::bail!("department '{dept_id}' not found");
-        }
-        info!(dept_id = %dept_id, manager_id = ?manager_id, "department manager updated");
-        Ok(())
-    }
-
-    /// Get all agents assigned to a department.
-    pub async fn department_members(&self, dept_id: &str) -> Result<Vec<PersistentAgent>> {
-        let db = self.db.lock().await;
-        let mut stmt =
-            db.prepare("SELECT * FROM agents WHERE department_id = ?1 ORDER BY name ASC")?;
-        let agents = stmt
-            .query_map(params![dept_id], |row| Ok(row_to_agent(row)))?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(agents)
-    }
-
-    /// Walk the parent_id chain from a department up to the root.
-    /// Returns the chain starting from the given department.
-    /// Includes cycle detection via visited set to prevent infinite loops.
-    pub async fn department_chain(&self, dept_id: &str) -> Result<Vec<Department>> {
-        let mut chain = Vec::new();
-        let mut current_id = Some(dept_id.to_string());
-        let mut visited = std::collections::HashSet::new();
-
-        while let Some(id) = current_id {
-            if !visited.insert(id.clone()) {
-                tracing::warn!(dept_id = %id, "cycle detected in department hierarchy");
-                break;
-            }
-            match self.get_department(&id).await? {
-                Some(dept) => {
-                    current_id = dept.parent_id.clone();
-                    chain.push(dept);
-                }
-                None => break,
-            }
-        }
-
-        Ok(chain)
-    }
-
-    /// Assign an agent to a department (or remove from department with None).
-    pub async fn set_agent_department(&self, agent_id: &str, dept_id: Option<&str>) -> Result<()> {
-        let db = self.db.lock().await;
-        let updated = db.execute(
-            "UPDATE agents SET department_id = ?1 WHERE id = ?2",
-            params![dept_id, agent_id],
-        )?;
-        if updated == 0 {
-            anyhow::bail!("agent '{agent_id}' not found");
-        }
-        info!(agent_id = %agent_id, department_id = ?dept_id, "agent department updated");
-        Ok(())
-    }
-
     // -----------------------------------------------------------------------
     // Budget policy operations
     // -----------------------------------------------------------------------
 
-    /// List all budget policies.
     pub async fn list_budget_policies(&self) -> Result<Vec<serde_json::Value>> {
         let db = self.db.lock().await;
         let mut stmt = db.prepare(
-            "SELECT id, scope_type, scope_id, window, amount_usd, warn_pct, hard_stop, paused, created_at \
+            "SELECT id, agent_id, window, amount_usd, warn_pct, hard_stop, paused, created_at \
              FROM budget_policies ORDER BY created_at DESC",
         )?;
         let policies = stmt
             .query_map([], |row| {
                 Ok(serde_json::json!({
                     "id": row.get::<_, String>(0)?,
-                    "scope_type": row.get::<_, String>(1)?,
-                    "scope_id": row.get::<_, String>(2)?,
-                    "window": row.get::<_, String>(3)?,
-                    "amount_usd": row.get::<_, f64>(4)?,
-                    "warn_pct": row.get::<_, f64>(5)?,
-                    "hard_stop": row.get::<_, i32>(6)? != 0,
-                    "paused": row.get::<_, i32>(7)? != 0,
-                    "created_at": row.get::<_, String>(8)?,
+                    "agent_id": row.get::<_, String>(1)?,
+                    "window": row.get::<_, String>(2)?,
+                    "amount_usd": row.get::<_, f64>(3)?,
+                    "warn_pct": row.get::<_, f64>(4)?,
+                    "hard_stop": row.get::<_, i32>(5)? != 0,
+                    "paused": row.get::<_, i32>(6)? != 0,
+                    "created_at": row.get::<_, String>(7)?,
                 }))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(policies)
     }
 
-    /// Create a new budget policy.
     pub async fn create_budget_policy(
         &self,
-        scope_type: &str,
-        scope_id: &str,
+        agent_id: &str,
         window: &str,
         amount_usd: f64,
     ) -> Result<String> {
@@ -1128,30 +1089,36 @@ impl AgentRegistry {
         let now = chrono::Utc::now().to_rfc3339();
         let db = self.db.lock().await;
         db.execute(
-            "INSERT INTO budget_policies (id, scope_type, scope_id, window, amount_usd, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![id, scope_type, scope_id, window, amount_usd, now],
+            "INSERT INTO budget_policies (id, agent_id, window, amount_usd, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, agent_id, window, amount_usd, now],
         )?;
-        info!(id = %id, scope_type = %scope_type, scope_id = %scope_id, "budget policy created");
+        info!(id = %id, agent_id = %agent_id, "budget policy created");
         Ok(id)
     }
 
-    /// Check budget: returns amount_usd if a policy exists for the given scope.
-    pub async fn check_budget(&self, scope_type: &str, scope_id: &str) -> Result<Option<f64>> {
+    /// Check budget for an agent — walks ancestor chain to find the tightest policy.
+    pub async fn check_budget(&self, agent_id: &str) -> Result<Option<f64>> {
+        let ancestor_ids = self.get_ancestor_ids(agent_id).await?;
         let db = self.db.lock().await;
-        let amount: Option<f64> = db
-            .query_row(
-                "SELECT amount_usd FROM budget_policies \
-                 WHERE scope_type = ?1 AND scope_id = ?2 AND paused = 0 \
-                 ORDER BY created_at DESC LIMIT 1",
-                params![scope_type, scope_id],
-                |row| row.get(0),
-            )
-            .optional()?;
-        Ok(amount)
+        let mut tightest: Option<f64> = None;
+        for id in &ancestor_ids {
+            let amount: Option<f64> = db
+                .query_row(
+                    "SELECT amount_usd FROM budget_policies \
+                     WHERE agent_id = ?1 AND paused = 0 \
+                     ORDER BY amount_usd ASC LIMIT 1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if let Some(a) = amount {
+                tightest = Some(tightest.map_or(a, |t: f64| t.min(a)));
+            }
+        }
+        Ok(tightest)
     }
 
-    /// Pause or unpause a budget policy.
     pub async fn set_budget_paused(&self, policy_id: &str, paused: bool) -> Result<()> {
         let db = self.db.lock().await;
         let updated = db.execute(
@@ -1161,15 +1128,13 @@ impl AgentRegistry {
         if updated == 0 {
             anyhow::bail!("budget policy '{policy_id}' not found");
         }
-        info!(policy_id = %policy_id, paused = paused, "budget policy paused state updated");
         Ok(())
     }
 
     // -----------------------------------------------------------------------
-    // Approval queue operations
+    // Approval queue
     // -----------------------------------------------------------------------
 
-    /// Create a new approval request.
     pub async fn create_approval(
         &self,
         agent_id: &str,
@@ -1190,7 +1155,6 @@ impl AgentRegistry {
         Ok(id)
     }
 
-    /// List approvals, optionally filtered by status.
     pub async fn list_approvals(&self, status: Option<&str>) -> Result<Vec<serde_json::Value>> {
         let db = self.db.lock().await;
         let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match status {
@@ -1232,7 +1196,6 @@ impl AgentRegistry {
         Ok(approvals)
     }
 
-    /// Resolve an approval request (approve/reject).
     pub async fn resolve_approval(
         &self,
         approval_id: &str,
@@ -1250,39 +1213,342 @@ impl AgentRegistry {
         if updated == 0 {
             anyhow::bail!("approval '{approval_id}' not found");
         }
-        info!(approval_id = %approval_id, status = %status, decided_by = %decided_by, "approval resolved");
         Ok(())
     }
 
-    /// Get max_concurrent for an agent by name. Returns 1 if not found.
-    pub async fn get_max_concurrent_by_name(&self, name: &str) -> Result<u32> {
+    // -----------------------------------------------------------------------
+    // Unified task store (SQLite-backed, replaces per-project JSONL)
+    // -----------------------------------------------------------------------
+
+    /// Create a task assigned to an agent.
+    pub async fn create_task(
+        &self,
+        agent_id: &str,
+        subject: &str,
+        description: &str,
+        skill: Option<&str>,
+        labels: &[String],
+    ) -> Result<aeqi_tasks::Task> {
+        // Resolve task prefix: agent's task_prefix, or first 2 chars of name, or "t".
+        let agent = self
+            .get(agent_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("agent not found: {agent_id}"))?;
+        let prefix = agent.task_prefix.unwrap_or_else(|| {
+            let name = &agent.name;
+            if name.len() >= 2 {
+                name[..2].to_lowercase()
+            } else {
+                "t".to_string()
+            }
+        });
+
         let db = self.db.lock().await;
-        let max_concurrent: Option<u32> = db
+
+        // Get and increment sequence for this prefix.
+        db.execute(
+            "INSERT OR IGNORE INTO task_sequences (prefix, next_seq) VALUES (?1, 1)",
+            params![prefix],
+        )?;
+        let seq: u32 = db.query_row(
+            "UPDATE task_sequences SET next_seq = next_seq + 1 WHERE prefix = ?1 RETURNING next_seq - 1",
+            params![prefix],
+            |row| row.get(0),
+        )?;
+
+        let task_id = format!("{prefix}-{seq:03}");
+        let now = chrono::Utc::now();
+        let labels_json = serde_json::to_string(labels)?;
+
+        let task = aeqi_tasks::Task {
+            id: aeqi_tasks::TaskId(task_id.clone()),
+            subject: subject.to_string(),
+            description: description.to_string(),
+            status: aeqi_tasks::TaskStatus::Pending,
+            priority: aeqi_tasks::task::Priority::Normal,
+            assignee: Some(agent.name.clone()),
+            agent_id: Some(agent_id.to_string()),
+            depends_on: Vec::new(),
+            blocks: Vec::new(),
+            skill: skill.map(|s| s.to_string()),
+            labels: labels.to_vec(),
+            retry_count: 0,
+            checkpoints: Vec::new(),
+            metadata: serde_json::Value::Null,
+            created_at: now,
+            updated_at: None,
+            closed_at: None,
+            closed_reason: None,
+            acceptance_criteria: None,
+            locked_by: None,
+            locked_at: None,
+        };
+
+        db.execute(
+            "INSERT INTO tasks (id, subject, description, status, priority, assignee, agent_id, skill, labels, created_at)
+             VALUES (?1, ?2, ?3, 'pending', 'normal', ?4, ?5, ?6, ?7, ?8)",
+            params![
+                task_id,
+                subject,
+                description,
+                agent.name,
+                agent_id,
+                skill,
+                labels_json,
+                now.to_rfc3339(),
+            ],
+        )?;
+
+        info!(task = %task_id, agent = %agent.name, subject = %subject, "task created");
+        Ok(task)
+    }
+
+    /// Get all pending tasks that are ready to run (no unmet dependencies).
+    pub async fn ready_tasks(&self) -> Result<Vec<aeqi_tasks::Task>> {
+        let db = self.db.lock().await;
+        let mut stmt = db.prepare(
+            "SELECT * FROM tasks WHERE status = 'pending' ORDER BY
+             CASE priority
+                WHEN 'critical' THEN 0
+                WHEN 'high' THEN 1
+                WHEN 'normal' THEN 2
+                WHEN 'low' THEN 3
+                ELSE 4
+             END,
+             created_at ASC",
+        )?;
+        let tasks: Vec<aeqi_tasks::Task> = stmt
+            .query_map([], |row| Ok(row_to_task(row)))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // Filter out tasks with unmet dependencies.
+        let ready: Vec<aeqi_tasks::Task> = tasks
+            .into_iter()
+            .filter(|t| {
+                if t.depends_on.is_empty() {
+                    return true;
+                }
+                // Check all deps are done (synchronous — we have the db lock).
+                t.depends_on.iter().all(|dep_id| {
+                    db.query_row(
+                        "SELECT status FROM tasks WHERE id = ?1",
+                        params![dep_id.0],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .ok()
+                    .as_deref()
+                        == Some("done")
+                })
+            })
+            .collect();
+
+        Ok(ready)
+    }
+
+    /// Get a task by ID.
+    pub async fn get_task(&self, task_id: &str) -> Result<Option<aeqi_tasks::Task>> {
+        let db = self.db.lock().await;
+        let task = db
             .query_row(
-                "SELECT max_concurrent FROM agents WHERE name = ?1 AND status = 'active' ORDER BY created_at DESC LIMIT 1",
-                params![name],
-                |row| row.get(0),
+                "SELECT * FROM tasks WHERE id = ?1",
+                params![task_id],
+                |row| Ok(row_to_task(row)),
             )
             .optional()?;
-        Ok(max_concurrent.unwrap_or(1))
+        Ok(task)
     }
 
-    /// Update the model for an agent by UUID.
-    pub async fn update_agent_model(&self, id: &str, model: &str) -> Result<()> {
+    /// Update a task's status.
+    pub async fn update_task_status(
+        &self,
+        task_id: &str,
+        status: aeqi_tasks::TaskStatus,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let status_str = status.to_string();
         let db = self.db.lock().await;
-        let updated = db.execute(
-            "UPDATE agents SET model = ?1 WHERE id = ?2",
-            params![model, id],
+
+        let closed_at = if matches!(
+            status,
+            aeqi_tasks::TaskStatus::Done | aeqi_tasks::TaskStatus::Cancelled
+        ) {
+            Some(now.clone())
+        } else {
+            None
+        };
+
+        db.execute(
+            "UPDATE tasks SET status = ?1, updated_at = ?2, closed_at = COALESCE(?3, closed_at) WHERE id = ?4",
+            params![status_str, now, closed_at, task_id],
         )?;
-        if updated == 0 {
-            anyhow::bail!("agent '{id}' not found");
-        }
-        info!(id = %id, model = %model, "agent model updated from TOML config");
         Ok(())
+    }
+
+    /// Update a task using a closure (mirrors TaskBoard API).
+    pub async fn update_task<F: FnOnce(&mut aeqi_tasks::Task)>(
+        &self,
+        task_id: &str,
+        f: F,
+    ) -> Result<aeqi_tasks::Task> {
+        let db = self.db.lock().await;
+        let mut task = db
+            .query_row(
+                "SELECT * FROM tasks WHERE id = ?1",
+                params![task_id],
+                |row| Ok(row_to_task(row)),
+            )
+            .optional()?
+            .ok_or_else(|| anyhow::anyhow!("task not found: {task_id}"))?;
+
+        f(&mut task);
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let labels_json = serde_json::to_string(&task.labels).unwrap_or_default();
+        let checkpoints_json = serde_json::to_string(&task.checkpoints).unwrap_or_default();
+        let deps_json = serde_json::to_string(&task.depends_on).unwrap_or_default();
+        let blocks_json = serde_json::to_string(&task.blocks).unwrap_or_default();
+        let metadata_json = serde_json::to_string(&task.metadata).unwrap_or_default();
+
+        db.execute(
+            "UPDATE tasks SET
+                subject = ?1, description = ?2, status = ?3, priority = ?4,
+                assignee = ?5, agent_id = ?6, skill = ?7, labels = ?8,
+                retry_count = ?9, checkpoints = ?10, metadata = ?11,
+                depends_on = ?12, blocks = ?13, acceptance_criteria = ?14,
+                locked_by = ?15, locked_at = ?16, updated_at = ?17,
+                closed_at = ?18, closed_reason = ?19
+             WHERE id = ?20",
+            params![
+                task.subject,
+                task.description,
+                task.status.to_string(),
+                task.priority.to_string(),
+                task.assignee,
+                task.agent_id,
+                task.skill,
+                labels_json,
+                task.retry_count,
+                checkpoints_json,
+                metadata_json,
+                deps_json,
+                blocks_json,
+                task.acceptance_criteria,
+                task.locked_by,
+                task.locked_at.map(|d| d.to_rfc3339()),
+                now,
+                task.closed_at.map(|d| d.to_rfc3339()),
+                task.closed_reason,
+                task.id.0,
+            ],
+        )?;
+
+        Ok(task)
+    }
+
+    /// List all tasks, optionally filtered by status and/or agent.
+    pub async fn list_tasks(
+        &self,
+        status: Option<&str>,
+        agent_id: Option<&str>,
+    ) -> Result<Vec<aeqi_tasks::Task>> {
+        let db = self.db.lock().await;
+        let mut sql = "SELECT * FROM tasks WHERE 1=1".to_string();
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+        if let Some(s) = status {
+            sql.push_str(" AND status = ?");
+            params_vec.push(Box::new(s.to_string()));
+        }
+        if let Some(a) = agent_id {
+            sql.push_str(" AND agent_id = ?");
+            params_vec.push(Box::new(a.to_string()));
+        }
+        sql.push_str(" ORDER BY created_at DESC");
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = db.prepare(&sql)?;
+        let tasks = stmt
+            .query_map(params_refs.as_slice(), |row| Ok(row_to_task(row)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(tasks)
+    }
+
+    /// Expose the database connection for shared use (e.g., by Scheduler).
+    pub fn db(&self) -> Arc<Mutex<Connection>> {
+        self.db.clone()
     }
 }
 
-/// Convert a template trigger definition to a TriggerType.
+/// Convert a SQLite row to a Task.
+fn row_to_task(row: &rusqlite::Row) -> aeqi_tasks::Task {
+    let labels_str: String = row.get("labels").unwrap_or_else(|_| "[]".to_string());
+    let checkpoints_str: String = row.get("checkpoints").unwrap_or_else(|_| "[]".to_string());
+    let deps_str: String = row.get("depends_on").unwrap_or_else(|_| "[]".to_string());
+    let blocks_str: String = row.get("blocks").unwrap_or_else(|_| "[]".to_string());
+    let metadata_str: String = row.get("metadata").unwrap_or_else(|_| "{}".to_string());
+
+    let status_str: String = row.get("status").unwrap_or_else(|_| "pending".to_string());
+    let status = match status_str.as_str() {
+        "in_progress" => aeqi_tasks::TaskStatus::InProgress,
+        "done" => aeqi_tasks::TaskStatus::Done,
+        "blocked" => aeqi_tasks::TaskStatus::Blocked,
+        "cancelled" => aeqi_tasks::TaskStatus::Cancelled,
+        _ => aeqi_tasks::TaskStatus::Pending,
+    };
+
+    let priority_str: String = row.get("priority").unwrap_or_else(|_| "normal".to_string());
+    let priority = match priority_str.as_str() {
+        "low" => aeqi_tasks::task::Priority::Low,
+        "high" => aeqi_tasks::task::Priority::High,
+        "critical" => aeqi_tasks::task::Priority::Critical,
+        _ => aeqi_tasks::task::Priority::Normal,
+    };
+
+    aeqi_tasks::Task {
+        id: aeqi_tasks::TaskId(row.get("id").unwrap_or_default()),
+        subject: row.get("subject").unwrap_or_default(),
+        description: row.get("description").unwrap_or_default(),
+        status,
+        priority,
+        assignee: row.get("assignee").ok(),
+        agent_id: row.get("agent_id").ok(),
+        depends_on: serde_json::from_str(&deps_str).unwrap_or_default(),
+        blocks: serde_json::from_str(&blocks_str).unwrap_or_default(),
+        skill: row.get("skill").ok(),
+        labels: serde_json::from_str(&labels_str).unwrap_or_default(),
+        retry_count: row.get::<_, u32>("retry_count").unwrap_or(0),
+        checkpoints: serde_json::from_str(&checkpoints_str).unwrap_or_default(),
+        metadata: serde_json::from_str(&metadata_str).unwrap_or(serde_json::Value::Null),
+        created_at: row
+            .get::<_, String>("created_at")
+            .ok()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+            .map(|d| d.with_timezone(&chrono::Utc))
+            .unwrap_or_default(),
+        updated_at: row
+            .get::<_, String>("updated_at")
+            .ok()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+            .map(|d| d.with_timezone(&chrono::Utc)),
+        closed_at: row
+            .get::<_, String>("closed_at")
+            .ok()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+            .map(|d| d.with_timezone(&chrono::Utc)),
+        closed_reason: row.get("closed_reason").ok(),
+        acceptance_criteria: row.get("acceptance_criteria").ok(),
+        locked_by: row.get("locked_by").ok(),
+        locked_at: row
+            .get::<_, String>("locked_at")
+            .ok()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+            .map(|d| d.with_timezone(&chrono::Utc)),
+    }
+}
+
 fn template_trigger_to_type(t: &TemplateTrigger) -> Result<crate::trigger::TriggerType> {
     if let Some(ref schedule) = t.schedule {
         return Ok(crate::trigger::TriggerType::Schedule {
@@ -1332,24 +1598,7 @@ fn template_trigger_to_type(t: &TemplateTrigger) -> Result<crate::trigger::Trigg
     )
 }
 
-fn row_to_department(row: &rusqlite::Row) -> Department {
-    Department {
-        id: row.get("id").unwrap_or_default(),
-        name: row.get("name").unwrap_or_default(),
-        project: row.get("project").ok(),
-        project_id: row.get("project_id").ok(),
-        manager_id: row.get("manager_id").ok(),
-        parent_id: row.get("parent_id").ok(),
-        created_at: row
-            .get::<_, String>("created_at")
-            .ok()
-            .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
-            .map(|d| d.with_timezone(&Utc))
-            .unwrap_or_default(),
-    }
-}
-
-fn row_to_agent(row: &rusqlite::Row) -> PersistentAgent {
+fn row_to_agent(row: &rusqlite::Row) -> Agent {
     let status_str: String = row.get("status").unwrap_or_default();
     let status = match status_str.as_str() {
         "paused" => AgentStatus::Paused,
@@ -1360,15 +1609,13 @@ fn row_to_agent(row: &rusqlite::Row) -> PersistentAgent {
     let caps_str: String = row.get("capabilities").unwrap_or_else(|_| "[]".to_string());
     let capabilities: Vec<String> = serde_json::from_str(&caps_str).unwrap_or_default();
 
-    PersistentAgent {
+    Agent {
         id: row.get("id").unwrap_or_default(),
         name: row.get("name").unwrap_or_default(),
         display_name: row.get("display_name").ok(),
         template: row.get("template").unwrap_or_default(),
         system_prompt: row.get("system_prompt").unwrap_or_default(),
-        project: row.get("project").ok(),
-        project_id: row.get("project_id").ok(),
-        department_id: row.get("department_id").ok(),
+        parent_id: row.get("parent_id").ok(),
         model: row.get("model").ok(),
         capabilities,
         status,
@@ -1385,7 +1632,6 @@ fn row_to_agent(row: &rusqlite::Row) -> PersistentAgent {
             .map(|d| d.with_timezone(&Utc)),
         session_count: row.get("session_count").unwrap_or(0),
         total_tokens: row.get::<_, i64>("total_tokens").unwrap_or(0) as u64,
-        // Visual identity — read from DB if columns exist, fallback to None.
         color: row.get("color").ok(),
         avatar: row.get("avatar").ok(),
         faces: row
@@ -1394,6 +1640,19 @@ fn row_to_agent(row: &rusqlite::Row) -> PersistentAgent {
             .and_then(|s| serde_json::from_str(&s).ok()),
         max_concurrent: row.get::<_, u32>("max_concurrent").unwrap_or(1),
         session_id: row.get("session_id").ok(),
+        workdir: row.get("workdir").ok(),
+        budget_usd: row.get("budget_usd").ok(),
+        execution_mode: row.get("execution_mode").ok(),
+        task_prefix: row.get("task_prefix").ok(),
+        worker_timeout_secs: row
+            .get::<_, i64>("worker_timeout_secs")
+            .ok()
+            .map(|v| v as u64),
+        prompts: row
+            .get::<_, String>("prompts")
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default(),
     }
 }
 
@@ -1428,55 +1687,127 @@ mod tests {
 
         assert_eq!(agent.name, "shadow");
         assert_eq!(agent.system_prompt, "You are Shadow.");
-        assert_eq!(agent.capabilities, vec!["spawn_agents"]);
-        assert!(agent.project.is_none());
+        assert!(agent.parent_id.is_none()); // Root agent
         assert_eq!(agent.status, AgentStatus::Active);
-        assert_eq!(agent.session_count, 0);
 
-        let fetched = reg.get_by_name("shadow").await.unwrap();
-        assert_eq!(fetched.len(), 1);
-        assert_eq!(fetched[0].id, agent.id);
+        let fetched = reg.get(&agent.id).await.unwrap().unwrap();
+        assert_eq!(fetched.id, agent.id);
     }
 
     #[tokio::test]
-    async fn spawn_project_scoped() {
+    async fn parent_child_relationship() {
         let reg = test_registry().await;
-        let agent = reg
+        let root = reg
+            .spawn("assistant", None, "root", "Root agent.", None, None, &[])
+            .await
+            .unwrap();
+        let child = reg
             .spawn(
-                "aeqi-lead",
+                "engineering",
                 None,
-                "shadow",
-                "Lead for aeqi.",
-                Some("aeqi"),
+                "team",
+                "Engineering team.",
+                Some(&root.id),
+                None,
+                &[],
+            )
+            .await
+            .unwrap();
+        let grandchild = reg
+            .spawn(
+                "backend",
+                None,
+                "team",
+                "Backend team.",
+                Some(&child.id),
                 None,
                 &[],
             )
             .await
             .unwrap();
 
-        assert_eq!(agent.project.as_deref(), Some("aeqi"));
+        // Children
+        let children = reg.get_children(&root.id).await.unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].name, "engineering");
 
-        let list = reg.list(Some("aeqi"), None).await.unwrap();
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].name, "aeqi-lead");
+        // Ancestors
+        let ancestors = reg.get_ancestors(&grandchild.id).await.unwrap();
+        assert_eq!(ancestors.len(), 3);
+        assert_eq!(ancestors[0].name, "backend");
+        assert_eq!(ancestors[1].name, "engineering");
+        assert_eq!(ancestors[2].name, "assistant");
 
-        let other = reg.list(Some("algostaking"), None).await.unwrap();
-        assert!(other.is_empty());
+        // Ancestor IDs
+        let ids = reg.get_ancestor_ids(&grandchild.id).await.unwrap();
+        assert_eq!(
+            ids,
+            vec![grandchild.id.clone(), child.id.clone(), root.id.clone()]
+        );
+    }
+
+    #[tokio::test]
+    async fn get_root() {
+        let reg = test_registry().await;
+        let root = reg
+            .spawn("assistant", None, "root", "Root.", None, None, &[])
+            .await
+            .unwrap();
+        let _child = reg
+            .spawn("worker", None, "t", "Worker.", Some(&root.id), None, &[])
+            .await
+            .unwrap();
+
+        let found = reg.get_root().await.unwrap().unwrap();
+        assert_eq!(found.id, root.id);
+    }
+
+    #[tokio::test]
+    async fn subtree() {
+        let reg = test_registry().await;
+        let root = reg
+            .spawn("root", None, "t", "R.", None, None, &[])
+            .await
+            .unwrap();
+        let a = reg
+            .spawn("a", None, "t", "A.", Some(&root.id), None, &[])
+            .await
+            .unwrap();
+        let _b = reg
+            .spawn("b", None, "t", "B.", Some(&root.id), None, &[])
+            .await
+            .unwrap();
+        let _c = reg
+            .spawn("c", None, "t", "C.", Some(&a.id), None, &[])
+            .await
+            .unwrap();
+
+        let tree = reg.get_subtree(&root.id).await.unwrap();
+        assert_eq!(tree.len(), 4); // root + a + b + c
+    }
+
+    #[tokio::test]
+    async fn move_agent_prevents_cycles() {
+        let reg = test_registry().await;
+        let root = reg
+            .spawn("root", None, "t", "R.", None, None, &[])
+            .await
+            .unwrap();
+        let child = reg
+            .spawn("child", None, "t", "C.", Some(&root.id), None, &[])
+            .await
+            .unwrap();
+
+        // Moving root under child would create a cycle.
+        let result = reg.move_agent(&root.id, Some(&child.id)).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn record_session_updates_stats() {
         let reg = test_registry().await;
         let agent = reg
-            .spawn(
-                "test-agent",
-                None,
-                "researcher",
-                "Test agent.",
-                None,
-                None,
-                &[],
-            )
+            .spawn("test", None, "t", "T.", None, None, &[])
             .await
             .unwrap();
 
@@ -1486,105 +1817,6 @@ mod tests {
         let updated = reg.get(&agent.id).await.unwrap().unwrap();
         assert_eq!(updated.session_count, 2);
         assert_eq!(updated.total_tokens, 8000);
-        assert!(updated.last_active.is_some());
-    }
-
-    #[tokio::test]
-    async fn status_lifecycle() {
-        let reg = test_registry().await;
-        reg.spawn(
-            "lifecycle",
-            None,
-            "shadow",
-            "Lifecycle test.",
-            None,
-            None,
-            &[],
-        )
-        .await
-        .unwrap();
-
-        reg.set_status("lifecycle", AgentStatus::Paused)
-            .await
-            .unwrap();
-        let agents = reg.get_by_name("lifecycle").await.unwrap();
-        assert_eq!(agents[0].status, AgentStatus::Paused);
-
-        reg.set_status("lifecycle", AgentStatus::Retired)
-            .await
-            .unwrap();
-        let agents = reg.get_by_name("lifecycle").await.unwrap();
-        assert_eq!(agents[0].status, AgentStatus::Retired);
-
-        // Active filter should not return retired agents.
-        let active = reg.list(None, Some(AgentStatus::Active)).await.unwrap();
-        assert!(active.is_empty());
-    }
-
-    #[tokio::test]
-    async fn default_for_project() {
-        let reg = test_registry().await;
-        reg.spawn(
-            "root-shadow",
-            None,
-            "shadow",
-            "Root agent.",
-            None,
-            None,
-            &[],
-        )
-        .await
-        .unwrap();
-        reg.spawn(
-            "aeqi-lead",
-            None,
-            "shadow",
-            "AEQI lead.",
-            Some("aeqi"),
-            None,
-            &[],
-        )
-        .await
-        .unwrap();
-
-        // Project-scoped takes priority.
-        let default = reg
-            .default_for_project(Some("aeqi"))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(default.name, "aeqi-lead");
-
-        // Unknown project falls back to root.
-        let default = reg
-            .default_for_project(Some("unknown"))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(default.name, "root-shadow");
-
-        // No project → root.
-        let default = reg.default_for_project(None).await.unwrap().unwrap();
-        assert_eq!(default.name, "root-shadow");
-    }
-
-    #[tokio::test]
-    async fn duplicate_names_allowed() {
-        let reg = test_registry().await;
-        let agent1 = reg
-            .spawn("shadow", None, "shadow", "First shadow.", None, None, &[])
-            .await
-            .unwrap();
-        let agent2 = reg
-            .spawn("shadow", None, "shadow", "Second shadow.", None, None, &[])
-            .await
-            .unwrap();
-        // Same name, different UUIDs.
-        assert_ne!(agent1.id, agent2.id);
-        assert_eq!(agent1.name, agent2.name);
-        // get_by_name returns both.
-        let all = reg.get_by_name("shadow").await.unwrap();
-        assert_eq!(all.len(), 2);
     }
 
     #[tokio::test]
@@ -1594,322 +1826,65 @@ mod tests {
 name: shadow
 display_name: "Shadow — Your Dark Butler"
 model: anthropic/claude-sonnet-4.6
-capabilities: [spawn_agents, spawn_projects]
+capabilities: [spawn_agents]
 ---
 
-You are Shadow, the user's personal assistant.
-You learn everything about the user aggressively.
-"#;
+You are Shadow, the user's personal assistant."#;
         let agent = reg.spawn_from_template(template, None).await.unwrap();
         assert_eq!(agent.name, "shadow");
         assert_eq!(
             agent.display_name.as_deref(),
             Some("Shadow — Your Dark Butler")
         );
-        assert_eq!(agent.model.as_deref(), Some("anthropic/claude-sonnet-4.6"));
-        assert_eq!(agent.capabilities, vec!["spawn_agents", "spawn_projects"]);
-        assert!(agent.system_prompt.contains("personal assistant"));
-        assert!(agent.project.is_none()); // Root scope
+        assert!(agent.parent_id.is_none()); // Root
     }
 
     #[tokio::test]
-    async fn spawn_from_template_creates_triggers() {
+    async fn spawn_from_template_with_parent() {
         let reg = test_registry().await;
+        let root = reg
+            .spawn("root", None, "t", "R.", None, None, &[])
+            .await
+            .unwrap();
         let template = r#"---
-name: watcher
+name: worker
 model: anthropic/claude-sonnet-4.6
-capabilities: [manage_triggers]
-triggers:
-  - name: morning-brief
-    schedule: "0 9 * * *"
-    skill: morning-brief
-    max_budget_usd: 0.50
-  - name: failure-watch
-    event: task_failed
-    cooldown_secs: 300
-    skill: failure-triage
-    max_budget_usd: 1.00
 ---
 
-You are a monitoring agent.
-"#;
-        let agent = reg.spawn_from_template(template, None).await.unwrap();
-        assert_eq!(agent.name, "watcher");
-
-        // Verify triggers were created.
-        let trigger_store = reg.trigger_store();
-        let triggers = trigger_store.list_for_agent(&agent.id).await.unwrap();
-        assert_eq!(triggers.len(), 2);
-
-        let brief = triggers.iter().find(|t| t.name == "morning-brief").unwrap();
-        assert_eq!(brief.skill, "morning-brief");
-        assert!(
-            matches!(brief.trigger_type, crate::trigger::TriggerType::Schedule { ref expr } if expr == "0 9 * * *")
-        );
-        assert_eq!(brief.max_budget_usd, Some(0.50));
-
-        let watch = triggers.iter().find(|t| t.name == "failure-watch").unwrap();
-        assert_eq!(watch.skill, "failure-triage");
-        assert!(matches!(
-            watch.trigger_type,
-            crate::trigger::TriggerType::Event {
-                cooldown_secs: 300,
-                ..
-            }
-        ));
-    }
-
-    // -----------------------------------------------------------------------
-    // Department tests
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn create_department() {
-        let reg = test_registry().await;
-        let dept = reg
-            .create_department("engineering", Some("aeqi"), None, None)
-            .await
-            .unwrap();
-
-        assert_eq!(dept.name, "engineering");
-        assert_eq!(dept.project.as_deref(), Some("aeqi"));
-        assert!(dept.manager_id.is_none());
-        assert!(dept.parent_id.is_none());
-        assert!(!dept.id.is_empty());
-
-        // Fetch by ID.
-        let fetched = reg.get_department(&dept.id).await.unwrap().unwrap();
-        assert_eq!(fetched.id, dept.id);
-        assert_eq!(fetched.name, "engineering");
-    }
-
-    #[tokio::test]
-    async fn list_departments_by_project() {
-        let reg = test_registry().await;
-        reg.create_department("engineering", Some("aeqi"), None, None)
-            .await
-            .unwrap();
-        reg.create_department("design", Some("aeqi"), None, None)
-            .await
-            .unwrap();
-        reg.create_department("ops", Some("other"), None, None)
-            .await
-            .unwrap();
-        reg.create_department("global", None, None, None)
-            .await
-            .unwrap();
-
-        let aeqi_depts = reg.list_departments(Some("aeqi")).await.unwrap();
-        assert_eq!(aeqi_depts.len(), 2);
-        let names: Vec<&str> = aeqi_depts.iter().map(|d| d.name.as_str()).collect();
-        assert!(names.contains(&"engineering"));
-        assert!(names.contains(&"design"));
-
-        let other_depts = reg.list_departments(Some("other")).await.unwrap();
-        assert_eq!(other_depts.len(), 1);
-        assert_eq!(other_depts[0].name, "ops");
-
-        // None returns all departments.
-        let all = reg.list_departments(None).await.unwrap();
-        assert_eq!(all.len(), 4);
-    }
-
-    #[tokio::test]
-    async fn set_and_change_department_manager() {
-        let reg = test_registry().await;
+You are a worker agent."#;
         let agent = reg
-            .spawn("lead", None, "t", "Lead.", None, None, &[])
+            .spawn_from_template(template, Some(&root.id))
             .await
             .unwrap();
-        let agent2 = reg
-            .spawn("lead2", None, "t", "Lead2.", None, None, &[])
-            .await
-            .unwrap();
-
-        let dept = reg
-            .create_department("engineering", None, None, None)
-            .await
-            .unwrap();
-        assert!(dept.manager_id.is_none());
-
-        // Set manager.
-        reg.set_department_manager(&dept.id, Some(&agent.id))
-            .await
-            .unwrap();
-        let fetched = reg.get_department(&dept.id).await.unwrap().unwrap();
-        assert_eq!(fetched.manager_id.as_deref(), Some(agent.id.as_str()));
-
-        // Change manager.
-        reg.set_department_manager(&dept.id, Some(&agent2.id))
-            .await
-            .unwrap();
-        let fetched = reg.get_department(&dept.id).await.unwrap().unwrap();
-        assert_eq!(fetched.manager_id.as_deref(), Some(agent2.id.as_str()));
-
-        // Clear manager.
-        reg.set_department_manager(&dept.id, None).await.unwrap();
-        let fetched = reg.get_department(&dept.id).await.unwrap().unwrap();
-        assert!(fetched.manager_id.is_none());
+        assert_eq!(agent.parent_id.as_deref(), Some(root.id.as_str()));
     }
 
     #[tokio::test]
-    async fn department_members_returns_correct_agents() {
+    async fn budget_walks_ancestor_chain() {
         let reg = test_registry().await;
-        let dept = reg
-            .create_department("engineering", Some("aeqi"), None, None)
+        let root = reg
+            .spawn("root", None, "t", "R.", None, None, &[])
             .await
             .unwrap();
-        let dept2 = reg
-            .create_department("design", Some("aeqi"), None, None)
-            .await
-            .unwrap();
-
-        let a1 = reg
-            .spawn("eng1", None, "t", "Eng1.", Some("aeqi"), None, &[])
-            .await
-            .unwrap();
-        let a2 = reg
-            .spawn("eng2", None, "t", "Eng2.", Some("aeqi"), None, &[])
-            .await
-            .unwrap();
-        let a3 = reg
-            .spawn("designer", None, "t", "Des.", Some("aeqi"), None, &[])
+        let child = reg
+            .spawn("child", None, "t", "C.", Some(&root.id), None, &[])
             .await
             .unwrap();
 
-        reg.set_agent_department(&a1.id, Some(&dept.id))
-            .await
-            .unwrap();
-        reg.set_agent_department(&a2.id, Some(&dept.id))
-            .await
-            .unwrap();
-        reg.set_agent_department(&a3.id, Some(&dept2.id))
+        // Set budget on root.
+        reg.create_budget_policy(&root.id, "daily", 10.0)
             .await
             .unwrap();
 
-        let members = reg.department_members(&dept.id).await.unwrap();
-        assert_eq!(members.len(), 2);
-        let names: Vec<&str> = members.iter().map(|a| a.name.as_str()).collect();
-        assert!(names.contains(&"eng1"));
-        assert!(names.contains(&"eng2"));
+        // Child inherits it.
+        let budget = reg.check_budget(&child.id).await.unwrap();
+        assert_eq!(budget, Some(10.0));
 
-        let design_members = reg.department_members(&dept2.id).await.unwrap();
-        assert_eq!(design_members.len(), 1);
-        assert_eq!(design_members[0].name, "designer");
-    }
-
-    #[tokio::test]
-    async fn department_chain_walks_hierarchy() {
-        let reg = test_registry().await;
-
-        // Create hierarchy: company → engineering → backend
-        let company = reg
-            .create_department("company", None, None, None)
+        // Tighter budget on child takes precedence.
+        reg.create_budget_policy(&child.id, "daily", 5.0)
             .await
             .unwrap();
-        let engineering = reg
-            .create_department("engineering", None, None, Some(&company.id))
-            .await
-            .unwrap();
-        let backend = reg
-            .create_department("backend", None, None, Some(&engineering.id))
-            .await
-            .unwrap();
-
-        // Chain from backend should be: backend → engineering → company
-        let chain = reg.department_chain(&backend.id).await.unwrap();
-        assert_eq!(chain.len(), 3);
-        assert_eq!(chain[0].name, "backend");
-        assert_eq!(chain[1].name, "engineering");
-        assert_eq!(chain[2].name, "company");
-
-        // Chain from engineering: engineering → company
-        let chain = reg.department_chain(&engineering.id).await.unwrap();
-        assert_eq!(chain.len(), 2);
-        assert_eq!(chain[0].name, "engineering");
-        assert_eq!(chain[1].name, "company");
-
-        // Chain from company (root): just company
-        let chain = reg.department_chain(&company.id).await.unwrap();
-        assert_eq!(chain.len(), 1);
-        assert_eq!(chain[0].name, "company");
-    }
-
-    #[tokio::test]
-    async fn set_agent_department_moves_between_departments() {
-        let reg = test_registry().await;
-        let dept_a = reg
-            .create_department("alpha", None, None, None)
-            .await
-            .unwrap();
-        let dept_b = reg
-            .create_department("beta", None, None, None)
-            .await
-            .unwrap();
-
-        let agent = reg
-            .spawn("mover", None, "t", "Mover.", None, None, &[])
-            .await
-            .unwrap();
-
-        // Initially no department.
-        let fetched = reg.get(&agent.id).await.unwrap().unwrap();
-        assert!(fetched.department_id.is_none());
-        assert!(reg.department_members(&dept_a.id).await.unwrap().is_empty());
-
-        // Assign to dept_a.
-        reg.set_agent_department(&agent.id, Some(&dept_a.id))
-            .await
-            .unwrap();
-        let members_a = reg.department_members(&dept_a.id).await.unwrap();
-        assert_eq!(members_a.len(), 1);
-        assert_eq!(members_a[0].id, agent.id);
-        assert!(reg.department_members(&dept_b.id).await.unwrap().is_empty());
-
-        // Move to dept_b.
-        reg.set_agent_department(&agent.id, Some(&dept_b.id))
-            .await
-            .unwrap();
-        assert!(reg.department_members(&dept_a.id).await.unwrap().is_empty());
-        let members_b = reg.department_members(&dept_b.id).await.unwrap();
-        assert_eq!(members_b.len(), 1);
-        assert_eq!(members_b[0].id, agent.id);
-
-        // Remove from department.
-        reg.set_agent_department(&agent.id, None).await.unwrap();
-        assert!(reg.department_members(&dept_b.id).await.unwrap().is_empty());
-        let fetched = reg.get(&agent.id).await.unwrap().unwrap();
-        assert!(fetched.department_id.is_none());
-    }
-
-    #[tokio::test]
-    async fn get_department_by_name() {
-        let reg = test_registry().await;
-        reg.create_department("engineering", Some("aeqi"), None, None)
-            .await
-            .unwrap();
-        reg.create_department("engineering", Some("other"), None, None)
-            .await
-            .unwrap();
-
-        let dept = reg
-            .get_department_by_name("engineering", Some("aeqi"))
-            .await
-            .unwrap();
-        assert!(dept.is_some());
-        assert_eq!(dept.unwrap().project.as_deref(), Some("aeqi"));
-
-        let dept = reg
-            .get_department_by_name("engineering", Some("other"))
-            .await
-            .unwrap();
-        assert!(dept.is_some());
-        assert_eq!(dept.unwrap().project.as_deref(), Some("other"));
-
-        let nope = reg
-            .get_department_by_name("nonexistent", Some("aeqi"))
-            .await
-            .unwrap();
-        assert!(nope.is_none());
+        let budget = reg.check_budget(&child.id).await.unwrap();
+        assert_eq!(budget, Some(5.0));
     }
 }

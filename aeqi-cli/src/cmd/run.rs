@@ -81,7 +81,13 @@ pub(crate) async fn cmd_run(
     };
 
     info!(prompt = %prompt, "starting agent");
-    let mut agent = Agent::new(agent_config, provider, tools, observer, identity);
+    let mut agent = Agent::new(
+        agent_config,
+        provider,
+        tools,
+        observer,
+        identity.system_prompt(),
+    );
     if let Some(mem) = memory {
         agent = agent.with_memory(mem);
     }

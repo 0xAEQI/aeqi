@@ -7,7 +7,7 @@ pub mod tool;
 
 pub use channel::{Channel, IncomingMessage, OutgoingMessage};
 pub use embedder::Embedder;
-pub use memory::{Memory, MemoryCategory, MemoryEntry, MemoryQuery, MemoryScope};
+pub use memory::{Memory, MemoryCategory, MemoryEntry, MemoryQuery};
 pub use observer::{
     CompactInstructions, ContextAttachment, Event, LogObserver, LoopAction, Observer,
     PrometheusObserver,

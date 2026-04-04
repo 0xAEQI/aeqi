@@ -35,6 +35,9 @@ pub struct Trigger {
     pub last_fired: Option<DateTime<Utc>>,
     pub fire_count: u32,
     pub total_cost_usd: f64,
+    /// Prompt entries injected into tasks created by this trigger.
+    #[serde(default)]
+    pub prompts: Vec<aeqi_core::PromptEntry>,
 }
 
 /// Trigger classification.
@@ -523,6 +526,7 @@ impl TriggerStore {
             last_fired: None,
             fire_count: 0,
             total_cost_usd: 0.0,
+            prompts: Vec::new(),
         };
 
         // Extract public_id for webhook triggers so it lives in a dedicated column.
@@ -744,6 +748,11 @@ fn row_to_trigger(row: &rusqlite::Row) -> Trigger {
             .map(|d| d.with_timezone(&Utc)),
         fire_count: row.get::<_, i32>("fire_count").unwrap_or(0) as u32,
         total_cost_usd: row.get("total_cost_usd").unwrap_or(0.0),
+        prompts: row
+            .get::<_, String>("prompts")
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default(),
     }
 }
 

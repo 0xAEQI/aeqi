@@ -24,13 +24,13 @@ export function CallToAction() {
           className="text-3xl md:text-4xl font-medium text-white/90 leading-snug mb-4 relative"
           style={{ fontFamily: "'Space Grotesk', sans-serif" }}
         >
-          From goals to done.
+          Four primitives. One conversation.
         </motion.h2>
         <motion.p
           {...fadeUp(0.1)}
           className="text-[15px] text-white/30 mb-10"
         >
-          Four tables. One loop. A tree that thinks.
+          Open source. Self-hosted. Built in Rust.
         </motion.p>
         <motion.div
           {...fadeUp(0.2)}
@@ -51,7 +51,7 @@ export function CallToAction() {
               className="relative bg-white text-[#08080C] rounded-full px-8 py-3.5 text-[14px] font-medium hover:bg-white/95 transition-colors"
               style={{ fontFamily: "'Space Grotesk', sans-serif" }}
             >
-              Enter
+              Start talking
             </div>
           </a>
           <a

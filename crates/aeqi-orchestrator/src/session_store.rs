@@ -26,8 +26,6 @@ pub struct Session {
     pub id: String,
     pub legacy_chat_id: Option<i64>,
     pub agent_id: Option<String>,
-    pub project_id: Option<String>,
-    pub department_id: Option<String>,
     pub session_type: String,
     pub name: String,
     pub status: String,
@@ -155,8 +153,8 @@ impl SessionStore {
                     "DROP INDEX IF EXISTS idx_usess_agent;
                      DROP INDEX IF EXISTS idx_usess_project;
                      DROP INDEX IF EXISTS idx_usess_type;
+                     DROP INDEX IF EXISTS idx_sess_project;
                      CREATE INDEX IF NOT EXISTS idx_sess_agent ON sessions(agent_id);
-                     CREATE INDEX IF NOT EXISTS idx_sess_project ON sessions(project_id);
                      CREATE INDEX IF NOT EXISTS idx_sess_type ON sessions(session_type);",
                 );
             }
@@ -168,8 +166,6 @@ impl SessionStore {
                  id TEXT PRIMARY KEY,
                  legacy_chat_id INTEGER UNIQUE,
                  agent_id TEXT,
-                 project_id TEXT,
-                 department_id TEXT,
                  session_type TEXT NOT NULL,
                  name TEXT NOT NULL,
                  status TEXT NOT NULL DEFAULT 'active',
@@ -177,7 +173,6 @@ impl SessionStore {
                  closed_at TEXT
              );
              CREATE INDEX IF NOT EXISTS idx_sess_agent ON sessions(agent_id);
-             CREATE INDEX IF NOT EXISTS idx_sess_project ON sessions(project_id);
              CREATE INDEX IF NOT EXISTS idx_sess_type ON sessions(session_type);",
         )
         .context("failed to create sessions table")?;
@@ -633,7 +628,6 @@ impl SessionStore {
         session_type: &str,
         name: &str,
         agent_id: Option<&str>,
-        project_id: Option<&str>,
     ) -> Result<String> {
         let db = self.db.lock().await;
         // Check if session exists for this chat_id.
@@ -652,9 +646,9 @@ impl SessionStore {
         // Create new.
         let id = uuid::Uuid::new_v4().to_string();
         db.execute(
-            "INSERT INTO sessions (id, legacy_chat_id, session_type, name, agent_id, project_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![id, chat_id, session_type, name, agent_id, project_id],
+            "INSERT INTO sessions (id, legacy_chat_id, session_type, name, agent_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, chat_id, session_type, name, agent_id],
         )?;
         Ok(id)
     }
@@ -735,52 +729,31 @@ impl SessionStore {
         self.timeline(chat_id, limit).await
     }
 
-    /// List sessions, optionally filtered by agent_id or project_id.
+    /// List sessions, optionally filtered by agent_id.
     pub async fn list_sessions(
         &self,
         agent_id: Option<&str>,
-        project_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Session>> {
         let db = self.db.lock().await;
 
-        let (sql, boxed_params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
-            match (agent_id, project_id) {
-                (Some(aid), Some(pid)) => (
-                    "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at, parent_id, task_id \
-                     FROM sessions WHERE agent_id = ?1 AND project_id = ?2 ORDER BY created_at DESC LIMIT ?3"
-                        .to_string(),
-                    vec![
-                        Box::new(aid.to_string()) as Box<dyn rusqlite::types::ToSql>,
-                        Box::new(pid.to_string()),
-                        Box::new(limit as i64),
-                    ],
-                ),
-                (Some(aid), None) => (
-                    "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at, parent_id, task_id \
-                     FROM sessions WHERE agent_id = ?1 ORDER BY created_at DESC LIMIT ?2"
-                        .to_string(),
-                    vec![
-                        Box::new(aid.to_string()) as Box<dyn rusqlite::types::ToSql>,
-                        Box::new(limit as i64),
-                    ],
-                ),
-                (None, Some(pid)) => (
-                    "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at, parent_id, task_id \
-                     FROM sessions WHERE project_id = ?1 ORDER BY created_at DESC LIMIT ?2"
-                        .to_string(),
-                    vec![
-                        Box::new(pid.to_string()) as Box<dyn rusqlite::types::ToSql>,
-                        Box::new(limit as i64),
-                    ],
-                ),
-                (None, None) => (
-                    "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at, parent_id, task_id \
-                     FROM sessions ORDER BY created_at DESC LIMIT ?1"
-                        .to_string(),
-                    vec![Box::new(limit as i64) as Box<dyn rusqlite::types::ToSql>],
-                ),
-            };
+        let (sql, boxed_params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match agent_id {
+            Some(aid) => (
+                "SELECT id, legacy_chat_id, agent_id, session_type, name, status, created_at, closed_at, parent_id, task_id \
+                 FROM sessions WHERE agent_id = ?1 ORDER BY created_at DESC LIMIT ?2"
+                    .to_string(),
+                vec![
+                    Box::new(aid.to_string()) as Box<dyn rusqlite::types::ToSql>,
+                    Box::new(limit as i64),
+                ],
+            ),
+            None => (
+                "SELECT id, legacy_chat_id, agent_id, session_type, name, status, created_at, closed_at, parent_id, task_id \
+                 FROM sessions ORDER BY created_at DESC LIMIT ?1"
+                    .to_string(),
+                vec![Box::new(limit as i64) as Box<dyn rusqlite::types::ToSql>],
+            ),
+        };
 
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             boxed_params.iter().map(|p| p.as_ref()).collect();
@@ -791,15 +764,13 @@ impl SessionStore {
                     id: row.get(0)?,
                     legacy_chat_id: row.get(1)?,
                     agent_id: row.get(2)?,
-                    project_id: row.get(3)?,
-                    department_id: row.get(4)?,
-                    session_type: row.get(5)?,
-                    name: row.get(6)?,
-                    status: row.get(7)?,
-                    created_at: row.get(8)?,
-                    closed_at: row.get(9)?,
-                    parent_id: row.get(10)?,
-                    task_id: row.get(11)?,
+                    session_type: row.get(3)?,
+                    name: row.get(4)?,
+                    status: row.get(5)?,
+                    created_at: row.get(6)?,
+                    closed_at: row.get(7)?,
+                    parent_id: row.get(8)?,
+                    task_id: row.get(9)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -811,8 +782,6 @@ impl SessionStore {
     pub async fn create_session(
         &self,
         agent_id: &str,
-        project_id: Option<&str>,
-        department_id: Option<&str>,
         session_type: &str,
         name: &str,
         parent_id: Option<&str>,
@@ -830,9 +799,9 @@ impl SessionStore {
         };
         let db = self.db.lock().await;
         db.execute(
-            "INSERT INTO sessions (id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, parent_id, task_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active', ?8, ?9)",
-            params![id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, parent_id, task_id],
+            "INSERT INTO sessions (id, legacy_chat_id, agent_id, session_type, name, status, parent_id, task_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7)",
+            params![id, legacy_chat_id, agent_id, session_type, name, parent_id, task_id],
         )?;
         Ok(id)
     }
@@ -853,7 +822,7 @@ impl SessionStore {
         let db = self.db.lock().await;
         let session = db
             .query_row(
-                "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at, parent_id, task_id
+                "SELECT id, legacy_chat_id, agent_id, session_type, name, status, created_at, closed_at, parent_id, task_id
                  FROM sessions WHERE id = ?1",
                 params![session_id],
                 |row| {
@@ -861,15 +830,13 @@ impl SessionStore {
                         id: row.get(0)?,
                         legacy_chat_id: row.get(1)?,
                         agent_id: row.get(2)?,
-                        project_id: row.get(3)?,
-                        department_id: row.get(4)?,
-                        session_type: row.get(5)?,
-                        name: row.get(6)?,
-                        status: row.get(7)?,
-                        created_at: row.get(8)?,
-                        closed_at: row.get(9)?,
-                        parent_id: row.get(10)?,
-                        task_id: row.get(11)?,
+                        session_type: row.get(3)?,
+                        name: row.get(4)?,
+                        status: row.get(5)?,
+                        created_at: row.get(6)?,
+                        closed_at: row.get(7)?,
+                        parent_id: row.get(8)?,
+                        task_id: row.get(9)?,
                     })
                 },
             )
@@ -881,7 +848,7 @@ impl SessionStore {
     pub async fn list_children(&self, parent_id: &str) -> Result<Vec<Session>> {
         let db = self.db.lock().await;
         let mut stmt = db.prepare(
-            "SELECT id, legacy_chat_id, agent_id, project_id, department_id, session_type, name, status, created_at, closed_at, parent_id, task_id
+            "SELECT id, legacy_chat_id, agent_id, session_type, name, status, created_at, closed_at, parent_id, task_id
              FROM sessions WHERE parent_id = ?1 ORDER BY created_at DESC",
         )?;
         let rows = stmt
@@ -890,15 +857,13 @@ impl SessionStore {
                     id: row.get(0)?,
                     legacy_chat_id: row.get(1)?,
                     agent_id: row.get(2)?,
-                    project_id: row.get(3)?,
-                    department_id: row.get(4)?,
-                    session_type: row.get(5)?,
-                    name: row.get(6)?,
-                    status: row.get(7)?,
-                    created_at: row.get(8)?,
-                    closed_at: row.get(9)?,
-                    parent_id: row.get(10)?,
-                    task_id: row.get(11)?,
+                    session_type: row.get(3)?,
+                    name: row.get(4)?,
+                    status: row.get(5)?,
+                    created_at: row.get(6)?,
+                    closed_at: row.get(7)?,
+                    parent_id: row.get(8)?,
+                    task_id: row.get(9)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -1172,7 +1137,7 @@ mod tests {
         let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
         let id1 = store
-            .ensure_session(100, "web", "test-session", None, None)
+            .ensure_session(100, "web", "test-session", None)
             .await
             .unwrap();
         assert!(!id1.is_empty());
@@ -1180,36 +1145,26 @@ mod tests {
 
         // Calling again returns the same ID.
         let id2 = store
-            .ensure_session(100, "web", "test-session", None, None)
+            .ensure_session(100, "web", "test-session", None)
             .await
             .unwrap();
         assert_eq!(id1, id2);
     }
 
     #[tokio::test]
-    async fn test_ensure_session_with_agent_and_project() {
+    async fn test_ensure_session_with_agent() {
         let dir = TempDir::new().unwrap();
         let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
         let id = store
-            .ensure_session(
-                200,
-                "web",
-                "agent-session",
-                Some("agent-uuid-1"),
-                Some("project-uuid-1"),
-            )
+            .ensure_session(200, "web", "agent-session", Some("agent-uuid-1"))
             .await
             .unwrap();
 
-        let sessions = store
-            .list_sessions(Some("agent-uuid-1"), None, 10)
-            .await
-            .unwrap();
+        let sessions = store.list_sessions(Some("agent-uuid-1"), 10).await.unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, id);
         assert_eq!(sessions[0].agent_id.as_deref(), Some("agent-uuid-1"));
-        assert_eq!(sessions[0].project_id.as_deref(), Some("project-uuid-1"));
         assert_eq!(sessions[0].legacy_chat_id, Some(200));
     }
 
@@ -1219,7 +1174,7 @@ mod tests {
         let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
         let session_id = store
-            .ensure_session(300, "web", "history-test", None, None)
+            .ensure_session(300, "web", "history-test", None)
             .await
             .unwrap();
 
@@ -1248,33 +1203,23 @@ mod tests {
         let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
         store
-            .ensure_session(400, "web", "s1", Some("a1"), Some("p1"))
+            .ensure_session(400, "web", "s1", Some("a1"))
             .await
             .unwrap();
         store
-            .ensure_session(401, "web", "s2", Some("a1"), Some("p2"))
+            .ensure_session(401, "web", "s2", Some("a1"))
             .await
             .unwrap();
         store
-            .ensure_session(402, "web", "s3", Some("a2"), Some("p1"))
+            .ensure_session(402, "web", "s3", Some("a2"))
             .await
             .unwrap();
 
-        let all = store.list_sessions(None, None, 100).await.unwrap();
+        let all = store.list_sessions(None, 100).await.unwrap();
         assert_eq!(all.len(), 3);
 
-        let by_agent = store.list_sessions(Some("a1"), None, 100).await.unwrap();
+        let by_agent = store.list_sessions(Some("a1"), 100).await.unwrap();
         assert_eq!(by_agent.len(), 2);
-
-        let by_project = store.list_sessions(None, Some("p1"), 100).await.unwrap();
-        assert_eq!(by_project.len(), 2);
-
-        let by_both = store
-            .list_sessions(Some("a1"), Some("p1"), 100)
-            .await
-            .unwrap();
-        assert_eq!(by_both.len(), 1);
-        assert_eq!(by_both[0].name, "s1");
     }
 
     #[tokio::test]
@@ -1293,14 +1238,11 @@ mod tests {
         drop(store);
         let store = SessionStore::open(&dir.path().join("conv.db")).unwrap();
 
-        let sessions = store.list_sessions(None, None, 100).await.unwrap();
+        let sessions = store.list_sessions(None, 100).await.unwrap();
         assert_eq!(sessions.len(), 2);
 
         // Verify the one with agent_id got it backfilled.
-        let agent_sessions = store
-            .list_sessions(Some("agent-x"), None, 100)
-            .await
-            .unwrap();
+        let agent_sessions = store.list_sessions(Some("agent-x"), 100).await.unwrap();
         assert_eq!(agent_sessions.len(), 1);
         assert_eq!(agent_sessions[0].legacy_chat_id, Some(500));
     }

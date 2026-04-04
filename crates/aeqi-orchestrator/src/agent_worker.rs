@@ -1,18 +1,16 @@
 use aeqi_core::traits::{
-    ChatRequest, Event, LogObserver, LoopAction, Memory, MemoryCategory, MemoryScope, Message,
-    MessageContent, Observer, Provider, Role, Tool,
+    ChatRequest, Event, LogObserver, LoopAction, Memory, MemoryCategory, Message, MessageContent,
+    Observer, Provider, Role, Tool,
 };
-use aeqi_core::{Agent, AgentConfig, Identity};
-use aeqi_tasks::{Checkpoint, Task, TaskOutcomeKind, TaskOutcomeRecord, TaskStatus};
+use aeqi_core::{Agent, AgentConfig, AssembledPrompt};
+use aeqi_tasks::{Task, TaskOutcomeKind, TaskOutcomeRecord, TaskStatus};
 use anyhow::Result;
-use chrono::Utc;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{Mutex, Notify};
 use tracing::{debug, info, warn};
 
-use crate::audit::{AuditEvent, AuditLog, DecisionType};
 use crate::checkpoint::AgentCheckpoint;
+use crate::event_store::EventStore;
 use crate::execution_events::{EventBroadcaster, ExecutionEvent};
 use crate::executor::TaskOutcome;
 use crate::failure_analysis::{FailureAnalysis, FailureMode};
@@ -57,11 +55,13 @@ pub struct AgentWorker {
     pub state: WorkerState,
     pub hook: Option<Hook>,
     pub execution: WorkerExecution,
-    pub identity: Identity,
+    pub system_prompt: String,
+    pub assembled_prompt: Option<AssembledPrompt>,
     pub dispatch_bus: Arc<DispatchBus>,
-    pub tasks: Arc<Mutex<aeqi_tasks::TaskBoard>>,
-    /// Fired when a task is closed so waiters don't need to poll.
-    pub task_notify: Arc<Notify>,
+    /// Snapshot of the assigned task, populated at assign() time.
+    pub task_snapshot: Option<aeqi_tasks::Task>,
+    /// Called once at the end of execute() with the final status and optional outcome record.
+    pub on_complete: Option<Box<dyn FnOnce(TaskStatus, Option<TaskOutcomeRecord>) + Send + Sync>>,
     pub memory: Option<Arc<dyn Memory>>,
     pub reflect_provider: Option<Arc<dyn Provider>>,
     pub reflect_model: String,
@@ -71,8 +71,8 @@ pub struct AgentWorker {
     pub max_task_retries: u32,
     /// Optional shared blackboard for adaptive retry strategies.
     pub notes: Option<Arc<Notes>>,
-    /// Optional audit log for recording retry analysis.
-    pub audit_log: Option<Arc<AuditLog>>,
+    /// Optional event store for recording decisions (replaces audit log).
+    pub event_store: Option<Arc<EventStore>>,
     /// Whether adaptive retry is enabled for this worker.
     pub adaptive_retry: bool,
     /// Model used for failure analysis when adaptive retry is enabled.
@@ -86,10 +86,6 @@ pub struct AgentWorker {
     /// Persistent agent UUID for entity-scoped memory. When set, memory queries
     /// include this agent's entity memories alongside domain/system memories.
     pub persistent_agent_id: Option<String>,
-    /// Project primer from config — injected into context before memory recall.
-    pub project_primer: Option<String>,
-    /// Shared primer from top-level config — injected into ALL workers.
-    pub shared_primer: Option<String>,
     /// Session store for recording worker transcripts.
     pub session_store: Option<Arc<crate::SessionStore>>,
 }
@@ -102,11 +98,9 @@ impl AgentWorker {
         project_name: String,
         provider: Arc<dyn aeqi_core::traits::Provider>,
         tools: Vec<Arc<dyn Tool>>,
-        identity: Identity,
+        system_prompt: String,
         model: String,
         dispatch_bus: Arc<DispatchBus>,
-        tasks: Arc<Mutex<aeqi_tasks::TaskBoard>>,
-        task_notify: Arc<Notify>,
     ) -> Self {
         let reflect_model = model.clone();
         Self {
@@ -120,25 +114,24 @@ impl AgentWorker {
                 tools,
                 model,
             },
-            identity,
+            system_prompt,
+            assembled_prompt: None,
             dispatch_bus,
-            tasks,
-            task_notify,
+            task_snapshot: None,
+            on_complete: None,
             memory: None,
             reflect_provider: None,
             reflect_model,
             project_dir: None,
             max_task_retries: 3,
             notes: None,
-            audit_log: None,
+            event_store: None,
             adaptive_retry: false,
             failure_analysis_model: String::new(),
             middleware_chain: None,
             event_broadcaster: None,
             write_queue: None,
             persistent_agent_id: None,
-            project_primer: None,
-            shared_primer: None,
             session_store: None,
         }
     }
@@ -149,10 +142,8 @@ impl AgentWorker {
         project_name: String,
         cwd: PathBuf,
         max_budget_usd: f64,
-        identity: Identity,
+        system_prompt: String,
         dispatch_bus: Arc<DispatchBus>,
-        tasks: Arc<Mutex<aeqi_tasks::TaskBoard>>,
-        task_notify: Arc<Notify>,
     ) -> Self {
         Self {
             agent_name,
@@ -164,25 +155,24 @@ impl AgentWorker {
                 cwd,
                 max_budget_usd,
             },
-            identity,
+            system_prompt,
+            assembled_prompt: None,
             dispatch_bus,
-            tasks,
-            task_notify,
+            task_snapshot: None,
+            on_complete: None,
             memory: None,
             reflect_provider: None,
             reflect_model: String::new(),
             project_dir: None,
             max_task_retries: 3,
             notes: None,
-            audit_log: None,
+            event_store: None,
             adaptive_retry: false,
             failure_analysis_model: String::new(),
             middleware_chain: None,
             event_broadcaster: None,
             write_queue: None,
             persistent_agent_id: None,
-            project_primer: None,
-            shared_primer: None,
             session_store: None,
         }
     }
@@ -217,17 +207,6 @@ impl AgentWorker {
     pub fn with_adaptive_retry(mut self, model: String) -> Self {
         self.adaptive_retry = true;
         self.failure_analysis_model = model;
-        self
-    }
-
-    /// Set project and shared primers for context injection.
-    pub fn with_primers(
-        mut self,
-        project_primer: Option<String>,
-        shared_primer: Option<String>,
-    ) -> Self {
-        self.project_primer = project_primer;
-        self.shared_primer = shared_primer;
         self
     }
 
@@ -304,50 +283,60 @@ impl AgentWorker {
         }
     }
 
-    /// Assign a task to this worker (set hook).
+    /// Assign a task to this worker (set hook and snapshot the full task).
     pub fn assign(&mut self, task: &Task) {
         self.hook = Some(Hook::new(task.id.clone(), task.subject.clone()));
+        self.task_snapshot = Some(task.clone());
         self.state = WorkerState::Hooked;
     }
 
     /// Save a checkpoint recording this worker's progress on a task.
-    async fn save_checkpoint(&self, task_id: &str, progress: &str, cost: f64, turns: u32) {
-        let mut store = self.tasks.lock().await;
-        if let Err(e) = store.update(task_id, |q| {
-            q.checkpoints.push(Checkpoint {
-                timestamp: Utc::now(),
-                worker: self.agent_name.clone(),
-                progress: progress.to_string(),
-                cost_usd: cost,
-                turns_used: turns,
-            });
-        }) {
-            warn!(task_id, error = %e, "failed to save checkpoint to task store");
-        }
+    /// Now a no-op — the scheduler handles task state through AgentRegistry;
+    /// checkpoints written to a throwaway board were lost anyway.
+    async fn save_checkpoint(&self, task_id: &str, progress: &str, _cost: f64, _turns: u32) {
+        debug!(
+            worker = %self.name,
+            task = %task_id,
+            progress = %progress,
+            "checkpoint save skipped (scheduler manages task state)"
+        );
     }
 
     async fn build_resume_brief(&self, task: &Task) -> String {
         let mut sections = Vec::new();
 
-        if let Some(ref audit) = self.audit_log {
-            let mut events = audit.query_by_task(&task.id.0).unwrap_or_default();
-            if !events.is_empty() {
-                if events.len() > 6 {
-                    events = events.split_off(events.len() - 6);
+        if let Some(ref es) = self.event_store {
+            let filter = crate::event_store::EventFilter {
+                event_type: Some("decision".to_string()),
+                task_id: Some(task.id.0.clone()),
+                ..Default::default()
+            };
+            if let Ok(events) = es.query(&filter, 6, 0).await {
+                if !events.is_empty() {
+                    let lines = events
+                        .iter()
+                        .map(|event| {
+                            let decision_type = event
+                                .content
+                                .get("decision_type")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown");
+                            let reasoning = event
+                                .content
+                                .get("reasoning")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            format!(
+                                "- {} [{}] {}",
+                                event.created_at.format("%Y-%m-%d %H:%M:%S UTC"),
+                                decision_type,
+                                truncate_for_prompt(reasoning, 220),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    sections.push(format!("### Audit trail\n{lines}"));
                 }
-                let lines = events
-                    .iter()
-                    .map(|event| {
-                        format!(
-                            "- {} [{}] {}",
-                            event.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
-                            event.decision_type,
-                            truncate_for_prompt(&event.reasoning, 220),
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                sections.push(format!("### Audit trail\n{lines}"));
             }
         }
 
@@ -402,7 +391,7 @@ impl AgentWorker {
     }
 
     /// Execute the hooked work through the native AEQI agent runtime.
-    /// Returns (outcome, cost_usd, turns_used) for the WorkerPool to record.
+    /// Returns (outcome, cost_usd, turns_used) for the Scheduler to record.
     pub async fn execute(&mut self) -> Result<(TaskOutcome, RuntimeExecution, f64, u32)> {
         let hook = match &self.hook {
             Some(h) => h.clone(),
@@ -418,6 +407,11 @@ impl AgentWorker {
                 );
                 session.mark_phase(RuntimePhase::Prime, "Worker had no hook assigned");
                 session.finish(&runtime_outcome);
+                // Fire on_complete for this early exit path.
+                if let Some(cb) = self.on_complete.take() {
+                    let outcome_record = Self::build_task_outcome_record(&runtime_outcome);
+                    cb(TaskStatus::Done, Some(outcome_record));
+                }
                 return Ok((
                     outcome,
                     RuntimeExecution {
@@ -440,23 +434,18 @@ impl AgentWorker {
         runtime_session.mark_phase(RuntimePhase::Prime, "Loaded task hook and worker identity");
 
         // Extract parent_session_id from task labels (set by dispatch consumption).
-        let parent_session_id = {
-            let store = self.tasks.lock().await;
-            store.get(&hook.task_id.0).and_then(|t| {
-                t.labels
-                    .iter()
-                    .find_map(|l| l.strip_prefix("parent_session_id:"))
-                    .map(String::from)
-            })
-        };
+        let parent_session_id = self.task_snapshot.as_ref().and_then(|t| {
+            t.labels
+                .iter()
+                .find_map(|l| l.strip_prefix("parent_session_id:"))
+                .map(String::from)
+        });
 
         // Create a DB session for this worker execution.
         let worker_session_id = if let Some(ref ss) = self.session_store {
             let task_id_str = hook.task_id.0.clone();
             ss.create_session(
                 &self.agent_name,
-                Some(&self.project_name),
-                None,
                 "task",
                 &task_id_str,
                 parent_session_id.as_deref(),
@@ -469,13 +458,11 @@ impl AgentWorker {
         };
 
         // Build WorkerContext for middleware chain.
-        let task_description_for_ctx = {
-            let store = self.tasks.lock().await;
-            store
-                .get(&hook.task_id.0)
-                .map(|t| t.description.clone())
-                .unwrap_or_else(|| hook.subject.clone())
-        };
+        let task_description_for_ctx = self
+            .task_snapshot
+            .as_ref()
+            .map(|t| t.description.clone())
+            .unwrap_or_else(|| hook.subject.clone());
         let mut worker_ctx = WorkerContext::new(
             &hook.task_id.0,
             &task_description_for_ctx,
@@ -517,6 +504,12 @@ impl AgentWorker {
                             runtime: Some(runtime_execution.clone()),
                         });
                     }
+                    // Fire on_complete for this early exit path.
+                    if let Some(cb) = self.on_complete.take() {
+                        let outcome_record =
+                            Self::build_task_outcome_record(&runtime_execution.outcome);
+                        cb(TaskStatus::Pending, Some(outcome_record));
+                    }
                     return Ok((outcome, runtime_execution, 0.0, 0));
                 }
                 MiddlewareAction::Continue
@@ -545,22 +538,10 @@ impl AgentWorker {
 
         self.state = WorkerState::Working;
 
-        // Mark task as in_progress.
-        {
-            let mut store = self.tasks.lock().await;
-            if let Err(e) = store.update(&hook.task_id.0, |b| {
-                b.status = TaskStatus::InProgress;
-                b.assignee = Some(self.agent_name.clone());
-            }) {
-                warn!(task = %hook.task_id, error = %e, "failed to mark task in_progress");
-            }
-        }
+        // The scheduler already marks in_progress before spawning — no need to do it here.
 
-        // Build the prompt from the task (including any previous checkpoints).
-        let task_snapshot = {
-            let store = self.tasks.lock().await;
-            store.get(&hook.task_id.0).cloned()
-        };
+        // Use the task snapshot populated at assign() time.
+        let task_snapshot = self.task_snapshot.clone();
 
         let mut task_context = match task_snapshot.as_ref() {
             Some(b) => {
@@ -610,31 +591,10 @@ impl AgentWorker {
                 .await;
         }
 
-        // Inject project + shared primers into identity (before memory recall).
-        let mut base_identity = self.identity.clone();
-        {
-            let mut primer_parts = Vec::new();
-            if let Some(ref shared) = self.shared_primer {
-                primer_parts.push(shared.clone());
-            }
-            if let Some(ref project) = self.project_primer {
-                primer_parts.push(project.clone());
-            }
-            if !primer_parts.is_empty() {
-                let primers = primer_parts.join("\n\n---\n\n");
-                let existing = base_identity.knowledge.clone().unwrap_or_default();
-                if existing.is_empty() {
-                    base_identity.knowledge = Some(primers);
-                } else {
-                    base_identity.knowledge =
-                        Some(format!("{existing}\n\n## Project Primer\n{primers}"));
-                }
-            }
-        }
-
-        // Enrich identity with dynamic memory recall via query planner.
+        // Enrich system prompt with dynamic memory recall via query planner.
+        // Primers are already assembled into self.system_prompt by assemble_prompts().
         // When a persistent agent UUID is set, also recall entity-scoped memories.
-        let enriched_identity = if let Some(ref mem) = self.memory {
+        let enriched_system_prompt = if let Some(ref mem) = self.memory {
             // Try query planner first — generates typed, prioritized queries.
             let entries = match std::panic::catch_unwind(|| {
                 aeqi_memory::query_planner::QueryPlanner::plan(
@@ -672,8 +632,7 @@ impl AgentWorker {
                 Err(_) => {
                     // Fallback: single flat search if query planner fails.
                     warn!(worker = %self.name, "query planner failed, falling back to flat search");
-                    let query = aeqi_core::traits::MemoryQuery::new(&task_context, 30)
-                        .with_scope(MemoryScope::Domain);
+                    let query = aeqi_core::traits::MemoryQuery::new(&task_context, 30);
                     mem.search(&query).await.unwrap_or_default()
                 }
             };
@@ -682,8 +641,7 @@ impl AgentWorker {
             let mut all = entries;
             if let Some(ref agent_id) = self.persistent_agent_id {
                 let eq = aeqi_core::traits::MemoryQuery::new(&task_context, 10)
-                    .with_scope(MemoryScope::Entity)
-                    .with_entity(agent_id.clone());
+                    .with_agent(agent_id.clone());
                 if let Ok(entity_entries) = mem.search(&eq).await {
                     debug!(
                         worker = %self.name,
@@ -696,20 +654,27 @@ impl AgentWorker {
             }
 
             if !all.is_empty() {
-                let mut id = base_identity.clone();
                 let dynamic = all
                     .iter()
-                    .map(|e| format!("- [{}] {}: {}", e.scope, e.key, e.content))
+                    .map(|e| {
+                        format!(
+                            "- [{}] {}: {}",
+                            e.agent_id.as_deref().unwrap_or("global"),
+                            e.key,
+                            e.content
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join("\n");
-                let existing = id.memory.unwrap_or_default();
-                id.memory = Some(format!("{existing}\n\n## Dynamic Recall\n{dynamic}"));
-                id
+                format!(
+                    "{}\n\n---\n\n## Dynamic Recall\n{dynamic}",
+                    self.system_prompt
+                )
             } else {
-                base_identity.clone()
+                self.system_prompt.clone()
             }
         } else {
-            base_identity
+            self.system_prompt.clone()
         };
         runtime_session.mark_phase(
             RuntimePhase::Act,
@@ -735,7 +700,7 @@ impl AgentWorker {
                     tools.clone(),
                     model,
                     &task_context,
-                    &enriched_identity,
+                    &enriched_system_prompt,
                 )
                 .await
                 .map(|agent_result| {
@@ -767,13 +732,10 @@ impl AgentWorker {
                 );
                 let executor = crate::claude_code::ClaudeCodeExecutor::new(cwd.clone())
                     .with_budget(*max_budget_usd);
-                // Use execute_with_identity to pass the enriched identity
-                // (persona, memory, blackboard, resume brief) to Claude Code.
-                // Previously this was silently dropped — the CC agent ran
-                // without any of the worker's context.
-                let identity_prompt = enriched_identity.system_prompt();
+                // Pass the enriched system prompt (persona, memory, blackboard,
+                // resume brief) to Claude Code.
                 executor
-                    .execute_with_identity(&identity_prompt, &task_context)
+                    .execute_with_identity(&enriched_system_prompt, &task_context)
                     .await
                     .map(|cc_result| {
                         info!(
@@ -889,7 +851,9 @@ impl AgentWorker {
             chain.run_on_complete(&mut worker_ctx, &mw_outcome).await;
         }
 
-        // Process outcome: save checkpoint, update task status, notify worker_pool.
+        // Process outcome: save checkpoint, determine final task status.
+        // `final_task_status` is used by the on_complete callback below.
+        let mut final_task_status = TaskStatus::Pending;
         match &outcome {
             TaskOutcome::Done(result_text) => {
                 info!(worker = %self.name, task = %hook.task_id, "work completed");
@@ -905,11 +869,7 @@ impl AgentWorker {
                     turns,
                 )
                 .await;
-                {
-                    let mut store = self.tasks.lock().await;
-                    let _ = store.close(&hook.task_id.0, result_text);
-                }
-                self.task_notify.notify_waiters();
+                final_task_status = TaskStatus::Done;
                 self.state = WorkerState::Done;
             }
 
@@ -941,18 +901,7 @@ impl AgentWorker {
                     turns,
                 )
                 .await;
-                // Mark task as Blocked and preserve the question for WorkerPool resolution.
-                {
-                    let mut store = self.tasks.lock().await;
-                    if let Err(e) = store.update(&hook.task_id.0, |b| {
-                        b.status = TaskStatus::Blocked;
-                        b.assignee = None;
-                        b.closed_reason = Some(question.clone());
-                    }) {
-                        warn!(task = %hook.task_id, error = %e, "failed to mark task blocked");
-                    }
-                }
-                self.task_notify.notify_waiters();
+                final_task_status = TaskStatus::Blocked;
                 self.state = WorkerState::Done; // Worker is done; task is blocked.
             }
 
@@ -970,36 +919,23 @@ impl AgentWorker {
                     turns,
                 )
                 .await;
-                {
-                    let mut store = self.tasks.lock().await;
-                    let max_retries = self.max_task_retries;
-                    if let Err(e) = store.update(&hook.task_id.0, |b| {
-                        b.retry_count += 1;
-                        if b.retry_count >= max_retries {
-                            b.status = TaskStatus::Cancelled;
-                            b.assignee = None;
-                            b.closed_reason = Some(format!(
-                                "Auto-cancelled after {} retries (handoff). Last: {}",
-                                b.retry_count, checkpoint
-                            ));
-                        } else {
-                            b.status = TaskStatus::Pending;
-                            b.assignee = None;
-                        }
-                    }) {
-                        warn!(task = %hook.task_id, error = %e, "failed to re-queue task after handoff");
-                    }
+                // Check if this handoff would exceed max retries.
+                let current_retry = self
+                    .task_snapshot
+                    .as_ref()
+                    .map(|t| t.retry_count)
+                    .unwrap_or(0);
+                if current_retry + 1 >= self.max_task_retries {
+                    final_task_status = TaskStatus::Cancelled;
+                    warn!(
+                        worker = %self.name,
+                        task = %hook.task_id,
+                        retries = current_retry + 1,
+                        "task auto-cancelled after max retries (handoff)"
+                    );
+                } else {
+                    final_task_status = TaskStatus::Pending;
                 }
-                // Log if auto-cancelled.
-                {
-                    let store = self.tasks.lock().await;
-                    if let Some(b) = store.get(&hook.task_id.0)
-                        && b.status == TaskStatus::Cancelled
-                    {
-                        warn!(worker = %self.name, task = %hook.task_id, retries = b.retry_count, "task auto-cancelled after max retries");
-                    }
-                }
-                self.task_notify.notify_waiters();
                 self.state = WorkerState::Done;
             }
 
@@ -1018,7 +954,7 @@ impl AgentWorker {
                 )
                 .await;
 
-                // Attempt LLM-based failure analysis before locking the task store.
+                // Attempt LLM-based failure analysis.
                 let failure_result: Option<(String, FailureMode)> = if self.adaptive_retry
                     && let Some(ref provider) = self.reflect_provider
                 {
@@ -1028,13 +964,11 @@ impl AgentWorker {
                         self.failure_analysis_model.clone()
                     };
                     if !fa_model.is_empty() {
-                        let (task_desc, task_labels) = {
-                            let store = self.tasks.lock().await;
-                            store
-                                .get(&hook.task_id.0)
-                                .map(|t| (t.description.clone(), t.labels.clone()))
-                                .unwrap_or_default()
-                        };
+                        let (task_desc, task_labels) = self
+                            .task_snapshot
+                            .as_ref()
+                            .map(|t| (t.description.clone(), t.labels.clone()))
+                            .unwrap_or_default();
                         let prompt =
                             FailureAnalysis::analysis_prompt(&hook.subject, &task_desc, error_text);
                         let request = ChatRequest {
@@ -1058,20 +992,24 @@ impl AgentWorker {
                                     "failure analysis completed"
                                 );
 
-                                // Record audit event.
-                                if let Some(ref audit) = self.audit_log {
-                                    let _ = audit.record(
-                                        &AuditEvent::new(
-                                            &self.project_name,
-                                            DecisionType::FailureAnalyzed,
-                                            format!(
-                                                "Mode: {:?}, Reasoning: {}",
-                                                analysis.mode, analysis.reasoning
-                                            ),
+                                // Record decision event.
+                                if let Some(ref es) = self.event_store {
+                                    let _ = es
+                                        .emit(
+                                            "decision",
+                                            None,
+                                            None,
+                                            Some(&hook.task_id.0),
+                                            &serde_json::json!({
+                                                "decision_type": "FailureAnalyzed",
+                                                "agent": self.agent_name,
+                                                "reasoning": format!(
+                                                    "Mode: {:?}, Reasoning: {}",
+                                                    analysis.mode, analysis.reasoning
+                                                ),
+                                            }),
                                         )
-                                        .with_task(&hook.task_id.0)
-                                        .with_agent(&self.agent_name),
-                                    );
+                                        .await;
                                 }
 
                                 // Mode-specific: query blackboard for MissingContext.
@@ -1108,76 +1046,51 @@ impl AgentWorker {
                     None
                 };
 
-                let auto_cancelled = {
-                    let mut store = self.tasks.lock().await;
-                    let mut cancelled = false;
-                    let max_retries = self.max_task_retries;
-                    let enrichment = failure_result.as_ref().map(|(e, _)| e.clone());
-                    let failure_mode = failure_result.as_ref().map(|(_, m)| *m);
-                    if let Err(e) = store.update(&hook.task_id.0, |b| {
-                        b.retry_count += 1;
-                        if b.retry_count >= max_retries {
-                            b.status = TaskStatus::Cancelled;
-                            b.assignee = None;
-                            b.closed_reason = Some(format!(
-                                "Auto-cancelled after {} retries. Last error: {}",
-                                b.retry_count, error_text
-                            ));
-                            cancelled = true;
-                        } else {
-                            // Mode-specific status overrides.
-                            match failure_mode {
-                                Some(FailureMode::ExternalBlocker) => {
-                                    b.status = TaskStatus::Blocked;
-                                    b.assignee = None;
-                                    b.closed_reason =
-                                        Some("Blocked: external blocker detected".to_string());
-                                    cancelled = true;
-                                }
-                                Some(FailureMode::BudgetExhausted) => {
-                                    b.status = TaskStatus::Blocked;
-                                    b.assignee = None;
-                                    b.closed_reason =
-                                        Some("Blocked: budget exhausted".to_string());
-                                    b.labels.push("budget-blocked".to_string());
-                                    cancelled = true;
-                                }
-                                _ => {
-                                    let failure_context =
-                                        enrichment.clone().unwrap_or_else(|| {
-                                            format!(
-                                                "\n\n---\n## Previous Failure (attempt {})\n\n\
-                                                 The previous worker failed with this error. \
-                                                 Try a different approach to avoid the same failure.\n\n\
-                                                 **Error:**\n{}\n",
-                                                b.retry_count, error_text
-                                            )
-                                        });
-                                    b.description.push_str(&failure_context);
-                                    b.status = TaskStatus::Pending;
-                                    b.assignee = None;
-                                }
-                            }
-                        }
-                    }) {
-                        warn!(task = %hook.task_id, error = %e, "failed to re-queue task after failure");
-                    }
-                    cancelled
-                };
-                self.task_notify.notify_waiters();
+                // Determine auto-cancel from task snapshot retry_count.
+                let current_retry = self
+                    .task_snapshot
+                    .as_ref()
+                    .map(|t| t.retry_count)
+                    .unwrap_or(0);
+                let auto_cancelled = current_retry + 1 >= self.max_task_retries;
+                let failure_mode = failure_result.as_ref().map(|(_, m)| *m);
+                // Also treat ExternalBlocker / BudgetExhausted as terminal.
+                let is_blocker = matches!(
+                    failure_mode,
+                    Some(FailureMode::ExternalBlocker) | Some(FailureMode::BudgetExhausted)
+                );
+
                 if auto_cancelled {
-                    warn!(worker = %self.name, task = %hook.task_id, "task auto-cancelled after 3 failed retries");
-                    if let Some(ref audit) = self.audit_log {
-                        let _ = audit.record(
-                            &AuditEvent::new(
-                                &self.project_name,
-                                DecisionType::TaskCancelled,
-                                format!("Auto-cancelled after max retries: {}", error_text),
-                            )
-                            .with_task(&hook.task_id.0)
-                            .with_agent(&self.agent_name),
-                        );
+                    final_task_status = TaskStatus::Cancelled;
+                    warn!(
+                        worker = %self.name,
+                        task = %hook.task_id,
+                        retries = current_retry + 1,
+                        "task auto-cancelled after max retries"
+                    );
+                    if let Some(ref es) = self.event_store {
+                        let _ = es.emit(
+                            "decision",
+                            None,
+                            None,
+                            Some(&hook.task_id.0),
+                            &serde_json::json!({
+                                "decision_type": "TaskCancelled",
+                                "agent": self.agent_name,
+                                "reasoning": format!("Auto-cancelled after max retries: {}", error_text),
+                            }),
+                        ).await;
                     }
+                } else if is_blocker {
+                    final_task_status = TaskStatus::Blocked;
+                    warn!(
+                        worker = %self.name,
+                        task = %hook.task_id,
+                        mode = ?failure_mode,
+                        "task blocked by failure analysis"
+                    );
+                } else {
+                    final_task_status = TaskStatus::Pending;
                 }
                 self.state = WorkerState::Failed(error_text.to_string());
             }
@@ -1250,6 +1163,16 @@ impl AgentWorker {
             }
         }
 
+        // Fire the on_complete callback with the final status and outcome record.
+        if let Some(cb) = self.on_complete.take() {
+            let final_record = if final_task_status == TaskStatus::Done {
+                Some(Self::build_task_outcome_record(&runtime_execution.outcome))
+            } else {
+                None
+            };
+            cb(final_task_status, final_record);
+        }
+
         self.hook = None;
         Ok((outcome, runtime_execution, cost, turns))
     }
@@ -1287,39 +1210,34 @@ impl AgentWorker {
         }
     }
 
-    async fn persist_runtime_value(&self, task_id: &str, runtime: serde_json::Value) {
-        let mut store = self.tasks.lock().await;
-        if let Err(error) = store.update(task_id, |task| {
-            task.set_aeqi_metadata("runtime", runtime);
-        }) {
-            warn!(
-                worker = %self.name,
-                task = %task_id,
-                error = %error,
-                "failed to persist runtime metadata"
-            );
-        }
+    async fn persist_runtime_value(&self, task_id: &str, _runtime: serde_json::Value) {
+        // No-op — was writing to a throwaway board. Runtime metadata now flows
+        // through the on_complete callback and the scheduler.
+        debug!(
+            worker = %self.name,
+            task = %task_id,
+            "runtime value persist skipped (scheduler manages task state)"
+        );
     }
 
-    async fn persist_task_outcome(&self, task_id: &str, outcome: &RuntimeOutcome) {
-        let record = TaskOutcomeRecord {
+    /// Build a TaskOutcomeRecord from a RuntimeOutcome (used by on_complete callback).
+    fn build_task_outcome_record(outcome: &RuntimeOutcome) -> TaskOutcomeRecord {
+        TaskOutcomeRecord {
             kind: Self::task_outcome_kind(outcome),
             summary: outcome.summary.clone(),
             reason: outcome.reason.clone(),
             next_action: outcome.next_action.clone(),
-        };
-
-        let mut store = self.tasks.lock().await;
-        if let Err(error) = store.update(task_id, |task| {
-            task.set_task_outcome(&record);
-        }) {
-            warn!(
-                worker = %self.name,
-                task = %task_id,
-                error = %error,
-                "failed to persist typed task outcome"
-            );
         }
+    }
+
+    async fn persist_task_outcome(&self, task_id: &str, outcome: &RuntimeOutcome) {
+        // The outcome record now flows through the on_complete callback.
+        debug!(
+            worker = %self.name,
+            task = %task_id,
+            kind = ?Self::task_outcome_kind(outcome),
+            "task outcome persist skipped (delivered via on_complete callback)"
+        );
     }
 
     fn task_outcome_kind(outcome: &RuntimeOutcome) -> TaskOutcomeKind {
@@ -1379,7 +1297,7 @@ impl AgentWorker {
         tools: Vec<Arc<dyn Tool>>,
         model: &str,
         task_context: &str,
-        identity: &Identity,
+        system_prompt: &str,
     ) -> Result<aeqi_core::AgentResult> {
         let observer: Arc<dyn Observer> = if let Some(ref chain) = self.middleware_chain {
             let mut worker_ctx = crate::middleware::WorkerContext::new(
@@ -1439,7 +1357,13 @@ impl AgentWorker {
             ..Default::default()
         };
 
-        let mut agent = Agent::new(agent_config, provider, tools, observer, identity.clone());
+        let mut agent = Agent::new(
+            agent_config,
+            provider,
+            tools,
+            observer,
+            system_prompt.to_string(),
+        );
 
         if let Some(ref mem) = self.memory {
             agent = agent.with_memory(mem.clone());
@@ -1549,16 +1473,17 @@ impl AgentWorker {
                 continue;
             }
 
-            let (scope, rest) = if let Some(r) = line.strip_prefix("DOMAIN ") {
-                (MemoryScope::Domain, r)
+            // Determine whether memory is agent-scoped (SELF) or global (DOMAIN/SYSTEM).
+            let (is_self, rest) = if let Some(r) = line.strip_prefix("DOMAIN ") {
+                (false, r)
             } else if let Some(r) = line.strip_prefix("SYSTEM ") {
-                (MemoryScope::System, r)
+                (false, r)
             } else if let Some(r) = line.strip_prefix("SELF ") {
-                (MemoryScope::Entity, r)
+                (true, r)
             } else if let Some((cat_str, _rest)) = line.split_once(':') {
                 let cat_str = cat_str.trim();
                 if matches!(cat_str, "FACT" | "PROCEDURE" | "PREFERENCE" | "CONTEXT") {
-                    (MemoryScope::Domain, line)
+                    (false, line)
                 } else {
                     continue;
                 }
@@ -1633,11 +1558,7 @@ impl AgentWorker {
                 continue;
             }
 
-            let entity_id = if scope == MemoryScope::Entity {
-                Some(worker_name)
-            } else {
-                None
-            };
+            let agent_id_for_store: Option<&str> = if is_self { Some(worker_name) } else { None };
 
             // Capture dedup relation targets for edge creation.
             let supersede_target = match &should_store_action {
@@ -1646,9 +1567,9 @@ impl AgentWorker {
                 _ => None,
             };
 
-            match mem.store(key, content, category, scope, entity_id).await {
+            match mem.store(key, content, category, agent_id_for_store).await {
                 Ok(id) if !id.is_empty() => {
-                    debug!(worker = %worker_name, id = %id, key = %key, scope = %scope, "insight stored");
+                    debug!(worker = %worker_name, id = %id, key = %key, "insight stored");
 
                     // Create memory graph edge if dedup detected a relationship.
                     if let Some((relation, target_id)) = supersede_target {
@@ -1666,11 +1587,10 @@ impl AgentWorker {
                         }
                     }
 
-                    // Infer additional edges: search scoped to same scope/entity
-                    let mut edge_query =
-                        aeqi_core::traits::MemoryQuery::new(content, 3).with_scope(scope);
-                    if let Some(eid) = entity_id {
-                        edge_query = edge_query.with_entity(eid.to_string());
+                    // Infer additional edges: search scoped to same agent
+                    let mut edge_query = aeqi_core::traits::MemoryQuery::new(content, 3);
+                    if let Some(aid) = agent_id_for_store {
+                        edge_query = edge_query.with_agent(aid.to_string());
                     }
                     if let Ok(related) = mem.search(&edge_query).await {
                         for entry in &related {

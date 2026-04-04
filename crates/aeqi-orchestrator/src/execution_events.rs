@@ -136,6 +136,77 @@ pub enum ExecutionEvent {
     },
 }
 
+impl ExecutionEvent {
+    /// Extract event type, agent_id, task_id, and content for EventStore persistence.
+    fn to_event_fields(&self) -> (String, Option<String>, Option<String>, serde_json::Value) {
+        let content = serde_json::to_value(self).unwrap_or(serde_json::Value::Null);
+        match self {
+            Self::TaskStarted { task_id, agent, .. } => (
+                "execution.task_started".into(),
+                Some(agent.clone()),
+                Some(task_id.clone()),
+                content,
+            ),
+            Self::TaskCompleted { task_id, .. } => (
+                "execution.task_completed".into(),
+                None,
+                Some(task_id.clone()),
+                content,
+            ),
+            Self::TaskFailed { task_id, .. } => (
+                "execution.task_failed".into(),
+                None,
+                Some(task_id.clone()),
+                content,
+            ),
+            Self::Progress { task_id, .. } => (
+                "execution.progress".into(),
+                None,
+                Some(task_id.clone()),
+                content,
+            ),
+            Self::ToolCallStarted { task_id, .. } | Self::ToolCallCompleted { task_id, .. } => (
+                "execution.tool_call".into(),
+                None,
+                Some(task_id.clone()),
+                content,
+            ),
+            Self::CheckpointCreated { task_id, .. } => (
+                "execution.checkpoint".into(),
+                None,
+                Some(task_id.clone()),
+                content,
+            ),
+            Self::ApprovalRequired { task_id, .. } | Self::ClarificationNeeded { task_id, .. } => (
+                "execution.blocked".into(),
+                None,
+                Some(task_id.clone()),
+                content,
+            ),
+            Self::ChatStream { task_id, .. } => {
+                // High-volume — skip persistence for chat stream events.
+                (
+                    "execution.chat_stream".into(),
+                    None,
+                    Some(task_id.clone()),
+                    serde_json::Value::Null,
+                )
+            }
+            Self::DispatchReceived {
+                from_agent,
+                to_agent,
+                ..
+            } => (
+                "execution.dispatch".into(),
+                Some(to_agent.clone()),
+                None,
+                content,
+            ),
+            _ => ("execution.other".into(), None, None, content),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // EventBroadcaster
 // ---------------------------------------------------------------------------
@@ -147,13 +218,25 @@ pub enum ExecutionEvent {
 /// publisher.
 pub struct EventBroadcaster {
     sender: broadcast::Sender<ExecutionEvent>,
+    /// Optional event store for persistence. When set, every published event
+    /// is also written to the events table (fire-and-forget).
+    event_store: Option<std::sync::Arc<crate::event_store::EventStore>>,
 }
 
 impl EventBroadcaster {
     /// Create a new broadcaster with capacity 256.
     pub fn new() -> Self {
         let (sender, _) = broadcast::channel(256);
-        Self { sender }
+        Self {
+            sender,
+            event_store: None,
+        }
+    }
+
+    /// Attach an EventStore for persistence. Every publish() will also emit
+    /// to the events table.
+    pub fn set_event_store(&mut self, store: std::sync::Arc<crate::event_store::EventStore>) {
+        self.event_store = Some(store);
     }
 
     /// Subscribe to receive execution events.
@@ -161,9 +244,28 @@ impl EventBroadcaster {
         self.sender.subscribe()
     }
 
-    /// Publish an event to all subscribers. Non-blocking; ignores lag errors
-    /// and silently drops events when there are no subscribers.
+    /// Publish an event to all subscribers and persist to the events table.
+    /// Non-blocking; ignores lag errors and silently drops events when there
+    /// are no subscribers.
     pub fn publish(&self, event: ExecutionEvent) {
+        // Persist to events table (fire-and-forget).
+        if let Some(ref store) = self.event_store {
+            let store = store.clone();
+            let (event_type, agent_id, task_id, content) = event.to_event_fields();
+            tokio::spawn(async move {
+                let _ = store
+                    .emit(
+                        &event_type,
+                        agent_id.as_deref(),
+                        None,
+                        task_id.as_deref(),
+                        &content,
+                    )
+                    .await;
+            });
+        }
+
+        // Broadcast to in-process subscribers.
         match self.sender.send(event) {
             Ok(n) => {
                 debug!(subscribers = n, "event published");

@@ -5,28 +5,24 @@ use crate::helpers::load_config;
 
 pub(crate) async fn cmd_audit(
     config_path: &Option<PathBuf>,
-    project: Option<&str>,
+    _project: Option<&str>,
     task: Option<&str>,
     last: u32,
 ) -> Result<()> {
     let (config, _) = load_config(config_path)?;
     let data_dir = config.data_dir();
-    let audit_path = PathBuf::from(&data_dir).join("audit.db");
 
-    if !audit_path.exists() {
-        println!("No audit log found at {}", audit_path.display());
-        return Ok(());
-    }
+    // Open the AgentRegistry DB (which contains the unified events table).
+    let agent_reg = aeqi_orchestrator::agent_registry::AgentRegistry::open(&data_dir)?;
+    let event_store = aeqi_orchestrator::EventStore::new(agent_reg.db());
 
-    let log = aeqi_orchestrator::AuditLog::open(&audit_path)?;
-
-    let events = if let Some(task_id) = task {
-        log.query_by_task(task_id)?
-    } else if let Some(proj) = project {
-        log.query_by_project(proj)?
-    } else {
-        log.query_recent(last)?
+    let filter = aeqi_orchestrator::event_store::EventFilter {
+        event_type: Some("decision".to_string()),
+        task_id: task.map(String::from),
+        ..Default::default()
     };
+
+    let events = event_store.query(&filter, last, 0).await?;
 
     if events.is_empty() {
         println!("No audit events found.");
@@ -35,15 +31,28 @@ pub(crate) async fn cmd_audit(
 
     for event in &events {
         let task_str = event.task_id.as_deref().unwrap_or("-");
-        let agent_str = event.agent.as_deref().unwrap_or("-");
+        let agent_str = event
+            .content
+            .get("agent")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+        let decision_type = event
+            .content
+            .get("decision_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+        let reasoning = event
+            .content
+            .get("reasoning")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         println!(
-            "[{}] {} | {} | task={} agent={} | {}",
-            event.timestamp.format("%Y-%m-%d %H:%M:%S"),
-            event.project,
-            event.decision_type,
+            "[{}] {} | task={} agent={} | {}",
+            event.created_at.format("%Y-%m-%d %H:%M:%S"),
+            decision_type,
             task_str,
             agent_str,
-            event.reasoning,
+            reasoning,
         );
     }
 

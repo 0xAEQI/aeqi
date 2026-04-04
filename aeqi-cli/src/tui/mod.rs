@@ -317,8 +317,7 @@ pub async fn run(
 
     // Resolve persistent agent.
     let registry = aeqi_orchestrator::agent_registry::AgentRegistry::open(&data_dir)?;
-    let mut agent: Option<aeqi_orchestrator::agent_registry::PersistentAgent> = if let Some(name) =
-        agent_name
+    let mut agent: Option<aeqi_orchestrator::agent_registry::Agent> = if let Some(name) = agent_name
     {
         // Explicit --agent flag → resolve by name.
         registry.get_active_by_name(name).await?
@@ -701,7 +700,7 @@ fn is_daemon_running(config: &aeqi_core::AEQIConfig) -> bool {
 /// Returns a sender for pushing messages + a join handle.
 fn spawn_direct_agent(
     config: &aeqi_core::AEQIConfig,
-    agent_record: Option<&aeqi_orchestrator::agent_registry::PersistentAgent>,
+    agent_record: Option<&aeqi_orchestrator::agent_registry::Agent>,
     event_tx: mpsc::Sender<ChatStreamEvent>,
 ) -> Result<(
     tokio::sync::mpsc::UnboundedSender<String>,
@@ -741,7 +740,8 @@ fn spawn_direct_agent(
         name: agent_record
             .map(|a| a.name.clone())
             .unwrap_or_else(|| "shadow".into()),
-        entity_id: agent_record.map(|a| a.id.clone()),
+        agent_id: agent_record.map(|a| a.id.clone()),
+        ancestor_ids: Vec::new(),
         session_type: SessionType::Perpetual,
         session_file: agent_record.map(|a| {
             config
@@ -756,7 +756,13 @@ fn spawn_direct_agent(
     let observer: std::sync::Arc<dyn aeqi_core::traits::Observer> =
         std::sync::Arc::new(LogObserver);
 
-    let mut agent = Agent::new(agent_config, provider, tools, observer, identity);
+    let mut agent = Agent::new(
+        agent_config,
+        provider,
+        tools,
+        observer,
+        identity.system_prompt(),
+    );
 
     // Chat stream sender for TUI events.
     let (stream_sender, mut stream_rx) = aeqi_core::ChatStreamSender::new(64);

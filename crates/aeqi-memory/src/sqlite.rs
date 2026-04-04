@@ -1,5 +1,5 @@
 use crate::graph::{MemoryEdge, MemoryRelation};
-use aeqi_core::traits::{Embedder, Memory, MemoryCategory, MemoryEntry, MemoryQuery, MemoryScope};
+use aeqi_core::traits::{Embedder, Memory, MemoryCategory, MemoryEntry, MemoryQuery};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -17,8 +17,7 @@ struct MemRow {
     key: String,
     content: String,
     cat_str: String,
-    scope_str: String,
-    entity_id: Option<String>,
+    agent_id: Option<String>,
     created_at: String,
     session_id: Option<String>,
 }
@@ -82,16 +81,8 @@ impl SqliteMemory {
 
         Self::migrate(&conn)?;
 
-        // Migrate legacy 'realm' scope to 'system'.
-        conn.execute(
-            "UPDATE memories SET scope = 'system' WHERE scope = 'realm'",
-            [],
-        )?;
-
         conn.execute_batch(
-            "CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope);
-             CREATE INDEX IF NOT EXISTS idx_memories_entity ON memories(entity_id);
-             CREATE INDEX IF NOT EXISTS idx_memories_scope_entity ON memories(scope, entity_id);",
+            "CREATE INDEX IF NOT EXISTS idx_memories_entity ON memories(entity_id);",
         )?;
 
         let fts_exists: bool = conn.query_row(
@@ -278,24 +269,16 @@ impl SqliteMemory {
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(fts_query)];
         let mut idx = 2usize;
 
-        if let Some(ref scope) = query.scope {
-            conditions.push(format!("m.scope = ?{idx}"));
-            params.push(Box::new(scope.to_string()));
-            idx += 1;
-        }
-
-        if let Some(ref cid) = query.entity_id {
+        if let Some(ref agent_id) = query.agent_id {
             conditions.push(format!("m.entity_id = ?{idx}"));
-            params.push(Box::new(cid.clone()));
+            params.push(Box::new(agent_id.clone()));
             idx += 1;
-        } else if query.scope == Some(MemoryScope::Domain) {
-            conditions.push("m.entity_id IS NULL".to_string());
         }
 
         let where_clause = conditions.join(" AND ");
 
         let sql = format!(
-            "SELECT m.id, m.key, m.content, m.category, m.scope, m.entity_id,
+            "SELECT m.id, m.key, m.content, m.category, m.entity_id,
                     m.created_at, m.session_id, bm25(memories_fts) as rank
              FROM memories_fts f
              JOIN memories m ON m.rowid = f.rowid
@@ -315,19 +298,17 @@ impl SqliteMemory {
                 let key: String = row.get(1)?;
                 let content: String = row.get(2)?;
                 let cat_str: String = row.get(3)?;
-                let scope_str: String = row.get(4)?;
-                let entity_id: Option<String> = row.get(5)?;
-                let created_at: String = row.get(6)?;
-                let session_id: Option<String> = row.get(7)?;
-                let bm25: f64 = row.get(8)?;
+                let agent_id: Option<String> = row.get(4)?;
+                let created_at: String = row.get(5)?;
+                let session_id: Option<String> = row.get(6)?;
+                let bm25: f64 = row.get(7)?;
                 Ok((
                     MemRow {
                         id,
                         key,
                         content,
                         cat_str,
-                        scope_str,
-                        entity_id,
+                        agent_id,
                         created_at,
                         session_id,
                     },
@@ -350,18 +331,10 @@ impl SqliteMemory {
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
         let mut idx = 1usize;
 
-        if let Some(ref scope) = query.scope {
-            conditions.push(format!("m.scope = ?{idx}"));
-            params.push(Box::new(scope.to_string()));
-            idx += 1;
-        }
-
-        if let Some(ref cid) = query.entity_id {
+        if let Some(ref agent_id) = query.agent_id {
             conditions.push(format!("m.entity_id = ?{idx}"));
-            params.push(Box::new(cid.clone()));
+            params.push(Box::new(agent_id.clone()));
             idx += 1;
-        } else if query.scope == Some(MemoryScope::Domain) {
-            conditions.push("m.entity_id IS NULL".to_string());
         }
 
         let _ = idx; // suppress unused warning
@@ -412,7 +385,7 @@ impl SqliteMemory {
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
-            "SELECT id, key, content, category, scope, entity_id, created_at, session_id
+            "SELECT id, key, content, category, entity_id, created_at, session_id
              FROM memories WHERE id IN ({placeholders})"
         );
         let params: Vec<&dyn rusqlite::types::ToSql> = ids
@@ -428,10 +401,9 @@ impl SqliteMemory {
                 key: row.get(1)?,
                 content: row.get(2)?,
                 cat_str: row.get(3)?,
-                scope_str: row.get(4)?,
-                entity_id: row.get(5)?,
-                created_at: row.get(6)?,
-                session_id: row.get(7)?,
+                agent_id: row.get(4)?,
+                created_at: row.get(5)?,
+                session_id: row.get(6)?,
             })
         })
         .map(|iter| iter.filter_map(|r| r.ok()).collect())
@@ -479,15 +451,6 @@ impl SqliteMemory {
             "context" => MemoryCategory::Context,
             "evergreen" => MemoryCategory::Evergreen,
             _ => MemoryCategory::Fact,
-        }
-    }
-
-    fn parse_scope(s: &str) -> MemoryScope {
-        match s {
-            "entity" | "companion" => MemoryScope::Entity,
-            "department" => MemoryScope::Department,
-            "system" => MemoryScope::System,
-            _ => MemoryScope::Domain,
         }
     }
 
@@ -550,8 +513,6 @@ impl SqliteMemory {
             return None;
         }
 
-        let scope = Self::parse_scope(&row.scope_str);
-
         let created_at = DateTime::parse_from_rfc3339(&row.created_at)
             .ok()?
             .with_timezone(&Utc);
@@ -567,8 +528,7 @@ impl SqliteMemory {
             key: row.key,
             content: row.content,
             category,
-            scope,
-            entity_id: row.entity_id,
+            agent_id: row.agent_id,
             created_at,
             session_id: row.session_id,
             score: score * decay,
@@ -717,8 +677,7 @@ impl Memory for SqliteMemory {
         key: &str,
         content: &str,
         category: MemoryCategory,
-        scope: MemoryScope,
-        entity_id: Option<&str>,
+        agent_id: Option<&str>,
     ) -> Result<String> {
         // Dedup by exact content within 24h
         if self.has_recent_duplicate(content, 24) {
@@ -737,18 +696,17 @@ impl Memory for SqliteMemory {
         let cat = serde_json::to_string(&category)?
             .trim_matches('"')
             .to_string();
-        let scope_str = scope.to_string();
 
         {
             let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock: {e}"))?;
             conn.execute(
-                "INSERT INTO memories (id, key, content, category, scope, entity_id, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                rusqlite::params![id, key, content, cat, scope_str, entity_id, now],
+                "INSERT INTO memories (id, key, content, category, entity_id, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![id, key, content, cat, agent_id, now],
             )?;
         }
 
-        debug!(id = %id, key = %key, scope = %scope_str, entity_id = ?entity_id, "memory stored");
+        debug!(id = %id, key = %key, agent_id = ?agent_id, "memory stored");
 
         if let Some(ref embedder) = self.embedder {
             let hash = Self::content_hash(content);
@@ -912,8 +870,7 @@ impl Memory for SqliteMemory {
                     key: r.key.clone(),
                     content: r.content.clone(),
                     cat_str: r.cat_str.clone(),
-                    scope_str: r.scope_str.clone(),
-                    entity_id: r.entity_id.clone(),
+                    agent_id: r.agent_id.clone(),
                     created_at: r.created_at.clone(),
                     session_id: r.session_id.clone(),
                 })
@@ -923,8 +880,7 @@ impl Memory for SqliteMemory {
                         key: r.key.clone(),
                         content: r.content.clone(),
                         cat_str: r.cat_str.clone(),
-                        scope_str: r.scope_str.clone(),
-                        entity_id: r.entity_id.clone(),
+                        agent_id: r.agent_id.clone(),
                         created_at: r.created_at.clone(),
                         session_id: r.session_id.clone(),
                     })
@@ -1038,7 +994,6 @@ mod tests {
             "login-flow",
             "The login uses JWT tokens with 24h expiry",
             MemoryCategory::Fact,
-            MemoryScope::Domain,
             None,
         )
         .await
@@ -1047,7 +1002,6 @@ mod tests {
             "deploy-process",
             "Deploy by merging to dev branch, auto-deploys",
             MemoryCategory::Procedure,
-            MemoryScope::Domain,
             None,
         )
         .await
@@ -1056,7 +1010,6 @@ mod tests {
             "db-config",
             "PostgreSQL on port 5432 with TimescaleDB",
             MemoryCategory::Fact,
-            MemoryScope::Domain,
             None,
         )
         .await
@@ -1068,7 +1021,7 @@ mod tests {
             .unwrap();
         assert!(!results.is_empty());
         assert!(results[0].content.contains("JWT"));
-        assert_eq!(results[0].scope, MemoryScope::Domain);
+        assert!(results[0].agent_id.is_none());
 
         let results = mem.search(&MemoryQuery::new("deploy", 10)).await.unwrap();
         assert!(!results.is_empty());
@@ -1076,16 +1029,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_entity_scoped_memory() {
+    async fn test_agent_scoped_memory() {
         let dir = tempfile::TempDir::new().unwrap();
-        let db_path = dir.path().join("test_entity.db");
+        let db_path = dir.path().join("test_agent.db");
         let mem = SqliteMemory::open(&db_path, 30.0).unwrap();
 
         mem.store(
             "shared-fact",
             "The API runs on port 8080",
             MemoryCategory::Fact,
-            MemoryScope::Domain,
             None,
         )
         .await
@@ -1094,7 +1046,6 @@ mod tests {
             "guardian-note",
             "Risk tolerance is low for this user",
             MemoryCategory::Preference,
-            MemoryScope::Entity,
             Some("guardian-001"),
         )
         .await
@@ -1103,39 +1054,38 @@ mod tests {
             "librarian-note",
             "User prefers detailed explanations",
             MemoryCategory::Preference,
-            MemoryScope::Entity,
             Some("librarian-001"),
         )
         .await
         .unwrap();
 
-        let guardian_query = MemoryQuery::new("risk tolerance", 10).with_entity("guardian-001");
+        let guardian_query = MemoryQuery::new("risk tolerance", 10).with_agent("guardian-001");
         let results = mem.search(&guardian_query).await.unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].entity_id.as_deref(), Some("guardian-001"));
+        assert_eq!(results[0].agent_id.as_deref(), Some("guardian-001"));
 
-        let librarian_query = MemoryQuery::new("risk tolerance", 10).with_entity("librarian-001");
+        let librarian_query = MemoryQuery::new("risk tolerance", 10).with_agent("librarian-001");
         let results = mem.search(&librarian_query).await.unwrap();
         assert!(results.is_empty());
 
-        let domain_query = MemoryQuery::new("API port", 10).with_scope(MemoryScope::Domain);
-        let results = mem.search(&domain_query).await.unwrap();
-        assert_eq!(results.len(), 1);
-        assert!(results[0].entity_id.is_none());
+        // Unscoped query should find the global memory.
+        let global_query = MemoryQuery::new("API port", 10);
+        let results = mem.search(&global_query).await.unwrap();
+        assert!(!results.is_empty());
+        assert!(results[0].agent_id.is_none());
     }
 
     #[tokio::test]
-    async fn test_system_scoped_memory() {
+    async fn test_agent_filtered_memory() {
         let dir = tempfile::TempDir::new().unwrap();
-        let db_path = dir.path().join("test_system.db");
+        let db_path = dir.path().join("test_agent_filter.db");
         let mem = SqliteMemory::open(&db_path, 30.0).unwrap();
 
         mem.store(
             "strategic-pref",
             "Always prefer Rust over Python for new services",
             MemoryCategory::Preference,
-            MemoryScope::System,
-            None,
+            Some("root-agent"),
         )
         .await
         .unwrap();
@@ -1143,16 +1093,15 @@ mod tests {
             "domain-fact",
             "The trading engine uses 50us tick",
             MemoryCategory::Fact,
-            MemoryScope::Domain,
             None,
         )
         .await
         .unwrap();
 
-        let system_query = MemoryQuery::new("Rust Python", 10).with_scope(MemoryScope::System);
-        let results = mem.search(&system_query).await.unwrap();
+        let agent_query = MemoryQuery::new("Rust Python", 10).with_agent("root-agent");
+        let results = mem.search(&agent_query).await.unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].scope, MemoryScope::System);
+        assert_eq!(results[0].agent_id.as_deref(), Some("root-agent"));
 
         let all_query = MemoryQuery::new("Rust Python services", 10);
         let results = mem.search(&all_query).await.unwrap();
@@ -1188,25 +1137,23 @@ mod tests {
 
         let results = mem.search(&MemoryQuery::new("old data", 10)).await.unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].scope, MemoryScope::Domain);
-        assert!(results[0].entity_id.is_none());
+        assert!(results[0].agent_id.is_none());
 
         mem.store(
             "new-fact",
-            "New data with scope",
+            "New data with agent",
             MemoryCategory::Fact,
-            MemoryScope::Entity,
-            Some("comp-1"),
+            Some("agent-1"),
         )
         .await
         .unwrap();
 
         let results = mem
-            .search(&MemoryQuery::new("New data scope", 10).with_entity("comp-1"))
+            .search(&MemoryQuery::new("New data agent", 10).with_agent("agent-1"))
             .await
             .unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].entity_id.as_deref(), Some("comp-1"));
+        assert_eq!(results[0].agent_id.as_deref(), Some("agent-1"));
     }
 
     #[tokio::test]
@@ -1216,13 +1163,7 @@ mod tests {
         let mem = SqliteMemory::open(&db_path, 30.0).unwrap();
 
         let id = mem
-            .store(
-                "key",
-                "content",
-                MemoryCategory::Fact,
-                MemoryScope::Domain,
-                None,
-            )
+            .store("key", "content", MemoryCategory::Fact, None)
             .await
             .unwrap();
 
@@ -1284,7 +1225,6 @@ mod tests {
                 "key-1",
                 "identical content for embedding",
                 MemoryCategory::Fact,
-                MemoryScope::Domain,
                 None,
             )
             .await
@@ -1338,23 +1278,11 @@ mod tests {
 
         // Store two memories with different content — both should call embedder.
         let _id1 = mem
-            .store(
-                "key-1",
-                "first unique content",
-                MemoryCategory::Fact,
-                MemoryScope::Domain,
-                None,
-            )
+            .store("key-1", "first unique content", MemoryCategory::Fact, None)
             .await
             .unwrap();
         let _id2 = mem
-            .store(
-                "key-2",
-                "second unique content",
-                MemoryCategory::Fact,
-                MemoryScope::Domain,
-                None,
-            )
+            .store("key-2", "second unique content", MemoryCategory::Fact, None)
             .await
             .unwrap();
 

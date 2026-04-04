@@ -51,19 +51,8 @@ pub(crate) async fn cmd_remember(
     let (config, _) = load_config(config_path)?;
     let memory = open_memory(&config, project_name)?;
 
-    let scope = if project_name.is_some() {
-        aeqi_core::traits::MemoryScope::Domain
-    } else {
-        aeqi_core::traits::MemoryScope::System
-    };
     let id = memory
-        .store(
-            key,
-            content,
-            aeqi_core::traits::MemoryCategory::Fact,
-            scope,
-            None,
-        )
+        .store(key, content, aeqi_core::traits::MemoryCategory::Fact, None)
         .await?;
     let scope = project_name.unwrap_or("global");
     println!("Stored memory {id} [{scope}] {key}");

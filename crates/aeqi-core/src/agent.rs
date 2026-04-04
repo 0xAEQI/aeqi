@@ -4,11 +4,10 @@ use std::time::Duration;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, info, warn};
 
-use crate::identity::Identity;
 use crate::traits::{
     ChatRequest, ChatResponse, ContentPart, ContextAttachment, Event, LoopAction, Memory,
-    MemoryCategory, MemoryScope, Message, MessageContent, Observer, Provider, Role, StopReason,
-    Tool, ToolResult, ToolSpec, Usage,
+    MemoryCategory, Message, MessageContent, Observer, Provider, Role, StopReason, Tool,
+    ToolResult, ToolSpec, Usage,
 };
 
 /// Generic notification that can be injected into the agent loop between turns.
@@ -122,10 +121,12 @@ pub struct AgentConfig {
     pub temperature: f32,
     /// Name of this agent (for logging).
     pub name: String,
-    /// Entity ID for scoped memory queries. None = domain scope.
-    pub entity_id: Option<String>,
-    /// Department ID for hierarchical memory scoping. None = no department.
-    pub department_id: Option<String>,
+    /// Agent UUID in the agent tree. Used for memory scoping.
+    pub agent_id: Option<String>,
+    /// Ancestor agent IDs for hierarchical memory search.
+    /// [self_id, parent_id, grandparent_id, ..., root_id].
+    /// Populated by the orchestrator from the agent tree.
+    pub ancestor_ids: Vec<String>,
     /// Model's context window size in tokens. Drives compaction decisions.
     pub context_window: u32,
     /// Maximum characters per individual tool result before persistence/truncation.
@@ -170,12 +171,8 @@ pub struct AgentConfig {
     /// model instead of the primary. Saves cost on simple queries while keeping
     /// quality for complex work. Hermes calls this "smart model routing."
     pub routing_model: Option<String>,
-    /// Optional per-project/per-agent compaction instructions appended to the
-    /// 9-section compaction prompt. Example: "Always preserve trade positions
-    /// and PnL numbers in the summary."
+    /// Optional compaction instructions appended to the 9-section compaction prompt.
     pub compact_instructions: Option<String>,
-    /// Project UUID for scoped memory queries. None = no project scope.
-    pub project_id: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -186,8 +183,8 @@ impl Default for AgentConfig {
             max_tokens: 8192,
             temperature: 0.0,
             name: "agent".to_string(),
-            entity_id: None,
-            department_id: None,
+            agent_id: None,
+            ancestor_ids: Vec::new(),
             context_window: 200_000,
             max_tool_result_chars: DEFAULT_MAX_TOOL_RESULT_CHARS,
             max_tool_results_per_turn: DEFAULT_MAX_TOOL_RESULTS_PER_TURN,
@@ -204,7 +201,6 @@ impl Default for AgentConfig {
             token_budget: None,
             routing_model: None,
             compact_instructions: None,
-            project_id: None,
         }
     }
 }
@@ -572,7 +568,7 @@ pub struct Agent {
     provider: Arc<dyn Provider>,
     tools: Vec<Arc<dyn Tool>>,
     observer: Arc<dyn Observer>,
-    identity: Identity,
+    system_prompt: String,
     memory: Option<Arc<dyn Memory>>,
     chat_stream: Option<crate::chat_stream::ChatStreamSender>,
     /// Receiver for notifications from background agents. Drained between turns.
@@ -591,14 +587,14 @@ impl Agent {
         provider: Arc<dyn Provider>,
         tools: Vec<Arc<dyn Tool>>,
         observer: Arc<dyn Observer>,
-        identity: Identity,
+        system_prompt: String,
     ) -> Self {
         Self {
             config,
             provider,
             tools,
             observer,
-            identity,
+            system_prompt,
             memory: None,
             chat_stream: None,
             notification_rx: None,
@@ -661,11 +657,10 @@ impl Agent {
             .await;
 
         // Build initial messages.
-        let system_prompt = self.identity.system_prompt();
         let mut messages = vec![
             Message {
                 role: Role::System,
-                content: MessageContent::text(&system_prompt),
+                content: MessageContent::text(&self.system_prompt),
             },
             Message {
                 role: Role::User,
@@ -1483,20 +1478,14 @@ impl Agent {
 
                 if tool_output.len() > 200 && Self::has_novel_terms(&tool_output, prompt) {
                     let all_entries = mem
-                        .hierarchical_search(
-                            &tool_output,
-                            self.config.entity_id.as_deref().unwrap_or(""),
-                            self.config.department_id.as_deref(),
-                            self.config.project_id.as_deref(),
-                            5,
-                        )
+                        .hierarchical_search(&tool_output, &self.config.ancestor_ids, 5)
                         .await
                         .unwrap_or_default();
 
                     if !all_entries.is_empty() {
                         let ctx = all_entries
                             .iter()
-                            .map(|e| format!("[{}] {}: {}", e.scope, e.key, e.content))
+                            .map(|e| format!("{}: {}", e.key, e.content))
                             .collect::<Vec<_>>()
                             .join("\n");
                         messages.push(Message {
@@ -1522,7 +1511,7 @@ impl Agent {
                 &messages,
                 &tracker,
                 &self.config.name,
-                &self.config.entity_id,
+                &self.config.agent_id,
             );
 
             // --- Detect file changes since last read (mid-turn enrichment) ---
@@ -1729,20 +1718,14 @@ impl Agent {
         let Some(ref mem) = self.memory else { return };
 
         let all_entries = mem
-            .hierarchical_search(
-                prompt,
-                self.config.entity_id.as_deref().unwrap_or(""),
-                self.config.department_id.as_deref(),
-                self.config.project_id.as_deref(),
-                5,
-            )
+            .hierarchical_search(prompt, &self.config.ancestor_ids, 5)
             .await
             .unwrap_or_default();
 
         if !all_entries.is_empty() {
             let ctx = all_entries
                 .iter()
-                .map(|e| format!("[{}] {}: {}", e.scope, e.key, e.content))
+                .map(|e| format!("{}: {}", e.key, e.content))
                 .collect::<Vec<_>>()
                 .join("\n");
 
@@ -2202,7 +2185,7 @@ impl Agent {
         messages: &[Message],
         tracker: &ContextTracker,
         agent_name: &str,
-        config_entity_id: &Option<String>,
+        config_agent_id: &Option<String>,
     ) {
         let Some(mem) = memory.clone() else { return };
         if tracker.total_prompt_tokens < SESSION_MEMORY_MIN_TOKENS {
@@ -2216,7 +2199,7 @@ impl Agent {
         }
 
         let name = agent_name.to_string();
-        let entity_id = config_entity_id.clone();
+        let agent_id = config_agent_id.clone();
 
         tokio::spawn(async move {
             let summary = format!(
@@ -2228,8 +2211,7 @@ impl Agent {
                     SESSION_MEMORY_KEY,
                     &summary,
                     MemoryCategory::Context,
-                    MemoryScope::Domain,
-                    entity_id.as_deref(),
+                    agent_id.as_deref(),
                 )
                 .await
             {
@@ -3098,16 +3080,17 @@ impl Agent {
                 continue;
             }
 
-            let (scope, rest) = if let Some(r) = line.strip_prefix("DOMAIN ") {
-                (MemoryScope::Domain, r)
+            // Strip optional scope prefix (DOMAIN/SYSTEM/SELF) — all stored under agent_id.
+            let rest = if let Some(r) = line.strip_prefix("DOMAIN ") {
+                r
             } else if let Some(r) = line.strip_prefix("SYSTEM ") {
-                (MemoryScope::System, r)
+                r
             } else if let Some(r) = line.strip_prefix("SELF ") {
-                (MemoryScope::Entity, r)
+                r
             } else if let Some((cat_str, _)) = line.split_once(':') {
                 let cat_str = cat_str.trim();
                 if matches!(cat_str, "FACT" | "PROCEDURE" | "PREFERENCE" | "CONTEXT") {
-                    (MemoryScope::Domain, line)
+                    line
                 } else {
                     continue;
                 }
@@ -3136,15 +3119,12 @@ impl Agent {
                 continue;
             }
 
-            let entity_id = if scope == MemoryScope::Entity {
-                self.config.entity_id.as_deref()
-            } else {
-                None
-            };
-
-            match mem.store(key, content, category, scope, entity_id).await {
+            match mem
+                .store(key, content, category, self.config.agent_id.as_deref())
+                .await
+            {
                 Ok(id) => {
-                    debug!(agent = %self.config.name, id = %id, key = %key, scope = %scope, "insight stored")
+                    debug!(agent = %self.config.name, id = %id, key = %key, "insight stored")
                 }
                 Err(e) => {
                     warn!(agent = %self.config.name, key = %key, "failed to store insight: {e}")

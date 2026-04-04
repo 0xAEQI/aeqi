@@ -50,6 +50,233 @@ Make AEQI's agent loop (`aeqi-core/src/agent.rs`) at least as resilient, perform
 
 ### Where Claude Code's Loop is Better
 
+See Phase 3 comparison below — gaps identified in 12 areas.
+
+### Where AEQI's Loop is Better Than CC
+
+1. **Three-tier hierarchical memory** — agent→department→project scoped memory with `hierarchical_search`. CC has flat memory prefetch.
+2. **Mid-loop memory recall** — proactively re-queries memory when tool output has novel terms (>200 chars, 3+ new terms). CC doesn't recall mid-loop.
+3. **Session memory extraction** — fire-and-forget background task extracting structured insights (SCOPE CATEGORY: key | content) into domain-scoped memory at 50K+ prompt tokens.
+4. **Perpetual sessions** — stays open via `input_rx` channel, accepts follow-up messages with full state reset per turn.
+5. **Token budget auto-continuation** — built-in with percentage tracking, nudge messages showing "X% of budget used", stops at 90%.
+6. **Budget pressure injection** — injects warnings into tool results at 70% and 90% of iteration budget. CC has no equivalent.
+7. **Observer trait richness** — 16 hooks including `collect_attachments`, `pre_compact`/`post_compact`, `file_changed`, `user_prompt_submit`. CC's hooks are more user-facing but less programmatically extensible.
+8. **Diminishing returns detection** — 50 tokens × 5 consecutive turns threshold. CC has this behind a feature flag (TOKEN_BUDGET).
+9. **Structured 9-section compaction** — detailed prompt with `<analysis>` scratchpad + `<summary>` extraction, custom `compact_instructions` per project.
+10. **File change detection between turns** — checks mtime of recently-read files, injects system reminders to re-read before editing.
+11. **Smart model routing** — uses cheap `routing_model` for simple messages on iteration 1.
+12. **Post-run reflection** — `reflect()` extracts up to 5 structured insights with scope/category/key/content into memory.
+
+## Phase 3: Side-by-Side Comparison (Completed 2026-04-04)
+
+### 1. Streaming Tool Execution During LLM Response
+
+| | Claude Code | AEQI |
+|---|---|---|
+| **Trigger** | `content_block_stop` → `addTool()` → `processQueue()` | `ToolUseComplete` → `add_tool()` → `try_start_queued()` |
+| **Concurrency** | `isConcurrencySafe(input)` per tool, mutual exclusion | `is_concurrent_safe(input)` per tool, same model |
+| **Error cascade** | Bash-only: `sibling_error` aborts siblings via child AbortController | `sibling_errored` Arc<Mutex<bool>> — all error types signal |
+| **Progress** | `pendingProgress[]` yielded immediately via Promise.race | `ToolProgress` event emitted during execution |
+
+**Gap**: Minimal. Both start tools mid-stream with same timing. **One difference**: CC only cascades errors from Bash (implicit dependency chains), AEQI cascades from any tool error. CC's approach is more precise — read/fetch failures shouldn't kill sibling tools.
+
+**Fix**: Change AEQI's sibling error signaling to only cascade from shell/bash tools. Low effort.
+
+### 2. Error Recovery: Prompt Too Long
+
+| | Claude Code | AEQI |
+|---|---|---|
+| **Detection** | API returns 413, withheld from UI | API returns context-length error string match |
+| **Step 1** | Context collapse drain (commit staged collapses) | — |
+| **Step 2** | Reactive compact (full LLM summarization) | Emergency compact (snip+microcompact+full compact) |
+| **Step 3** | Surface withheld error + return `prompt_too_long` | Break with `ContextExhausted` or `ApiError` |
+| **Error withholding** | Yes — recoverable errors hidden from UI until recovery fails | No — errors surface immediately |
+| **Single-shot guard** | `hasAttemptedReactiveCompact` flag | Checks compaction count vs `MAX_COMPACTIONS_PER_RUN` (3) |
+
+**Gap**: 
+- No error withholding — AEQI exposes intermediate errors to frontend observers even when recovery succeeds
+- No context collapse (cheap drain step before expensive full compact)
+- AEQI's reactive compact is effective but lacks the cheaper first-pass
+
+**Fix (P0)**:
+1. Add error withholding: on context-length error, suppress observer notification, attempt recovery, only surface if recovery fails
+2. Context collapse is a larger feature — defer to P1
+
+### 3. Error Recovery: Max Output Tokens
+
+| | Claude Code | AEQI |
+|---|---|---|
+| **Step 1** | Escalate from 8K default to 64K `ESCALATED_MAX_TOKENS` | — |
+| **Step 2** | Multi-turn: inject "resume mid-thought, break into smaller pieces" | Auto-continue with continuation prompt, `OutputTruncated { attempt }` |
+| **Circuit breaker** | `MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3` | `output_recovery_count` (configurable) |
+| **Reset** | Counter resets on normal next-turn and stop-hook-blocking continues | Resets per-run |
+
+**Gap**: CC has an escalation step (try higher limit before going multi-turn). AEQI goes straight to continuation. Both are valid strategies.
+
+**Fix (P2)**: Consider adding escalation step — try `max_tokens * 4` (capped at model max) before falling to continuation. Low priority since AEQI's continuation approach works well.
+
+### 4. Error Recovery: Streaming Fallback
+
+| | Claude Code | AEQI |
+|---|---|---|
+| **Mid-stream fallback** | Tombstone orphaned messages, clear all buffers atomically, discard executor, continue from fallback response | Not implemented |
+| **Model fallback** | `FallbackTriggeredError` → switch model, strip signature blocks, clear buffers, discard executor, retry inner loop | After `FALLBACK_TRIGGER_COUNT` (3) consecutive failures → switch to `fallback_model`, decrement iteration, continue |
+| **Buffer clearing** | `assistantMessages.length=0`, `toolResults.length=0`, `toolUseBlocks.length=0`, `needsFollowUp=false` | Executor `discard()` aborts handles + cancels queued |
+| **Signature handling** | Strips thinking signature blocks (model-bound, would 400 on different model) | N/A (no extended thinking signatures) |
+
+**Gap (P0)**:
+- No mid-stream fallback with tombstoning. If the provider switches models mid-stream, orphaned partial messages could corrupt the conversation.
+- No atomic buffer clearing when fallback triggers. AEQI's executor `discard()` handles tool cleanup but not message-level cleanup.
+- Fallback trigger is based on consecutive failures (reactive) rather than specific error types (proactive).
+
+**Fix (P0)**:
+1. Add tombstone support: when `call_streaming_with_tools()` detects a fallback, mark any partial assistant messages as tombstoned (remove from history, emit tombstone event)
+2. Clear accumulated text/tool state on fallback before retry
+3. Consider provider-level fallback signals (specific error types that trigger immediate fallback rather than waiting for 3 failures)
+
+### 5. Context Compaction: Levels and Triggers
+
+| | Claude Code | AEQI |
+|---|---|---|
+| **Order** | Microcompact → Snip → Context Collapse → Auto-compact → Reactive | Snip (85%) → Microcompact (85%) → Full compact (80%) → Reactive (on error) |
+| **Microcompact trigger** | Time-based (cache expired) OR count-based (cached path) | Token threshold (85% of compact threshold) |
+| **Snip** | Removes old rounds | Removes oldest assistant+tool rounds from compactable window |
+| **Full compact** | LLM summarization with file+skill re-injection | 9-section LLM summarization with file restoration + skill preservation |
+| **Reactive** | Triggered by API 413, runs full compaction | Triggered by context-length error, runs snip+microcompact+full compact |
+| **Context Collapse** | Persistent commit log, 90% commit / 95% block thresholds | Not implemented |
+| **Circuit breaker** | 3 consecutive autocompact failures → stop | `MAX_COMPACTIONS_PER_RUN = 3` hard cap |
+
+**Gap**: 
+- No context collapse system (persistent structured log that can be cheaply drained before expensive full compact)
+- CC's microcompact has prompt-cache-aware path (`cache_edits` API) — AEQI's is simpler replacement
+
+**Fix (P1)**: Context collapse is architecturally significant. Defer. AEQI's 3-stage pipeline is solid for current needs.
+
+### 6. Context Compaction: Post-Compact Restoration
+
+| | Claude Code | AEQI |
+|---|---|---|
+| **Files** | Re-reads via cache clearing + forced CLAUDE.md re-read | Restores from `recent_files` tracking (5 files, 5K tokens each, 50K budget) |
+| **Skills** | Clears invoked-skill-names so skills re-inject on next turn | Preserves skill messages verbatim in compacted output |
+| **State clearing** | Resets microcompact, context collapse, getUserContext cache, system prompt sections, classifier approvals | Resets replacement_state for microcompacted entries |
+| **Tool pairing** | Invariant maintained at error boundaries (4 sites) | `repair_tool_pairing()` post-compact: injects synthetic results for dangling tool_use, strips orphan tool_results |
+
+**Gap**: Minimal. AEQI's approach of preserving skills verbatim is arguably better than CC's clear-and-re-inject. AEQI's explicit `repair_tool_pairing()` is more thorough post-compact.
+
+**Fix**: None needed. AEQI's post-compact restoration is at parity or better.
+
+### 7. Stop Hooks / Post-Turn Validation
+
+| | Claude Code | AEQI |
+|---|---|---|
+| **Mechanism** | Shell commands in `settings.json` via `executeStopHooks()` | `Observer.after_turn()` — Rust trait returning `LoopAction` |
+| **Blocking** | `blockingErrors[]` fed back to model for fixing | `Inject(Vec<String>)` — messages force continuation |
+| **Prevention** | `preventContinuation: true` stops loop entirely | `Halt(String)` stops loop |
+| **Fire-and-forget** | Memory extraction, prompt suggestion, auto-dream | Session memory extraction (fire-and-forget tokio::spawn) |
+| **User-configurable** | Yes — shell commands in JSON settings | No — requires Rust code |
+
+**Gap**: AEQI's `after_turn` is more powerful programmatically (can inject arbitrary messages, has full context) but not user-configurable. CC's shell-command hooks are accessible to end users.
+
+**Fix (P2)**: Add configurable shell-command hooks to AEQI's observer system. Could implement as a `ShellHookObserver` that reads hook definitions from project config and executes them.
+
+### 8. Prefetching During Streaming
+
+| | Claude Code | AEQI |
+|---|---|---|
+| **Memory** | Started once at loop entry, polled after tools | Not prefetched — mid-loop recall happens after tools |
+| **Skill discovery** | Started per-iteration during streaming, consumed post-tools | Skills injected at spawn time, not discovered mid-session |
+| **Tool use summary** | Haiku generates summary after tools, consumed next iteration during streaming | Not implemented |
+
+**Gap (P1)**:
+- Memory recall could start during LLM streaming rather than after tools. The search query is known (user prompt + recent context). This would overlap 100-500ms of memory search with 5-30s of model generation.
+- Tool use summaries would help with long sessions — a cheap model summarizes what tools did, reducing context pressure.
+
+**Fix (P1)**:
+1. Start `hierarchical_search` during streaming (spawn task when stream begins, await after tools). Requires refactoring mid-loop recall to also consume prefetch results.
+2. Tool use summaries: spawn cheap model call after tool batch, consume result at start of next iteration's post-streaming phase. Lower priority.
+
+### 9. Tool Result Budget Enforcement
+
+| | Claude Code | AEQI |
+|---|---|---|
+| **Per-tool limit** | `maxResultSizeChars` on Tool definition, `Infinity` opts out | `DEFAULT_MAX_TOOL_RESULT_CHARS` (50K), per-tool override via `max_result_size_chars()` |
+| **Aggregate limit** | `contentReplacementState` tracks replacements | `DEFAULT_MAX_TOOL_RESULTS_PER_TURN` (200K), `enforce_result_budget()` truncates largest first |
+| **Persistence** | Persist to disk with preview | Persist to disk with `PERSIST_PREVIEW_SIZE` (2K) preview, fallback to head+tail truncation |
+| **Tracking** | `ContentReplacementState` per-conversation | `ContentReplacementState` HashMap prevents double-processing |
+
+**Gap**: None. AEQI has MORE granularity (aggregate per-turn budget + per-tool override + budget pressure injection). At parity or better.
+
+### 10. Conversation Repair
+
+| | Claude Code | AEQI |
+|---|---|---|
+| **Post-compact** | Not explicit (relies on invariant maintenance) | `repair_tool_pairing()`: injects synthetic results for dangling tool_use, strips orphan tool_results |
+| **On API error** | `yieldMissingToolResultBlocks()` — 4 call sites | Executor `discard()` cancels queued, but no explicit orphan repair on API errors |
+| **On abort** | Synthetic tool_results via executor `getRemainingResults()` | Executor abort + cancel, but unclear if synthetic results generated |
+| **On fallback** | Orphaned tool_use blocks get error tool_results before retry | Not handled (see gap #4) |
+
+**Gap**: AEQI's post-compact repair is good. But it may miss orphaned tool_use blocks at error/abort/fallback boundaries.
+
+**Fix (P0)**: Add `yield_missing_tool_results()` equivalent. After any error or abort in `try_streaming_with_tools()`, scan assistant messages for tool_use blocks without matching tool_results and inject synthetic error results. Critical for conversation integrity.
+
+### 11. Worktree Isolation for Subagents
+
+| | Claude Code | AEQI |
+|---|---|---|
+| **Mechanism** | `EnterWorktree`/`ExitWorktree` tools, creates temp git worktree, transparent CWD switch | Not implemented |
+| **Use case** | Parallel subagents can't conflict on file writes | Subagents share working directory |
+
+**Gap**: Missing entirely. When multiple delegates run in parallel on the same project, they can conflict on file operations.
+
+**Fix (P1)**: Implement worktree isolation in `DelegateTool`. When spawning a delegate with `isolation: "worktree"`, create a git worktree, set the delegate's CWD, merge changes back on completion. Requires git operations and CWD management in `spawn_session()`.
+
+### 12. Permission Model in the Loop
+
+| | Claude Code | AEQI |
+|---|---|---|
+| **Architecture** | 10-step pipeline: deny→ask→tool-specific→safety→bypass→always-allow→classifier | `observer.before_tool()` returns `LoopAction` |
+| **User-facing** | Settings-based rules, interactive prompts, ML classifier for auto-mode | Programmatic only (Rust observer trait) |
+| **Safety checks** | `.git/`, `.claude/`, shell configs — bypass-immune | No built-in safety checks |
+
+**Gap**: AEQI has no user-facing permission system. The `before_tool` hook enables programmatic control but there's no interactive permission prompt, no deny/allow rules, no safety-sensitive path detection.
+
+**Fix (P2)**: Not critical for current use (solo developer, all projects are mine). Add safety-sensitive path detection as a quick win. Full permission system is P3.
+
+## Phase 4: Implementation Priority (Completed 2026-04-04)
+
+### P0 — Resilience (Do First)
+
+| # | Fix | Effort | Impact |
+|---|---|---|---|
+| P0-1 | **Error withholding**: suppress observer notification on recoverable errors (context-length, max-tokens), only surface if recovery fails | Small | Prevents frontend confusion during recovery |
+| P0-2 | **Conversation repair at error boundaries**: add `yield_missing_tool_results()` after API errors, aborts, and fallback switches | Medium | Prevents corrupted tool_use/tool_result pairing |
+| P0-3 | **Streaming fallback atomicity**: tombstone partial messages, clear accumulated state, discard executor on mid-stream or model fallback | Medium | Prevents conversation corruption on fallback |
+| P0-4 | **Bash-only error cascading**: change sibling error signal to only fire from shell/bash tool errors | Small | Prevents unnecessary tool cancellation |
+
+### P1 — Performance
+
+| # | Fix | Effort | Impact |
+|---|---|---|---|
+| P1-1 | **Memory prefetch during streaming**: spawn `hierarchical_search` when stream starts, consume after tools | Small | Overlaps 100-500ms memory latency with model generation |
+| P1-2 | **Worktree isolation for delegates**: git worktree create/cleanup in spawn_session | Large | Enables safe parallel delegate execution |
+| P1-3 | **Context collapse system**: persistent structured log with cheap drain before full compact | Large | Cheaper recovery from prompt-too-long errors |
+
+### P2 — UX
+
+| # | Fix | Effort | Impact |
+|---|---|---|---|
+| P2-1 | **Max output token escalation**: try `max_tokens * 4` before falling to continuation | Small | May avoid multi-turn continuation overhead |
+| P2-2 | **Shell-command stop hooks**: `ShellHookObserver` reads hook defs from project config | Medium | User-configurable post-turn validation |
+| P2-3 | **Safety-sensitive path detection**: warn before modifying .git/, config files | Small | Basic safety for non-solo use |
+
+### P3 — Polish
+
+| # | Fix | Effort | Impact |
+|---|---|---|---|
+| P3-1 | **Tool use summaries**: cheap model summarizes tool batch, consumed next iteration | Medium | Reduces context pressure in long sessions |
+| P3-2 | **Full permission system**: rules-based deny/ask/allow with interactive prompts | Large | Required for multi-user deployment |
+| P3-3 | **Prompt-cache-aware microcompact**: `cache_edits` API integration | Medium | Reduces cache invalidation on microcompact |
+
 ## Research Plan
 
 ### Phase 1: Deep Read Claude Code (query.ts ecosystem)

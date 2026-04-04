@@ -10,6 +10,7 @@ import MemoryPage from "@/pages/MemoryPage";
 import TriggersPage from "@/pages/TriggersPage";
 import SkillsPage from "@/pages/SkillsPage";
 import FinancePage from "@/pages/FinancePage";
+import DrivePage from "@/pages/DrivePage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -37,6 +38,7 @@ export default function App() {
         <Route path="memories" element={<MemoryPage />} />
         <Route path="notes" element={<MemoryPage />} />
         <Route path="finance" element={<FinancePage />} />
+        <Route path="drive" element={<DrivePage />} />
         <Route path="departments/:id" element={<DepartmentsPage />} />
 
         {/* Redirects */}

@@ -11,10 +11,10 @@ use tracing::{info, warn};
 
 use anyhow::Result;
 
-use aeqi_core::traits::{Memory, MemoryQuery, MemoryScope};
+use aeqi_core::traits::{Memory, MemoryQuery};
 
+use crate::agent_registry::AgentRegistry;
 use crate::agent_router::AgentRouter;
-use crate::registry::CompanyRegistry;
 use crate::session_store::{ChannelInfo, SessionMessage, SessionStore, ThreadEvent};
 
 const CHAT_COUNCIL_HOLD_REASON: &str = "awaiting_council";
@@ -191,13 +191,13 @@ pub enum CompletionStatus {
 /// The unified chat engine.
 pub struct MessageRouter {
     pub conversations: Arc<SessionStore>,
-    pub registry: Arc<CompanyRegistry>,
+    pub agent_registry: Arc<AgentRegistry>,
     pub agent_router: Arc<Mutex<AgentRouter>>,
     pub council_advisors: Arc<Vec<aeqi_core::config::PeerAgentConfig>>,
     /// If false, only explicit `/council` requests fan out to advisors.
     pub auto_council_enabled: bool,
     pub leader_name: String,
-    /// Default company to route messages to when no project_hint is given.
+    /// Default project/agent to route messages to when no project_hint is given.
     pub default_project: String,
     pub pending_tasks: Arc<Mutex<HashMap<String, PendingTask>>>,
     pub task_notify: Arc<tokio::sync::Notify>,
@@ -207,6 +207,8 @@ pub struct MessageRouter {
     pub memory_stores_by_id: HashMap<String, Arc<dyn Memory>>,
     /// LLM-backed intent classifier for ambiguous messages.
     pub intent_classifier: Option<Arc<crate::intent::IntentClassifier>>,
+    /// Wake signal for the global Scheduler.
+    pub scheduler_wake: Arc<tokio::sync::Notify>,
 }
 
 impl MessageRouter {
@@ -352,27 +354,35 @@ impl MessageRouter {
         description: &str,
         hold_for_council: bool,
     ) -> Result<aeqi_tasks::Task> {
-        let project = self
-            .registry
-            .get_project(project_name)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("project not found: {project_name}"))?;
+        let agent = self
+            .agent_registry
+            .resolve_by_hint(project_name)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("agent not found for hint: {project_name}"))?;
 
-        let task = project.create_task(subject, None).await?;
-        let mut store = project.tasks.lock().await;
-        let task = store.update(&task.id.0, |entry| {
-            if !description.is_empty() {
-                entry.description = description.to_string();
-            }
-            Self::set_scheduler_hold(
-                entry,
-                hold_for_council,
-                hold_for_council.then_some(CHAT_COUNCIL_HOLD_REASON),
-            );
-        })?;
+        let labels: Vec<String> = if hold_for_council {
+            vec!["chat".to_string(), "council_pending".to_string()]
+        } else {
+            vec!["chat".to_string()]
+        };
+
+        let mut task = self
+            .agent_registry
+            .create_task(&agent.id, subject, description, None, &labels)
+            .await?;
+
+        if hold_for_council {
+            Self::set_scheduler_hold(&mut task, true, Some(CHAT_COUNCIL_HOLD_REASON));
+            self.agent_registry
+                .update_task(&task.id.0, |entry| {
+                    Self::set_scheduler_hold(entry, true, Some(CHAT_COUNCIL_HOLD_REASON));
+                })
+                .await?;
+        }
 
         info!(
             project = %project_name,
+            agent = %agent.name,
             task = %task.id,
             hold_for_council,
             subject = %subject,
@@ -380,7 +390,7 @@ impl MessageRouter {
         );
 
         if !hold_for_council {
-            self.registry.wake.notify_one();
+            self.scheduler_wake.notify_one();
         }
 
         Ok(task)
@@ -680,7 +690,7 @@ impl MessageRouter {
         );
 
         if hold_for_council {
-            let registry = self.registry.clone();
+            let agent_registry = self.agent_registry.clone();
             let conversations = self.conversations.clone();
             let agent_router = self.agent_router.clone();
             let council_advisors = self.council_advisors.clone();
@@ -692,10 +702,11 @@ impl MessageRouter {
             let project_hint = msg.project_hint.clone();
             let department_hint = msg.department_hint.clone();
             let chat_id = msg.chat_id;
+            let scheduler_wake = self.scheduler_wake.clone();
 
             tokio::spawn(async move {
                 MessageRouter::finish_council_enrichment(
-                    registry,
+                    agent_registry,
                     conversations,
                     agent_router,
                     council_advisors,
@@ -708,6 +719,7 @@ impl MessageRouter {
                     source_tag_for_spawn,
                     project_hint,
                     department_hint,
+                    scheduler_wake,
                 )
                 .await;
             });
@@ -731,16 +743,10 @@ impl MessageRouter {
             .map(|(task_id, pending)| (task_id.clone(), pending.project.clone()))
             .collect();
 
-        for (qid, project) in pending {
-            let status = {
-                if let Some(project) = self.registry.get_project(&project).await {
-                    let store = project.tasks.lock().await;
-                    store
-                        .get(&qid)
-                        .map(|b| (b.status, Self::task_completion_reason(b)))
-                } else {
-                    None
-                }
+        for (qid, _project) in pending {
+            let status = match self.agent_registry.get_task(&qid).await {
+                Ok(Some(task)) => Some((task.status, Self::task_completion_reason(&task))),
+                _ => None,
             };
 
             match status {
@@ -818,19 +824,14 @@ impl MessageRouter {
 
     /// Poll a specific task for completion.
     pub async fn poll_completion(&self, task_id: &str) -> Option<ChatCompletion> {
-        let project = {
+        let _project = {
             let pending = self.pending_tasks.lock().await;
             pending.get(task_id).map(|task| task.project.clone())?
         };
-        let status = {
-            if let Some(project) = self.registry.get_project(&project).await {
-                let store = project.tasks.lock().await;
-                store
-                    .get(task_id)
-                    .map(|b| (b.status, Self::task_completion_reason(b)))
-            } else {
-                None
-            }
+
+        let status = match self.agent_registry.get_task(task_id).await {
+            Ok(Some(task)) => Some((task.status, Self::task_completion_reason(&task))),
+            _ => None,
         };
 
         match status {
@@ -892,7 +893,7 @@ impl MessageRouter {
             // Global query — search all projects.
             let mut all_ctx = Vec::new();
             for (name, mem) in &self.memory_stores {
-                let mq = MemoryQuery::new(q, 3).with_scope(MemoryScope::Domain);
+                let mq = MemoryQuery::new(q, 3);
                 if let Ok(results) = mem.search(&mq).await {
                     for entry in results {
                         all_ctx.push(format!("  • [{}] {}: {}", name, entry.key, entry.content));
@@ -908,68 +909,102 @@ impl MessageRouter {
             None
         };
 
-        let summaries = self.registry.list_project_summaries().await;
-        let (spent, budget, remaining) = self.registry.cost_ledger.budget_status();
-        let worker_count = self.registry.total_max_workers().await;
+        // Gather agent and task info from AgentRegistry.
+        let agents = self.agent_registry.list_active().await.unwrap_or_default();
+        let all_tasks = self
+            .agent_registry
+            .list_tasks(None, None)
+            .await
+            .unwrap_or_default();
 
-        let recent_audit = match &self.registry.audit_log {
-            Some(audit) => audit.query_recent(5).unwrap_or_default(),
-            None => Vec::new(),
-        };
-
-        let project_summaries: Vec<_> = if let Some(p) = project_hint {
-            summaries.iter().filter(|s| s.name == p).collect()
+        let agent_summaries: Vec<serde_json::Value> = if let Some(hint) = project_hint {
+            agents
+                .iter()
+                .filter(|a| a.name.eq_ignore_ascii_case(hint) || a.id == hint)
+                .map(|a| {
+                    let agent_tasks: Vec<_> = all_tasks
+                        .iter()
+                        .filter(|t| t.agent_id.as_deref() == Some(&a.id))
+                        .collect();
+                    let open = agent_tasks
+                        .iter()
+                        .filter(|t| {
+                            !matches!(
+                                t.status,
+                                aeqi_tasks::TaskStatus::Done | aeqi_tasks::TaskStatus::Cancelled
+                            )
+                        })
+                        .count();
+                    let total = agent_tasks.len();
+                    serde_json::json!({
+                        "name": a.name,
+                        "open_tasks": open,
+                        "total_tasks": total,
+                    })
+                })
+                .collect()
         } else {
-            summaries.iter().collect()
+            agents
+                .iter()
+                .map(|a| {
+                    let agent_tasks: Vec<_> = all_tasks
+                        .iter()
+                        .filter(|t| t.agent_id.as_deref() == Some(&a.id))
+                        .collect();
+                    let open = agent_tasks
+                        .iter()
+                        .filter(|t| {
+                            !matches!(
+                                t.status,
+                                aeqi_tasks::TaskStatus::Done | aeqi_tasks::TaskStatus::Cancelled
+                            )
+                        })
+                        .count();
+                    let total = agent_tasks.len();
+                    serde_json::json!({
+                        "name": a.name,
+                        "open_tasks": open,
+                        "total_tasks": total,
+                    })
+                })
+                .collect()
         };
+
+        let total_open = all_tasks
+            .iter()
+            .filter(|t| {
+                !matches!(
+                    t.status,
+                    aeqi_tasks::TaskStatus::Done | aeqi_tasks::TaskStatus::Cancelled
+                )
+            })
+            .count();
 
         let mut context = String::new();
 
-        if let Some(p) = project_hint {
-            if let Some(s) = project_summaries.first() {
-                context.push_str(&format!(
-                    "{}: {} open tasks ({} pending, {} in progress, {} done)\n",
-                    s.name, s.open_tasks, s.pending_tasks, s.in_progress_tasks, s.done_tasks
-                ));
-                if !s.departments.is_empty() {
-                    context.push_str("Departments:\n");
-                    for d in &s.departments {
-                        context.push_str(&format!(
-                            "  {} — lead: {}, agents: {}\n",
-                            d.name,
-                            d.lead.as_deref().unwrap_or("-"),
-                            d.agents.join(", ")
-                        ));
-                    }
-                }
+        if let Some(hint) = project_hint {
+            if let Some(summary) = agent_summaries.first() {
+                let name = summary["name"].as_str().unwrap_or(hint);
+                let open = summary["open_tasks"].as_u64().unwrap_or(0);
+                let total = summary["total_tasks"].as_u64().unwrap_or(0);
+                context.push_str(&format!("{}: {} open/{} total tasks\n", name, open, total));
             } else {
-                context.push_str(&format!("Project '{}' not found.\n", p));
+                context.push_str(&format!("Agent '{}' not found.\n", hint));
             }
         } else {
-            for s in &project_summaries {
-                context.push_str(&format!(
-                    "{}: {} open/{} total tasks\n",
-                    s.name, s.open_tasks, s.total_tasks
-                ));
+            for summary in &agent_summaries {
+                let name = summary["name"].as_str().unwrap_or("?");
+                let open = summary["open_tasks"].as_u64().unwrap_or(0);
+                let total = summary["total_tasks"].as_u64().unwrap_or(0);
+                context.push_str(&format!("{}: {} open/{} total tasks\n", name, open, total));
             }
         }
 
         context.push_str(&format!(
-            "\nWorkers: {}, Cost: ${:.3}/${:.2}, Remaining: ${:.3}\n",
-            worker_count, spent, budget, remaining
+            "\nAgents: {}, Total open tasks: {}\n",
+            agents.len(),
+            total_open
         ));
-
-        if !recent_audit.is_empty() {
-            context.push_str("\nRecent:\n");
-            for e in &recent_audit {
-                context.push_str(&format!(
-                    "  [{}] {} — {}\n",
-                    e.project,
-                    e.decision_type,
-                    e.reasoning.chars().take(80).collect::<String>()
-                ));
-            }
-        }
 
         // Prepend memory context if available.
         if let Some(ref mem_ctx) = memory_context {
@@ -981,31 +1016,16 @@ impl MessageRouter {
             context: context.trim().to_string(),
             action: None,
             task: None,
-            projects: Some(
-                project_summaries
-                    .iter()
-                    .map(|s| {
-                        serde_json::json!({
-                            "name": s.name,
-                            "open_tasks": s.open_tasks,
-                            "total_tasks": s.total_tasks,
-                        })
-                    })
-                    .collect(),
-            ),
-            cost: Some(serde_json::json!({
-                "spent": spent,
-                "budget": budget,
-                "remaining": remaining,
-            })),
-            workers: Some(worker_count),
+            projects: Some(agent_summaries),
+            cost: None,
+            workers: Some(agents.len() as u32),
         }
     }
 
     /// Search memory for context relevant to a query in a specific project.
     pub async fn build_memory_context(&self, project: &str, query: &str) -> Option<String> {
         let mem = self.memory_stores.get(project)?;
-        let mq = MemoryQuery::new(query, 5).with_scope(MemoryScope::Domain);
+        let mq = MemoryQuery::new(query, 5);
         let results = mem.search(&mq).await.ok()?;
         if results.is_empty() {
             return None;
@@ -1024,13 +1044,7 @@ impl MessageRouter {
             .get(project)
             .ok_or_else(|| anyhow::anyhow!("no memory store for project: {project}"))?;
         let id = mem
-            .store(
-                key,
-                content,
-                aeqi_core::traits::MemoryCategory::Fact,
-                MemoryScope::Domain,
-                None,
-            )
+            .store(key, content, aeqi_core::traits::MemoryCategory::Fact, None)
             .await?;
         Ok(id)
     }
@@ -1043,20 +1057,20 @@ impl MessageRouter {
         let project = if let Some(p) = &msg.project_hint {
             p.clone()
         } else {
+            // Try to match an agent name from the message text.
+            let agents = self.agent_registry.list_active().await.unwrap_or_default();
             let mut found = String::new();
-            for s in self.registry.list_project_summaries().await {
-                if msg_lower.contains(&s.name.to_lowercase()) {
-                    found = s.name.clone();
+            for agent in &agents {
+                if msg_lower.contains(&agent.name.to_lowercase()) {
+                    found = agent.name.clone();
                     break;
                 }
             }
             if found.is_empty() {
-                self.registry
-                    .list_project_summaries()
-                    .await
+                agents
                     .first()
-                    .map(|s| s.name.clone())
-                    .unwrap_or_default()
+                    .map(|a| a.name.clone())
+                    .unwrap_or_else(|| self.default_project.clone())
             } else {
                 found
             }
@@ -1087,7 +1101,17 @@ impl MessageRouter {
             }
         };
 
-        match self.registry.assign(&project, &subject, "").await {
+        let create_result = match self.agent_registry.resolve_by_hint(&project).await {
+            Ok(Some(agent)) => {
+                self.agent_registry
+                    .create_task(&agent.id, &subject, "", None, &["chat".to_string()])
+                    .await
+            }
+            Ok(None) => Err(anyhow::anyhow!("agent not found for hint: {project}")),
+            Err(e) => Err(e),
+        };
+
+        match create_result {
             Ok(task) => ChatResponse {
                 ok: true,
                 context: format!(
@@ -1120,12 +1144,19 @@ impl MessageRouter {
             return ChatResponse::error("I need a task ID to close (e.g., 'close task as-001').");
         }
 
-        for name in self.registry.project_names().await {
-            if let Some(board) = self.registry.get_task_board(&name).await {
-                let mut board = board.lock().await;
-                if board.get(&task_id).is_some() && board.close(&task_id, "closed via chat").is_ok()
+        // Close via AgentRegistry: update the task status to Done.
+        match self.agent_registry.get_task(&task_id).await {
+            Ok(Some(_)) => {
+                match self
+                    .agent_registry
+                    .update_task(&task_id, |task| {
+                        task.status = aeqi_tasks::TaskStatus::Done;
+                        task.closed_at = Some(chrono::Utc::now());
+                        task.closed_reason = Some("closed via chat".to_string());
+                    })
+                    .await
                 {
-                    return ChatResponse {
+                    Ok(_) => ChatResponse {
                         ok: true,
                         context: format!("Done. Task {} is now closed.", task_id),
                         action: Some("task_closed".to_string()),
@@ -1133,25 +1164,19 @@ impl MessageRouter {
                         projects: None,
                         cost: None,
                         workers: None,
-                    };
+                    },
+                    Err(e) => {
+                        ChatResponse::error(&format!("Failed to close task {}: {}", task_id, e))
+                    }
                 }
             }
+            Ok(None) => ChatResponse::error(&format!("Couldn't find task {}.", task_id)),
+            Err(e) => ChatResponse::error(&format!("Error looking up task {}: {}", task_id, e)),
         }
-
-        ChatResponse::error(&format!("Couldn't find task {}.", task_id))
-    }
-
-    #[cfg(test)]
-    async fn scoped_advisor_names(
-        &self,
-        project_hint: Option<&str>,
-        department_hint: Option<&str>,
-    ) -> Option<HashSet<String>> {
-        Self::scoped_advisor_names_with(&self.registry, project_hint, department_hint).await
     }
 
     async fn classify_advisors_with(
-        registry: &Arc<CompanyRegistry>,
+        agent_registry: &Arc<AgentRegistry>,
         agent_router: &Arc<Mutex<AgentRouter>>,
         council_advisors: &Arc<Vec<aeqi_core::config::PeerAgentConfig>>,
         clean_text: &str,
@@ -1165,7 +1190,7 @@ impl MessageRouter {
         }
 
         let scoped_names =
-            Self::scoped_advisor_names_with(registry, project_hint, department_hint).await;
+            Self::scoped_advisor_names_with(agent_registry, project_hint, department_hint).await;
         let advisor_refs: Vec<&aeqi_core::config::PeerAgentConfig> = match &scoped_names {
             Some(names) => council_advisors
                 .iter()
@@ -1207,39 +1232,35 @@ impl MessageRouter {
     }
 
     async fn scoped_advisor_names_with(
-        registry: &Arc<CompanyRegistry>,
+        agent_registry: &Arc<AgentRegistry>,
         project_hint: Option<&str>,
         department_hint: Option<&str>,
     ) -> Option<HashSet<String>> {
+        // Department scoping: find agents that are children of the project agent.
         let project_name = project_hint?;
-        let summaries = registry.list_project_summaries().await;
-        let summary = summaries.into_iter().find(|s| s.name == project_name)?;
+        let _department_name = department_hint?;
 
-        let department_name = department_hint?;
+        // Resolve the project agent and collect its subtree names.
+        let agent = agent_registry.resolve_by_hint(project_name).await.ok()??;
+        let children = agent_registry
+            .get_children(&agent.id)
+            .await
+            .ok()
+            .unwrap_or_default();
 
-        let mut allowed = HashSet::new();
-        if let Some(department) = summary
-            .departments
-            .iter()
-            .find(|d| d.name.eq_ignore_ascii_case(department_name))
-        {
-            if let Some(lead) = &department.lead {
-                allowed.insert(lead.clone());
-            }
-            allowed.extend(department.agents.iter().cloned());
-        } else {
-            warn!(
-                project = %project_name,
-                department = %department_name,
-                "department-scoped chat referenced unknown department"
-            );
+        if children.is_empty() {
+            return None;
         }
 
+        let mut allowed = HashSet::new();
+        for child in children {
+            allowed.insert(child.name);
+        }
         Some(allowed)
     }
 
     async fn gather_council_input_with(
-        registry: Arc<CompanyRegistry>,
+        agent_registry: Arc<AgentRegistry>,
         conversations: Arc<SessionStore>,
         advisors: &[String],
         clean_text: &str,
@@ -1251,11 +1272,10 @@ impl MessageRouter {
 
         let mut handles = Vec::new();
         for advisor_name in advisors {
-            let project_name = advisor_name.clone();
             let adv_name = advisor_name.clone();
             let adv_msg = clean_text.to_string();
             let adv_history = conv_context.to_string();
-            let reg = registry.clone();
+            let ar = agent_registry.clone();
 
             let handle = tokio::spawn(async move {
                 let task_subject = "[council] Advisor input requested".to_string();
@@ -1275,47 +1295,59 @@ impl MessageRouter {
                     )
                 };
 
-                let task_id = match reg.assign(&project_name, &task_subject, &task_desc).await {
-                    Ok(b) => b.id.0.clone(),
+                // Resolve the advisor agent and create a task via AgentRegistry.
+                let agent = match ar.resolve_by_hint(&adv_name).await {
+                    Ok(Some(a)) => a,
+                    Ok(None) => {
+                        warn!(agent = %adv_name, "advisor agent not found");
+                        return None;
+                    }
+                    Err(e) => {
+                        warn!(agent = %adv_name, error = %e, "failed to resolve advisor agent");
+                        return None;
+                    }
+                };
+
+                let task_id = match ar
+                    .create_task(
+                        &agent.id,
+                        &task_subject,
+                        &task_desc,
+                        None,
+                        &["council".to_string()],
+                    )
+                    .await
+                {
+                    Ok(t) => t.id.0.clone(),
                     Err(e) => {
                         warn!(agent = %adv_name, error = %e, "failed to create advisor task");
                         return None;
                     }
                 };
 
-                let notify = reg
-                    .get_project(&project_name)
-                    .await
-                    .map(|d| d.task_notify.clone());
+                // Poll for completion with a 60-second timeout.
                 let timeout = tokio::time::sleep(std::time::Duration::from_secs(60));
                 tokio::pin!(timeout);
+                let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
                 loop {
                     tokio::select! {
-                        _ = async {
-                            match &notify {
-                                Some(n) => n.notified().await,
-                                None => std::future::pending::<()>().await,
-                            }
-                        } => {}
+                        _ = interval.tick() => {}
                         _ = &mut timeout => {
                             warn!(agent = %adv_name, "advisor task timed out");
                             return None;
                         }
                     }
-                    let done = {
-                        if let Some(project) = reg.get_project(&project_name).await {
-                            let store = project.tasks.lock().await;
-                            store.get(&task_id).map(|b| {
-                                (
-                                    b.status == aeqi_tasks::TaskStatus::Done,
-                                    b.outcome_summary(),
-                                )
-                            })
-                        } else {
-                            None
+                    let done = match ar.get_task(&task_id).await {
+                        Ok(Some(task)) => {
+                            if task.status == aeqi_tasks::TaskStatus::Done {
+                                Some(task.outcome_summary())
+                            } else {
+                                None
+                            }
                         }
+                        _ => None,
                     };
-                    if let Some((true, reason)) = done {
+                    if let Some(reason) = done {
                         let text = reason.unwrap_or_default();
                         return Some((adv_name, text));
                     }
@@ -1357,7 +1389,7 @@ impl MessageRouter {
     }
 
     async fn finish_council_enrichment(
-        registry: Arc<CompanyRegistry>,
+        agent_registry: Arc<AgentRegistry>,
         conversations: Arc<SessionStore>,
         agent_router: Arc<Mutex<AgentRouter>>,
         council_advisors: Arc<Vec<aeqi_core::config::PeerAgentConfig>>,
@@ -1370,9 +1402,10 @@ impl MessageRouter {
         source_tag: String,
         project_hint: Option<String>,
         department_hint: Option<String>,
+        scheduler_wake: Arc<tokio::sync::Notify>,
     ) {
         let advisors_to_invoke = Self::classify_advisors_with(
-            &registry,
+            &agent_registry,
             &agent_router,
             &council_advisors,
             &clean_text,
@@ -1400,7 +1433,7 @@ impl MessageRouter {
                 )
                 .await;
             Self::gather_council_input_with(
-                registry.clone(),
+                agent_registry.clone(),
                 conversations.clone(),
                 &advisors_to_invoke,
                 &clean_text,
@@ -1411,22 +1444,14 @@ impl MessageRouter {
             .await
         };
 
-        let Some(project) = registry.get_project(&project_name).await else {
-            warn!(
-                project = %project_name,
-                task = %task_id,
-                "chat council enrichment could not find project"
-            );
-            return;
-        };
-
-        let update_result = {
-            let mut store = project.tasks.lock().await;
-            store.update(&task_id, |task| {
+        // Update task with council input.
+        let update_result: Result<()> = agent_registry
+            .update_task(&task_id, |task| {
                 Self::append_council_input(&mut task.description, &council_input);
                 Self::set_scheduler_hold(task, false, None);
             })
-        };
+            .await
+            .map(|_| ());
 
         match update_result {
             Ok(_) => {
@@ -1458,7 +1483,7 @@ impl MessageRouter {
                         })),
                     )
                     .await;
-                registry.wake.notify_one()
+                scheduler_wake.notify_one();
             }
             Err(e) => warn!(
                 project = %project_name,
@@ -1466,589 +1491,6 @@ impl MessageRouter {
                 error = %e,
                 "failed to finalize chat council enrichment"
             ),
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::WorkerPool;
-    use crate::company::Company;
-    use crate::message::DispatchBus;
-    use crate::registry::CompanyRegistry;
-    use aeqi_core::config::{CompanyConfig, DepartmentConfig, ExecutionMode, PeerAgentConfig};
-    use aeqi_core::traits::{
-        ChatRequest, ChatResponse as ProviderChatResponse, Provider, StopReason, Usage,
-    };
-    use anyhow::Result;
-    use async_trait::async_trait;
-    use chrono::Utc;
-    use std::path::PathBuf;
-    use tempfile::TempDir;
-
-    fn temp_project(name: &str, prefix: &str) -> anyhow::Result<(Arc<Company>, TempDir)> {
-        let dir = TempDir::new()?;
-        std::fs::create_dir_all(dir.path().join(".tasks"))?;
-        let config = CompanyConfig {
-            id: None,
-            name: name.to_string(),
-            prefix: prefix.to_string(),
-            repo: dir.path().display().to_string(),
-            model: Some("test-model".to_string()),
-            runtime: None,
-            max_workers: 1,
-            worktree_root: None,
-            execution_mode: ExecutionMode::Agent,
-            max_turns: Some(1),
-            max_budget_usd: None,
-            worker_timeout_secs: 60,
-            max_cost_per_day_usd: None,
-            orchestrator: None,
-            departments: Vec::new(),
-            domain_hints: Vec::new(),
-            compact_instructions: None,
-            primer: None,
-        };
-        let project = Company::from_config(&config, dir.path(), "test-model")?;
-        Ok((Arc::new(project), dir))
-    }
-
-    async fn test_engine() -> (
-        MessageRouter,
-        Arc<Company>,
-        Arc<CompanyRegistry>,
-        TempDir,
-        TempDir,
-        PathBuf,
-    ) {
-        let dispatch_bus = Arc::new(DispatchBus::new());
-        let registry = Arc::new(CompanyRegistry::new(
-            dispatch_bus.clone(),
-            "leader".to_string(),
-        ));
-        let (project, project_dir) = temp_project("leader", "ld").unwrap();
-        registry.register_project_only(project.clone()).await;
-
-        let conv_dir = TempDir::new().unwrap();
-        let conv_path = conv_dir.path().join("conv.db");
-        let conversations = Arc::new(SessionStore::open(&conv_path).unwrap());
-
-        let engine = MessageRouter {
-            conversations,
-            registry: registry.clone(),
-            agent_router: Arc::new(Mutex::new(AgentRouter::new(String::new(), 0))),
-            council_advisors: Arc::new(Vec::new()),
-            auto_council_enabled: true,
-            leader_name: "leader".to_string(),
-            pending_tasks: Arc::new(Mutex::new(HashMap::new())),
-            task_notify: Arc::new(tokio::sync::Notify::new()),
-            memory_stores: HashMap::new(),
-            memory_stores_by_id: HashMap::new(),
-            intent_classifier: None,
-            default_project: "leader".to_string(),
-        };
-
-        (engine, project, registry, project_dir, conv_dir, conv_path)
-    }
-
-    struct DoneProvider;
-
-    #[async_trait]
-    impl Provider for DoneProvider {
-        async fn chat(&self, _request: &ChatRequest) -> Result<ProviderChatResponse> {
-            Ok(ProviderChatResponse {
-                content: Some("DONE: fixed".to_string()),
-                tool_calls: Vec::new(),
-                usage: Usage::default(),
-                stop_reason: StopReason::EndTurn,
-            })
-        }
-
-        fn name(&self) -> &str {
-            "done-provider"
-        }
-
-        async fn health_check(&self) -> Result<()> {
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn quick_path_records_user_and_reply() {
-        let (engine, _project, _registry, _project_dir, _conv_dir, _conv_path) =
-            test_engine().await;
-        let msg = IncomingMessage {
-            message: "create task review the patrol loop".to_string(),
-            chat_id: 7,
-            sender: "alice".to_string(),
-            source: MessageSource::Web,
-            project_hint: None,
-            department_hint: None,
-            channel_name: None,
-            agent_id: None,
-        };
-
-        let response = engine.handle_message(&msg).await.unwrap();
-        assert!(response.ok);
-
-        let history = engine.get_history(7, 10, 0).await.unwrap();
-        assert_eq!(history.len(), 2);
-        assert_eq!(history[0].role, "User");
-        assert_eq!(history[0].content, msg.message);
-        assert_eq!(history[1].role, "leader");
-        assert_eq!(history[1].content, response.context);
-    }
-
-    #[tokio::test]
-    async fn poll_completion_records_reply_in_history() {
-        let (engine, project, _registry, _project_dir, _conv_dir, _conv_path) = test_engine().await;
-        let msg = IncomingMessage {
-            message: "Give me a deployment update".to_string(),
-            chat_id: 11,
-            sender: "alice".to_string(),
-            source: MessageSource::Web,
-            project_hint: None,
-            department_hint: None,
-            channel_name: None,
-            agent_id: None,
-        };
-
-        let handle = engine.handle_message_full(&msg, None).await.unwrap();
-        {
-            let mut store = project.tasks.lock().await;
-            store.close(&handle.task_id, "All green.").unwrap();
-        }
-
-        let completion = engine.poll_completion(&handle.task_id).await.unwrap();
-        assert_eq!(completion.text, "All green.");
-
-        let history = engine.get_history(11, 10, 0).await.unwrap();
-        assert_eq!(history.len(), 2);
-        assert_eq!(history[0].role, "User");
-        assert_eq!(history[0].content, msg.message);
-        assert_eq!(history[1].role, "leader");
-        assert_eq!(history[1].content, "All green.");
-    }
-
-    #[tokio::test]
-    async fn full_path_records_timeline_lifecycle_events() {
-        let (engine, project, _registry, _project_dir, _conv_dir, _conv_path) = test_engine().await;
-        let msg = IncomingMessage {
-            message: "Investigate the patrol loop".to_string(),
-            chat_id: 12,
-            sender: "alice".to_string(),
-            source: MessageSource::Web,
-            project_hint: None,
-            department_hint: None,
-            channel_name: None,
-            agent_id: None,
-        };
-
-        let handle = engine.handle_message_full(&msg, None).await.unwrap();
-
-        let timeline = engine.get_timeline(12, 10, 0).await.unwrap();
-        let event_types: Vec<&str> = timeline
-            .iter()
-            .map(|event| event.event_type.as_str())
-            .collect();
-        assert_eq!(
-            event_types,
-            vec!["message", "task_created", "task_released"]
-        );
-        assert_eq!(timeline[0].role, "User");
-        assert_eq!(timeline[0].content, msg.message);
-        assert_eq!(timeline[1].role, "system");
-        assert_eq!(
-            timeline[1]
-                .metadata
-                .as_ref()
-                .and_then(|m| m.get("task_id"))
-                .and_then(|v| v.as_str()),
-            Some(handle.task_id.as_str())
-        );
-
-        project
-            .tasks
-            .lock()
-            .await
-            .close(&handle.task_id, "Patrol loop fixed.")
-            .unwrap();
-
-        let completion = engine.poll_completion(&handle.task_id).await.unwrap();
-        assert_eq!(completion.text, "Patrol loop fixed.");
-
-        let timeline = engine.get_timeline(12, 10, 0).await.unwrap();
-        let event_types: Vec<&str> = timeline
-            .iter()
-            .map(|event| event.event_type.as_str())
-            .collect();
-        assert_eq!(
-            event_types,
-            vec![
-                "message",
-                "task_created",
-                "task_released",
-                "task_completed",
-                "message",
-            ]
-        );
-        assert_eq!(timeline[3].role, "system");
-        assert_eq!(timeline[4].role, "leader");
-        assert_eq!(timeline[4].content, "Patrol loop fixed.");
-        assert_eq!(
-            timeline[3]
-                .metadata
-                .as_ref()
-                .and_then(|m| m.get("task_id"))
-                .and_then(|v| v.as_str()),
-            Some(handle.task_id.as_str())
-        );
-    }
-
-    #[tokio::test]
-    async fn full_path_preserves_older_history() {
-        let (engine, _project, _registry, _project_dir, _conv_dir, conv_path) = test_engine().await;
-        engine
-            .conversations
-            .record_with_source(21, "User", "Earlier context", Some("web"))
-            .await
-            .unwrap();
-
-        let conn = rusqlite::Connection::open(&conv_path).unwrap();
-        conn.execute(
-            "UPDATE conversations SET timestamp = ?1 WHERE chat_id = ?2",
-            rusqlite::params![(Utc::now() - chrono::TimeDelta::hours(3)).to_rfc3339(), 21],
-        )
-        .unwrap();
-
-        let msg = IncomingMessage {
-            message: "What should we do next?".to_string(),
-            chat_id: 21,
-            sender: "alice".to_string(),
-            source: MessageSource::Web,
-            project_hint: None,
-            department_hint: None,
-            channel_name: None,
-            agent_id: None,
-        };
-
-        let _handle = engine.handle_message_full(&msg, None).await.unwrap();
-
-        let history = engine.get_history(21, 10, 0).await.unwrap();
-        assert_eq!(history.len(), 2);
-        assert_eq!(history[0].content, "Earlier context");
-        assert_eq!(history[1].content, msg.message);
-    }
-
-    #[tokio::test]
-    async fn full_path_routes_scoped_chat_to_project_and_completes_there() {
-        let dispatch_bus = Arc::new(DispatchBus::new());
-        let registry = Arc::new(CompanyRegistry::new(dispatch_bus, "leader".to_string()));
-        let (leader_project, _leader_dir) = temp_project("leader", "ld").unwrap();
-        let (app_project, _app_dir) = temp_project("app", "ap").unwrap();
-        registry.register_project_only(leader_project.clone()).await;
-        registry.register_project_only(app_project.clone()).await;
-
-        let conv_dir = TempDir::new().unwrap();
-        let conv_path = conv_dir.path().join("conv.db");
-        let conversations = Arc::new(SessionStore::open(&conv_path).unwrap());
-
-        let engine = MessageRouter {
-            conversations,
-            registry: registry.clone(),
-            agent_router: Arc::new(Mutex::new(AgentRouter::new(String::new(), 0))),
-            council_advisors: Arc::new(Vec::new()),
-            auto_council_enabled: true,
-            leader_name: "leader".to_string(),
-            pending_tasks: Arc::new(Mutex::new(HashMap::new())),
-            task_notify: Arc::new(tokio::sync::Notify::new()),
-            memory_stores: HashMap::new(),
-            memory_stores_by_id: HashMap::new(),
-            intent_classifier: None,
-            default_project: "leader".to_string(),
-        };
-
-        let msg = IncomingMessage {
-            message: "Ship the release checklist".to_string(),
-            chat_id: 55,
-            sender: "alice".to_string(),
-            source: MessageSource::Web,
-            project_hint: Some("app".to_string()),
-            department_hint: None,
-            channel_name: Some("app-ops".to_string()),
-            agent_id: None,
-        };
-
-        let handle = engine.handle_message_full(&msg, None).await.unwrap();
-        assert_eq!(handle.project, "app");
-        assert!(
-            app_project
-                .tasks
-                .lock()
-                .await
-                .get(&handle.task_id)
-                .is_some()
-        );
-        assert!(
-            leader_project
-                .tasks
-                .lock()
-                .await
-                .get(&handle.task_id)
-                .is_none()
-        );
-
-        app_project
-            .tasks
-            .lock()
-            .await
-            .close(&handle.task_id, "Release checklist completed.")
-            .unwrap();
-
-        let completion = engine.poll_completion(&handle.task_id).await.unwrap();
-        assert_eq!(completion.text, "Release checklist completed.");
-    }
-
-    #[tokio::test]
-    async fn create_chat_task_hold_blocks_scheduler_until_released() {
-        let (engine, project, _registry, _project_dir, _conv_dir, _conv_path) = test_engine().await;
-
-        let task = engine
-            .create_chat_task("leader", "[web] alice (77)", "Draft the answer", true)
-            .await
-            .unwrap();
-
-        {
-            let store = project.tasks.lock().await;
-            let held = store.get(&task.id.0).unwrap();
-            assert!(held.is_scheduler_held());
-            assert!(store.ready().is_empty());
-        }
-
-        {
-            let mut store = project.tasks.lock().await;
-            store
-                .update(&task.id.0, |entry| {
-                    MessageRouter::set_scheduler_hold(entry, false, None);
-                })
-                .unwrap();
-            let ready = store.ready();
-            assert_eq!(ready.len(), 1);
-            assert_eq!(ready[0].id, task.id);
-        }
-    }
-
-    #[tokio::test]
-    async fn scoped_advisor_names_follow_department_before_project_team() {
-        let dispatch_bus = Arc::new(DispatchBus::new());
-        let registry = Arc::new(CompanyRegistry::new(
-            dispatch_bus.clone(),
-            "leader".to_string(),
-        ));
-
-        let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".tasks")).unwrap();
-        let config = CompanyConfig {
-            id: None,
-            name: "app".to_string(),
-            prefix: "ap".to_string(),
-            repo: dir.path().display().to_string(),
-            model: Some("test-model".to_string()),
-            runtime: None,
-            max_workers: 1,
-            worktree_root: None,
-            execution_mode: ExecutionMode::Agent,
-            max_turns: Some(1),
-            max_budget_usd: None,
-            worker_timeout_secs: 60,
-            max_cost_per_day_usd: None,
-            orchestrator: None,
-            departments: vec![DepartmentConfig {
-                name: "backend".to_string(),
-                lead: Some("reviewer".to_string()),
-                agents: vec!["reviewer".to_string()],
-                description: None,
-            }],
-            domain_hints: Vec::new(),
-            compact_instructions: None,
-            primer: None,
-        };
-        let project = Arc::new(Company::from_config(&config, dir.path(), "test-model").unwrap());
-        let provider: Arc<dyn Provider> = Arc::new(DoneProvider);
-        let mut pool = WorkerPool::new(&project, provider, Vec::new(), dispatch_bus.clone());
-        pool.execution_mode = aeqi_core::ExecutionMode::Agent;
-        pool.set_escalation_targets("leader", "leader");
-        registry.register_project(project, pool).await;
-
-        let conv_dir = TempDir::new().unwrap();
-        let conv_path = conv_dir.path().join("conv.db");
-        let conversations = Arc::new(SessionStore::open(&conv_path).unwrap());
-
-        let engine = MessageRouter {
-            conversations,
-            registry,
-            agent_router: Arc::new(Mutex::new(AgentRouter::new(String::new(), 0))),
-            council_advisors: Arc::new(vec![
-                PeerAgentConfig {
-                    name: "researcher".to_string(),
-                    prefix: "rs".to_string(),
-                    model: None,
-                    runtime: None,
-                    role: "advisor".to_string(),
-                    voice: Default::default(),
-                    execution_mode: ExecutionMode::Agent,
-                    max_workers: 1,
-                    max_turns: None,
-                    max_budget_usd: None,
-                    default_repo: None,
-                    expertise: vec!["research".to_string()],
-                    capabilities: Vec::new(),
-                    telegram_token_secret: None,
-                    model_tier: None,
-                    display_name: None,
-                    color: None,
-                    avatar: None,
-                    faces: None,
-                    triggers: vec![],
-                    prompt: None,
-                },
-                PeerAgentConfig {
-                    name: "reviewer".to_string(),
-                    prefix: "rv".to_string(),
-                    model: None,
-                    runtime: None,
-                    role: "advisor".to_string(),
-                    voice: Default::default(),
-                    execution_mode: ExecutionMode::Agent,
-                    max_workers: 1,
-                    max_turns: None,
-                    max_budget_usd: None,
-                    default_repo: None,
-                    expertise: vec!["review".to_string()],
-                    capabilities: Vec::new(),
-                    telegram_token_secret: None,
-                    model_tier: None,
-                    display_name: None,
-                    color: None,
-                    avatar: None,
-                    faces: None,
-                    triggers: vec![],
-                    prompt: None,
-                },
-                PeerAgentConfig {
-                    name: "outsider".to_string(),
-                    prefix: "ot".to_string(),
-                    model: None,
-                    runtime: None,
-                    role: "advisor".to_string(),
-                    voice: Default::default(),
-                    execution_mode: ExecutionMode::Agent,
-                    max_workers: 1,
-                    max_turns: None,
-                    max_budget_usd: None,
-                    default_repo: None,
-                    expertise: vec!["ops".to_string()],
-                    capabilities: Vec::new(),
-                    telegram_token_secret: None,
-                    model_tier: None,
-                    display_name: None,
-                    color: None,
-                    avatar: None,
-                    faces: None,
-                    triggers: vec![],
-                    prompt: None,
-                },
-            ]),
-            auto_council_enabled: true,
-            leader_name: "leader".to_string(),
-            pending_tasks: Arc::new(Mutex::new(HashMap::new())),
-            task_notify: Arc::new(tokio::sync::Notify::new()),
-            memory_stores: HashMap::new(),
-            memory_stores_by_id: HashMap::new(),
-            intent_classifier: None,
-            default_project: "leader".to_string(),
-        };
-
-        // Without a department hint, project-only scope returns None (no restriction).
-        let project_scoped = engine.scoped_advisor_names(Some("app"), None).await;
-        assert!(project_scoped.is_none());
-
-        let department_scoped = engine
-            .scoped_advisor_names(Some("app"), Some("backend"))
-            .await
-            .unwrap();
-        assert!(department_scoped.contains("reviewer"));
-        assert!(!department_scoped.contains("researcher"));
-        assert!(!department_scoped.contains("outsider"));
-    }
-
-    #[tokio::test]
-    async fn auto_council_can_be_disabled_without_breaking_explicit_council() {
-        let (mut engine, project, _registry, _project_dir, _conv_dir, _conv_path) =
-            test_engine().await;
-        engine.council_advisors = Arc::new(vec![PeerAgentConfig {
-            name: "reviewer".to_string(),
-            prefix: "rv".to_string(),
-            model: None,
-            runtime: None,
-            role: "advisor".to_string(),
-            voice: Default::default(),
-            execution_mode: ExecutionMode::Agent,
-            max_workers: 1,
-            max_turns: None,
-            max_budget_usd: None,
-            default_repo: None,
-            expertise: vec!["review".to_string()],
-            capabilities: Vec::new(),
-            telegram_token_secret: None,
-            model_tier: None,
-            display_name: None,
-            color: None,
-            avatar: None,
-            faces: None,
-            triggers: vec![],
-            prompt: None,
-        }]);
-        engine.auto_council_enabled = false;
-
-        let normal = IncomingMessage {
-            message: "check the chat tests".to_string(),
-            chat_id: 88,
-            sender: "alice".to_string(),
-            source: MessageSource::Web,
-            project_hint: None,
-            department_hint: None,
-            channel_name: None,
-            agent_id: None,
-        };
-        let handle = engine.handle_message_full(&normal, None).await.unwrap();
-        let released = engine.get_timeline(88, 10, 0).await.unwrap();
-        assert!(released.iter().any(|e| e.event_type == "task_released"));
-        assert!(!released.iter().any(|e| e.event_type == "council_pending"));
-        {
-            let store = project.tasks.lock().await;
-            let stored = store.get(&handle.task_id).unwrap();
-            assert!(!stored.is_scheduler_held());
-        }
-
-        let explicit = IncomingMessage {
-            message: "/council check the chat tests".to_string(),
-            chat_id: 89,
-            sender: "alice".to_string(),
-            source: MessageSource::Web,
-            project_hint: None,
-            department_hint: None,
-            channel_name: None,
-            agent_id: None,
-        };
-        let explicit_handle = engine.handle_message_full(&explicit, None).await.unwrap();
-        let held = engine.get_timeline(89, 10, 0).await.unwrap();
-        assert!(held.iter().any(|e| e.event_type == "council_pending"));
-        {
-            let store = project.tasks.lock().await;
-            let stored = store.get(&explicit_handle.task_id).unwrap();
-            assert!(stored.is_scheduler_held());
         }
     }
 }

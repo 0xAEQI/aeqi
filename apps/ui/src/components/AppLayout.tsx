@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { to: "/", label: "home", end: true },
   { to: "/sessions", label: "sessions" },
   { to: "/issues", label: "tasks" },
+  { to: "/drive", label: "drive" },
   { to: "/triggers", label: "triggers" },
   { to: "/skills", label: "skills" },
   { to: "/memories", label: "memories" },

@@ -14,7 +14,6 @@ fn resolve_env_value(value: &str) -> String {
     }
 }
 use aeqi_memory::SqliteMemory;
-use aeqi_orchestrator::CompanyRegistry;
 use aeqi_providers::{AnthropicProvider, OllamaProvider, OpenRouterEmbedder, OpenRouterProvider};
 use aeqi_tasks::TaskBoard;
 use aeqi_tools::{
@@ -396,27 +395,45 @@ pub(crate) fn augment_identity_with_org_context(
     identity
 }
 
-pub(crate) async fn handle_fast_lane(text: &str, reg: &Arc<CompanyRegistry>) -> String {
+pub(crate) async fn handle_fast_lane(
+    text: &str,
+    scheduler: &Arc<aeqi_orchestrator::scheduler::Scheduler>,
+) -> String {
     let cmd = text.split_whitespace().next().unwrap_or("");
     match cmd {
         "/status" => {
-            let projects = reg.project_names().await;
-            if projects.is_empty() {
-                return "No projects registered.".to_string();
+            let active = scheduler.active_count().await;
+            let counts = scheduler.agent_counts().await;
+            let mut lines = vec![format!("*Scheduler Status* — {active} active workers\n")];
+            if counts.is_empty() {
+                lines.push("  No workers running.".to_string());
+            } else {
+                for (agent, count) in &counts {
+                    lines.push(format!("  {agent}: {count} worker(s)"));
+                }
             }
-            let mut lines = vec!["*Project Status*\n".to_string()];
-            for d in &projects {
-                lines.push(format!("  {} — active", d));
+            // List agents from agent registry.
+            if let Ok(agents) = scheduler.agent_registry.list_active().await {
+                if !agents.is_empty() {
+                    lines.push(String::new());
+                    lines.push("*Agents*".to_string());
+                    for a in &agents {
+                        lines.push(format!("  {} — active", a.name));
+                    }
+                }
             }
             lines.join("\n")
         }
         "/help" => "*Available Commands*\n\n\
-             /status — Project status\n\
+             /status — Agent status\n\
              /cost — Today's spend\n\
              /help — This message"
             .to_string(),
         "/cost" => {
-            "Cost tracking: use `/cost` here or `aeqi daemon query cost` from CLI.".to_string()
+            let (spent, budget, remaining) = scheduler.cost_ledger.budget_status();
+            format!(
+                "*Cost — Today*\n\n  Spent: ${spent:.2}\n  Budget: ${budget:.2}\n  Remaining: ${remaining:.2}"
+            )
         }
         _ => format!("Unknown fast-lane command: {cmd}"),
     }

@@ -1,11 +1,11 @@
+use aeqi_core::SecretStore;
 use aeqi_core::config::TelegramChatRouteConfig;
 use aeqi_core::traits::{Channel, Memory};
-use aeqi_core::{Identity, SecretStore};
 use aeqi_gates::TelegramChannel;
 use aeqi_orchestrator::tools::build_orchestration_tools;
 use aeqi_orchestrator::{
-    AgentRouter, AuditLog, Company, CompanyRegistry, Daemon, DispatchBus, ExpertiseLedger, Notes,
-    SessionStore, WorkerPool,
+    AEQIMetrics, AgentRouter, Daemon, DispatchBus, EventStore, Notes, Scheduler, SchedulerConfig,
+    SessionStore,
 };
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -16,10 +16,9 @@ use tracing::{info, warn};
 
 use crate::cli::DaemonAction;
 use crate::helpers::{
-    augment_identity_with_org_context, build_project_tools, build_provider_for_agent,
-    build_provider_for_project, build_tools, daemon_ipc_request, find_agent_dir, find_project_dir,
-    get_api_key, handle_fast_lane, load_config, load_config_with_agents, open_memory,
-    pid_file_path,
+    build_project_tools, build_provider_for_project, build_tools, daemon_ipc_request,
+    find_agent_dir, find_project_dir, get_api_key, handle_fast_lane, load_config,
+    load_config_with_agents, open_memory, pid_file_path,
 };
 use crate::service::{install_user_service, render_user_service, uninstall_user_service};
 
@@ -50,30 +49,9 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 .leader_agent()
                 .map(|a| a.name.clone())
                 .unwrap_or_else(|| "leader".to_string());
-            let mut registry_inner =
-                CompanyRegistry::new(dispatch_bus.clone(), leader_name.clone());
-            registry_inner.config_project_names =
-                config.companies.iter().map(|p| p.name.clone()).collect();
-            registry_inner.set_cost_ledger(cost_ledger.clone());
 
             // Initialize v3 subsystems (SQLite-backed).
-            match AuditLog::open(&data_dir.join("audit.db")) {
-                Ok(al) => {
-                    let al = Arc::new(al);
-                    registry_inner.audit_log = Some(al);
-                    info!("audit log initialized");
-                }
-                Err(e) => warn!(error = %e, "failed to initialize audit log"),
-            }
-            match ExpertiseLedger::open(&data_dir.join("expertise.db")) {
-                Ok(el) => {
-                    let el = Arc::new(el);
-                    registry_inner.expertise_ledger = Some(el);
-                    info!("expertise ledger initialized");
-                }
-                Err(e) => warn!(error = %e, "failed to initialize expertise ledger"),
-            }
-            match Notes::open(
+            let notes: Option<Arc<Notes>> = match Notes::open(
                 &data_dir.join("notes.db"),
                 config.orchestrator.notes_transient_ttl_hours,
                 config.orchestrator.notes_durable_ttl_days,
@@ -81,25 +59,27 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             ) {
                 Ok(bb) => {
                     let bb = Arc::new(bb);
-                    registry_inner.notes = Some(bb);
                     info!("notes initialized");
+                    Some(bb)
                 }
-                Err(e) => warn!(error = %e, "failed to initialize notes"),
-            }
-            match SessionStore::open(&data_dir.join("sessions.db")) {
-                Ok(cs) => {
-                    let cs = Arc::new(cs);
-                    registry_inner.session_store = Some(cs);
-                    info!("session store initialized");
+                Err(e) => {
+                    warn!(error = %e, "failed to initialize notes");
+                    None
                 }
-                Err(e) => warn!(error = %e, "failed to initialize session store"),
-            }
+            };
+            let session_store: Option<Arc<SessionStore>> =
+                match SessionStore::open(&data_dir.join("sessions.db")) {
+                    Ok(cs) => {
+                        let cs = Arc::new(cs);
+                        info!("session store initialized");
+                        Some(cs)
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "failed to initialize session store");
+                        None
+                    }
+                };
 
-            // Set primers on registry for session_send access.
-            registry_inner.shared_primer = config.shared_primer.clone();
-            registry_inner.project_primer = config.companies.first().and_then(|c| c.primer.clone());
-
-            let registry = Arc::new(registry_inner);
             let background_automation_enabled = config.orchestrator.background_automation_enabled;
             let advisor_agents = config.advisor_agents();
             let mut skipped_projects = Vec::new();
@@ -112,171 +92,9 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 }
             }
 
-            // Register project rigs.
-            for project_cfg in &config.companies {
-                let project_dir = match find_project_dir(&project_cfg.name) {
-                    Ok(d) => d,
-                    Err(_) => {
-                        skipped_projects.push(project_cfg.name.clone());
-                        warn!(
-                            project = %project_cfg.name,
-                            "project dir not found, skipping daemon registration"
-                        );
-                        continue;
-                    }
-                };
-                let default_model = config.model_for_company(&project_cfg.name);
-
-                let project = Arc::new(Company::from_config(
-                    project_cfg,
-                    &project_dir,
-                    &default_model,
-                )?);
-                let workdir = project.repo.clone();
-                let tasks_dir = project_dir.join(".tasks");
-                let tools = build_project_tools(
-                    &workdir,
-                    &tasks_dir,
-                    &project_cfg.prefix,
-                    Some(&project.worktree_root),
-                );
-                let provider = build_provider_for_project(&config, &project_cfg.name)?;
-                let mut pool = WorkerPool::new(
-                    &project,
-                    provider.clone(),
-                    tools.clone(),
-                    dispatch_bus.clone(),
-                );
-                pool.event_broadcaster = Some(event_broadcaster.clone());
-                let project_orch = config.orchestrator_for_company(&project_cfg.name);
-
-                // Wire memory + reflection for worker post-execution insight extraction.
-                if let Ok(mem) = open_memory(&config, Some(&project_cfg.name)) {
-                    let mem: Arc<dyn Memory> = Arc::new(mem);
-                    pool.memory = Some(mem);
-                    if background_automation_enabled {
-                        pool.reflect_provider = Some(provider.clone());
-                        pool.reflect_model = config.default_model_for_provider(
-                            aeqi_core::config::ProviderKind::OpenRouter,
-                        );
-                    }
-                }
-
-                // Wire escalation targets.
-                pool.set_escalation_targets(config.leader(), config.leader());
-                pool.identity = augment_identity_with_org_context(
-                    &config,
-                    pool.identity.clone(),
-                    Some(&pool.escalation_target),
-                    Some(&project_cfg.name),
-                );
-
-                // Wire v3 orchestrator config fields.
-                pool.expertise_routing = project_orch.expertise_routing;
-                pool.preflight_enabled = project_orch.preflight_enabled;
-                pool.preflight_model = project_orch.preflight_model.clone();
-                pool.preflight_max_cost_usd = project_orch.preflight_max_cost_usd;
-                pool.adaptive_retry = project_orch.adaptive_retry;
-                pool.failure_analysis_model = project_orch.failure_analysis_model.clone();
-                pool.infer_deps_threshold = project_orch.infer_deps_threshold;
-                pool.max_resolution_attempts = project_orch.max_resolution_attempts;
-                pool.max_description_chars = project_orch.max_description_chars;
-                pool.max_task_retries = project_orch.max_task_retries;
-
-                // Wire skill discovery directories (project-specific + shared).
-                let project_skills_dir = project_dir.join("skills");
-                let shared_skills_dir = project_dir
-                    .parent()
-                    .map(|p| p.join("shared").join("skills"))
-                    .unwrap_or_default();
-                pool.skills_dirs = vec![project_skills_dir, shared_skills_dir];
-
-                pool.worker_max_budget_usd = project_cfg.max_budget_usd;
-
-                // Wire project + shared primers from config.
-                pool.project_primer = project_cfg.primer.clone();
-                pool.shared_primer = config.shared_primer.clone();
-
-                registry.register_project(project.clone(), pool).await;
-            }
-
             // Build channels map for the leader agent.
             let channels: Arc<RwLock<HashMap<String, Arc<dyn aeqi_core::traits::Channel>>>> =
                 Arc::new(RwLock::new(HashMap::new()));
-
-            // Register advisor agents as projects (so they can receive tasks).
-            for agent_cfg in &advisor_agents {
-                let agent_dir = match find_agent_dir(&agent_cfg.name) {
-                    Ok(d) => d,
-                    Err(_) => {
-                        warn!(agent = %agent_cfg.name, "advisor agent dir not found, skipping");
-                        skipped_advisors.push(agent_cfg.name.clone());
-                        continue;
-                    }
-                };
-                let agent_identity = augment_identity_with_org_context(
-                    &config,
-                    Identity::load(&agent_dir, None).unwrap_or_default(),
-                    Some(&agent_cfg.name),
-                    None,
-                );
-                let agent_tasks_dir = agent_dir.join(".tasks");
-                std::fs::create_dir_all(&agent_tasks_dir).ok();
-                let agent_task_board = aeqi_tasks::TaskBoard::open(&agent_tasks_dir)?;
-                let agent_model = config.model_for_agent(&agent_cfg.name);
-                let agent_workdir = agent_cfg
-                    .default_repo
-                    .as_ref()
-                    .map(|r| config.resolve_repo(r))
-                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-
-                let agent_project = Arc::new(Company {
-                    id: String::new(),
-                    name: agent_cfg.name.clone(),
-                    prefix: agent_cfg.prefix.clone(),
-                    repo: agent_workdir.clone(),
-                    worktree_root: dirs::home_dir().unwrap_or_default().join("worktrees"),
-                    model: agent_model.clone(),
-                    max_workers: agent_cfg.max_workers,
-                    worker_timeout_secs: 300, // 5 min timeout for advisor responses
-                    company_identity: agent_identity,
-                    tasks: Arc::new(tokio::sync::Mutex::new(agent_task_board)),
-                    task_notify: Arc::new(tokio::sync::Notify::new()),
-                    departments: Vec::new(),
-                });
-
-                let agent_tools: Vec<Arc<dyn aeqi_core::traits::Tool>> =
-                    build_tools(&agent_workdir);
-                let provider = build_provider_for_agent(&config, &agent_cfg.name)?;
-                let mut agent_scout = WorkerPool::new(
-                    &agent_project,
-                    provider.clone(),
-                    agent_tools,
-                    dispatch_bus.clone(),
-                );
-                agent_scout.event_broadcaster = Some(event_broadcaster.clone());
-
-                agent_scout.worker_max_budget_usd = agent_cfg.max_budget_usd;
-
-                // Wire memory + reflection for advisor agents (same pattern as project worker pools).
-                if let Ok(mem) = open_memory(&config, Some(&agent_cfg.name)) {
-                    let mem: Arc<dyn Memory> = Arc::new(mem);
-                    agent_scout.memory = Some(mem);
-                    if background_automation_enabled {
-                        agent_scout.reflect_provider = Some(provider.clone());
-                        agent_scout.reflect_model = config.default_model_for_provider(
-                            aeqi_core::config::ProviderKind::OpenRouter,
-                        );
-                    }
-                }
-
-                registry.register_project(agent_project, agent_scout).await;
-                info!(
-                    agent = %agent_cfg.name,
-                    model = %agent_model,
-                    "registered advisor agent"
-                );
-            }
 
             // Build agent router for message classification.
             let classifier_api_key = get_api_key(&config).unwrap_or_default();
@@ -321,6 +139,24 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 .map(|c| c.name.clone())
                 .unwrap_or_default();
 
+            // Open AgentRegistry — required for daemon operation.
+            let agent_reg: Arc<aeqi_orchestrator::agent_registry::AgentRegistry> =
+                match aeqi_orchestrator::agent_registry::AgentRegistry::open(&config.data_dir()) {
+                    Ok(ar) => Arc::new(ar),
+                    Err(e) => {
+                        anyhow::bail!("failed to open agent registry: {e}");
+                    }
+                };
+
+            // Pre-create the scheduler wake signal so both MessageRouter and
+            // Scheduler share the same Notify instance.
+            let scheduler_wake: Arc<tokio::sync::Notify> = Arc::new(tokio::sync::Notify::new());
+
+            // Shared slot for the Scheduler — populated after the scheduler is built,
+            // but readable by the telegram message loop for fast-lane commands.
+            let shared_scheduler: Arc<std::sync::RwLock<Option<Arc<Scheduler>>>> =
+                Arc::new(std::sync::RwLock::new(None));
+
             // Build the unified MessageRouter.
             let council_advisors: Arc<Vec<aeqi_core::config::PeerAgentConfig>> =
                 Arc::new(config.advisor_agents().into_iter().cloned().collect());
@@ -328,10 +164,11 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             // Intent classifier (legacy — no longer used for routing).
             let intent_classifier: Option<Arc<aeqi_orchestrator::intent::IntentClassifier>> = None;
 
-            let message_router = registry.session_store.as_ref().map(|cs| {
+            let message_router = session_store.as_ref().map(|cs| {
                 Arc::new(aeqi_orchestrator::MessageRouter {
                     conversations: cs.clone(),
-                    registry: registry.clone(),
+                    agent_registry: agent_reg.clone(),
+                    scheduler_wake: scheduler_wake.clone(),
                     agent_router: agent_router.clone(),
                     council_advisors: council_advisors.clone(),
                     auto_council_enabled,
@@ -413,6 +250,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                                                         .map(|route| (route.chat_id, route))
                                                         .collect(),
                                                 );
+                                                let tg_scheduler = shared_scheduler.clone();
                                                 tokio::spawn(async move {
                                                     telegram_message_loop(
                                                         &mut rx,
@@ -424,6 +262,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                                                         eb,
                                                         default_chat,
                                                         telegram_routes,
+                                                        tg_scheduler,
                                                     )
                                                     .await;
                                                 });
@@ -452,42 +291,19 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 }
             }
 
-            // Register the leader agent as a project (so it can receive tasks).
+            // Register the leader agent — build orchestration tools for it.
             // Optional — daemon runs fine without a leader agent configured.
             if let Some(leader_cfg) = config.leader_agent().cloned() {
                 let fa_agent_dir = find_agent_dir(&leader_name)
                     .unwrap_or_else(|_| PathBuf::from("agents/aurelia"));
-                let fa_identity = augment_identity_with_org_context(
-                    &config,
-                    Identity::load(&fa_agent_dir, None).unwrap_or_default(),
-                    Some(&leader_name),
-                    None,
-                );
                 let fa_tasks_dir = fa_agent_dir.join(".tasks");
                 std::fs::create_dir_all(&fa_tasks_dir).ok();
-                let fa_task_board = aeqi_tasks::TaskBoard::open(&fa_tasks_dir)?;
-                let fa_model = config.model_for_agent(&leader_name);
                 let fa_prefix = leader_cfg.prefix.clone();
                 let fa_workdir = leader_cfg
                     .default_repo
                     .as_ref()
                     .map(|r| config.resolve_repo(r))
                     .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-
-                let fa_rig = Arc::new(Company {
-                    id: String::new(),
-                    name: leader_name.clone(),
-                    prefix: fa_prefix.clone(),
-                    repo: fa_workdir.clone(),
-                    worktree_root: dirs::home_dir().unwrap_or_default().join("worktrees"),
-                    model: fa_model,
-                    max_workers: leader_cfg.max_workers,
-                    worker_timeout_secs: 1800,
-                    company_identity: fa_identity,
-                    tasks: Arc::new(tokio::sync::Mutex::new(fa_task_board)),
-                    task_notify: fa_task_notify.clone(),
-                    departments: Vec::new(),
-                });
 
                 let mut fa_tools: Vec<Arc<dyn aeqi_core::traits::Tool>> =
                     build_project_tools(&fa_workdir, &fa_tasks_dir, &fa_prefix, None);
@@ -502,13 +318,21 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                             None
                         }
                     };
+                let default_project = config
+                    .companies
+                    .first()
+                    .map(|c| c.name.clone())
+                    .unwrap_or_default();
+                let project_name = config.companies.first().map(|c| c.name.clone());
                 let orch_tools = build_orchestration_tools(
-                    registry.clone(),
+                    leader_name.clone(),
+                    default_project.clone(),
+                    project_name,
                     dispatch_bus.clone(),
                     channels.clone(),
                     get_api_key(&config).ok(),
                     fa_memory,
-                    registry.notes.clone(),
+                    notes.clone(),
                     Some(event_broadcaster.clone()),
                     None,          // graph DB resolved per-session, not at daemon init
                     None,          // session_id resolved per-session, not at daemon init
@@ -516,66 +340,316 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     None,          // session_store
                     None,          // session_manager
                     String::new(), // default_model
+                    agent_reg.clone(),
                 );
                 fa_tools.extend(orch_tools);
-
-                let leader_provider = build_provider_for_agent(&config, &leader_name)?;
-                let mut fa_witness = WorkerPool::new(
-                    &fa_rig,
-                    leader_provider.clone(),
-                    fa_tools,
-                    dispatch_bus.clone(),
-                );
-                fa_witness.event_broadcaster = Some(event_broadcaster.clone());
-
-                if let Ok(mem) = open_memory(&config, Some(&leader_name)) {
-                    let mem: Arc<dyn Memory> = Arc::new(mem);
-                    fa_witness.memory = Some(mem);
-                    if background_automation_enabled {
-                        fa_witness.reflect_provider = Some(leader_provider.clone());
-                        fa_witness.reflect_model = config.default_model_for_provider(
-                            aeqi_core::config::ProviderKind::OpenRouter,
-                        );
-                    }
-                }
-
-                fa_witness.worker_max_budget_usd = leader_cfg.max_budget_usd;
-
-                registry.register_project(fa_rig, fa_witness).await;
             } else {
                 warn!("no leader agent configured — daemon will run without one");
             }
 
-            let project_count = registry.project_count().await;
             println!("AEQI daemon starting...");
-            println!("Registered {} projects + agents", project_count);
+            println!("Press Ctrl+C to stop.\n");
 
             let socket_path = config.data_dir().join("rm.sock");
             println!("PID file: {}", pid_path.display());
             println!("IPC socket: {}", socket_path.display());
 
-            println!("Press Ctrl+C to stop.\n");
+            // Reconcile TOML agent configs with DB agents.
+            // PeerAgentConfig (TOML) and Agent (DB) are dual systems.
+            // This lightweight sync ensures TOML model changes propagate to DB.
+            for peer in &config.agents {
+                if let Ok(Some(agent)) = agent_reg.get_active_by_name(&peer.name).await
+                    && let Some(ref model) = peer.model
+                    && agent.model.as_deref() != Some(model)
+                {
+                    let _ = agent_reg.update_model(&agent.id, model).await;
+                }
+            }
 
-            let mut daemon = Daemon::new(registry, dispatch_bus);
-            daemon.event_broadcaster = event_broadcaster;
-            daemon.message_router = message_router;
+            // -----------------------------------------------------------
+            // Spawn companies as agents in the registry and build the
+            // global Scheduler.
+            // -----------------------------------------------------------
+            let total_max_workers: u32 = config.companies.iter().map(|c| c.max_workers).sum();
 
-            // Set up default provider for direct session messaging.
-            if let Some(first_project) = config.companies.first() {
-                match build_provider_for_project(&config, &first_project.name) {
-                    Ok(provider) => {
-                        daemon.default_provider = Some(provider);
-                        daemon.default_model = config.model_for_company(&first_project.name);
-                        info!(
-                            model = %daemon.default_model,
-                            "default session provider initialized"
-                        );
+            for project_cfg in &config.companies {
+                let repo_path = config.resolve_repo(&project_cfg.repo);
+                // Upsert: reuse existing active agent or spawn a new one.
+                let agent = match agent_reg.get_active_by_name(&project_cfg.name).await {
+                    Ok(Some(existing)) => existing,
+                    _ => {
+                        match agent_reg
+                            .spawn(
+                                &project_cfg.name,
+                                None,
+                                "company",
+                                &format!("Agent for {} repository", project_cfg.name),
+                                None, // parent_id — top-level
+                                project_cfg.model.as_deref(),
+                                &[],
+                            )
+                            .await
+                        {
+                            Ok(a) => a,
+                            Err(e) => {
+                                warn!(
+                                    project = %project_cfg.name,
+                                    error = %e,
+                                    "failed to spawn agent for company, skipping"
+                                );
+                                skipped_projects.push(project_cfg.name.clone());
+                                continue;
+                            }
+                        }
                     }
-                    Err(e) => {
-                        warn!(error = %e, "failed to build default session provider");
+                };
+
+                if let Err(e) = agent_reg
+                    .update_agent_ops(
+                        &agent.id,
+                        Some(repo_path.to_str().unwrap_or_default()),
+                        project_cfg.max_cost_per_day_usd,
+                        Some(match project_cfg.execution_mode {
+                            aeqi_core::config::ExecutionMode::Agent => "agent",
+                            aeqi_core::config::ExecutionMode::ClaudeCode => "claude_code",
+                        }),
+                        Some(&project_cfg.prefix),
+                        Some(project_cfg.worker_timeout_secs),
+                    )
+                    .await
+                {
+                    warn!(
+                        project = %project_cfg.name,
+                        error = %e,
+                        "failed to set operational fields on company agent"
+                    );
+                } else {
+                    info!(
+                        project = %project_cfg.name,
+                        agent_id = %agent.id,
+                        "company agent registered in agent registry"
+                    );
+                }
+            }
+
+            // Also register advisor + leader agents the same way.
+            for agent_cfg in &advisor_agents {
+                let agent_workdir = agent_cfg
+                    .default_repo
+                    .as_ref()
+                    .map(|r| config.resolve_repo(r))
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                let agent = match agent_reg.get_active_by_name(&agent_cfg.name).await {
+                    Ok(Some(existing)) => existing,
+                    _ => {
+                        match agent_reg
+                            .spawn(
+                                &agent_cfg.name,
+                                None,
+                                "advisor",
+                                &format!("Advisor agent: {}", agent_cfg.name),
+                                None,
+                                agent_cfg.model.as_deref(),
+                                &[],
+                            )
+                            .await
+                        {
+                            Ok(a) => a,
+                            Err(e) => {
+                                warn!(
+                                    agent = %agent_cfg.name,
+                                    error = %e,
+                                    "failed to spawn advisor agent in registry"
+                                );
+                                skipped_advisors.push(agent_cfg.name.clone());
+                                continue;
+                            }
+                        }
+                    }
+                };
+                let _ = agent_reg
+                    .update_agent_ops(
+                        &agent.id,
+                        Some(agent_workdir.to_str().unwrap_or_default()),
+                        agent_cfg.max_budget_usd,
+                        None,
+                        Some(&agent_cfg.prefix),
+                        Some(300), // 5 min advisor timeout
+                    )
+                    .await;
+            }
+
+            // Inject shared_primer and project_primer as prompts entries on agents.
+            // This makes primers data (stored on agents) rather than code (injected per-worker).
+            if let Some(ref primer) = config.shared_primer {
+                // Find or create the root agent and inject shared primer.
+                // For now, inject on all company agents as descendants-scoped.
+                for project_cfg in &config.companies {
+                    if let Ok(Some(agent)) = agent_reg.get_active_by_name(&project_cfg.name).await {
+                        let mut prompts = agent.prompts.clone();
+                        // Only add if not already present.
+                        if !prompts.iter().any(|p| p.content == *primer) {
+                            prompts.insert(0, aeqi_core::PromptEntry::primer(primer.clone()));
+                            let prompts_json = serde_json::to_string(&prompts).unwrap_or_default();
+                            let _ = agent_reg.update_prompts(&agent.id, &prompts_json).await;
+                        }
                     }
                 }
             }
+            for project_cfg in &config.companies {
+                if let Some(ref primer) = project_cfg.primer {
+                    if let Ok(Some(agent)) = agent_reg.get_active_by_name(&project_cfg.name).await {
+                        let mut prompts = agent.prompts.clone();
+                        if !prompts.iter().any(|p| p.content == *primer) {
+                            prompts.insert(
+                                prompts
+                                    .iter()
+                                    .position(|p| p.scope == aeqi_core::PromptScope::SelfOnly)
+                                    .unwrap_or(prompts.len()),
+                                aeqi_core::PromptEntry::primer(primer.clone()),
+                            );
+                            let prompts_json = serde_json::to_string(&prompts).unwrap_or_default();
+                            let _ = agent_reg.update_prompts(&agent.id, &prompts_json).await;
+                        }
+                    }
+                }
+            }
+
+            // Build the global Scheduler.
+            let scheduler_config = SchedulerConfig {
+                max_workers: total_max_workers.max(4),
+                default_timeout_secs: 3600,
+                worker_max_budget_usd: config
+                    .companies
+                    .first()
+                    .and_then(|c| c.max_budget_usd)
+                    .unwrap_or(5.0),
+                skills_dirs: {
+                    let mut dirs = Vec::new();
+                    for project_cfg in &config.companies {
+                        if let Ok(d) = find_project_dir(&project_cfg.name) {
+                            dirs.push(d.join("skills"));
+                            if let Some(parent) = d.parent() {
+                                dirs.push(parent.join("shared").join("skills"));
+                            }
+                        }
+                    }
+                    dirs
+                },
+                shared_primer: config.shared_primer.clone(),
+                reflect_model: config
+                    .default_model_for_provider(aeqi_core::config::ProviderKind::OpenRouter),
+                adaptive_retry: config.orchestrator.adaptive_retry,
+                failure_analysis_model: config.orchestrator.failure_analysis_model.clone(),
+                verification_enabled: true,
+                max_task_retries: config.orchestrator.max_task_retries,
+            };
+
+            // Build a default provider for the scheduler (uses first project's provider).
+            let default_provider: Option<Arc<dyn aeqi_core::traits::Provider>> =
+                if let Some(first) = config.companies.first() {
+                    match build_provider_for_project(&config, &first.name) {
+                        Ok(p) => Some(p),
+                        Err(e) => {
+                            warn!(error = %e, "failed to build default session provider");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+            let default_model = config
+                .companies
+                .first()
+                .map(|c| config.model_for_company(&c.name))
+                .unwrap_or_default();
+
+            let scheduler_provider: Arc<dyn aeqi_core::traits::Provider> =
+                if let Some(first) = config.companies.first() {
+                    match build_provider_for_project(&config, &first.name) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            warn!(error = %e, "scheduler: failed to build provider, using default");
+                            default_provider
+                                .clone()
+                                .expect("no provider available for scheduler")
+                        }
+                    }
+                } else {
+                    default_provider
+                        .clone()
+                        .expect("no provider available for scheduler")
+                };
+
+            // Collect base tools for the scheduler (union of project tools).
+            let scheduler_tools: Vec<Arc<dyn aeqi_core::traits::Tool>> =
+                if let Some(first) = config.companies.first() {
+                    let workdir = config.resolve_repo(&first.repo);
+                    build_tools(&workdir)
+                } else {
+                    Vec::new()
+                };
+
+            let metrics = Arc::new(AEQIMetrics::new());
+
+            // Create the unified EventStore sharing the AgentRegistry DB.
+            let event_store = Arc::new(EventStore::new(agent_reg.db()));
+            info!("event store initialized (unified)");
+
+            let scheduler = Scheduler::new(
+                scheduler_config,
+                agent_reg.clone(),
+                dispatch_bus.clone(),
+                scheduler_provider,
+                scheduler_tools,
+                cost_ledger.clone(),
+                metrics.clone(),
+                event_broadcaster.clone(),
+                event_store.clone(),
+            );
+
+            // Wire optional services into the scheduler.
+            let scheduler = {
+                let mut s = scheduler;
+                // Use the pre-allocated wake signal shared with MessageRouter.
+                s.wake = scheduler_wake.clone();
+                s.notes = notes.clone();
+                s.session_store = session_store.clone();
+                let trigger_store = Arc::new(agent_reg.trigger_store());
+                s.trigger_store = Some(trigger_store.clone());
+                // Wire memory for the scheduler (uses leader or first project memory).
+                if let Ok(mem) = open_memory(&config, None) {
+                    s.memory_store = Some(Arc::new(mem) as Arc<dyn Memory>);
+                }
+                Arc::new(s)
+            };
+
+            // Construct the daemon.
+            let mut daemon = Daemon::new(
+                cost_ledger.clone(),
+                metrics,
+                dispatch_bus.clone(),
+                scheduler.clone(),
+                agent_reg.clone(),
+                event_store,
+            );
+            daemon.notes = notes;
+            daemon.session_store = session_store.clone();
+            daemon.leader_agent_name = leader_name.clone();
+            daemon.config_project_names = config.companies.iter().map(|p| p.name.clone()).collect();
+            daemon.shared_primer = config.shared_primer.clone();
+            daemon.project_primer = config.companies.first().and_then(|c| c.primer.clone());
+            daemon.event_broadcaster = event_broadcaster;
+            daemon.message_router = message_router;
+            daemon.default_provider = default_provider;
+            daemon.default_model = default_model;
+
+            // Set up trigger store.
+            let trigger_store = Arc::new(agent_reg.trigger_store());
+            let trigger_count = trigger_store.count_enabled().await.unwrap_or(0);
+            println!("Triggers: {trigger_count} enabled");
+            daemon.set_trigger_store(trigger_store.clone());
+
             daemon.set_readiness_context(
                 config.companies.len(),
                 advisor_agents.len(),
@@ -585,84 +659,33 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             daemon.set_background_automation_enabled(background_automation_enabled);
             daemon.set_pid_file(pid_path);
             daemon.set_socket_path(socket_path.clone());
-            // Initialize trigger store + agent registry for persistent agent triggers.
-            match aeqi_orchestrator::agent_registry::AgentRegistry::open(&config.data_dir()) {
-                Ok(agent_reg) => {
-                    let trigger_store = Arc::new(agent_reg.trigger_store());
-                    let trigger_count = trigger_store.count_enabled().await.unwrap_or(0);
-                    println!("Triggers: {trigger_count} enabled");
-                    let agent_reg = Arc::new(agent_reg);
-                    daemon.set_trigger_store(trigger_store.clone());
-                    daemon.set_agent_registry(agent_reg.clone());
 
-                    // Upsert projects into the registry DB and backfill department project_ids.
-                    for project_cfg in &config.companies {
-                        if let Some(ref id) = project_cfg.id
-                            && let Err(e) = agent_reg
-                                .upsert_project(id, &project_cfg.name, &project_cfg.prefix)
-                                .await
-                        {
-                            warn!(
-                                project = %project_cfg.name,
-                                error = %e,
-                                "failed to upsert project"
-                            );
-                        }
-                    }
-                    if let Err(e) = agent_reg.backfill_department_project_ids().await {
-                        warn!(error = %e, "failed to backfill department project_ids");
-                    }
-                    if let Err(e) = agent_reg.backfill_agent_project_ids().await {
-                        warn!(error = %e, "failed to backfill agent project_ids");
-                    }
+            // Publish the scheduler into the shared slot so the
+            // telegram message loop can use it for fast-lane commands.
+            if let Ok(mut guard) = shared_scheduler.write() {
+                *guard = Some(scheduler);
+            }
 
-                    // Reconcile TOML agent configs with DB agents.
-                    // PeerAgentConfig (TOML) and PersistentAgent (DB) are dual systems.
-                    // This lightweight sync ensures TOML model changes propagate to DB.
-                    for peer in &config.agents {
-                        if let Ok(Some(agent)) = agent_reg.get_active_by_name(&peer.name).await
-                            && let Some(ref model) = peer.model
-                            && agent.model.as_deref() != Some(model)
-                        {
-                            let _ = agent_reg.update_agent_model(&agent.id, model).await;
-                        }
-                    }
+            info!(total_max_workers, "global scheduler initialized");
 
-                    // Wire agent_registry + trigger_store into all worker pools.
-                    daemon
-                        .registry
-                        .wire_agent_system(
-                            agent_reg.clone(),
-                            trigger_store,
-                            daemon
-                                .message_router
-                                .as_ref()
-                                .map(|ce| ce.conversations.clone()),
-                        )
-                        .await;
-
-                    // Configure SessionManager with all dependencies for spawn_session().
-                    if let Some(ref ss) = daemon.registry.session_store
-                        && let Some(sm) = Arc::get_mut(&mut daemon.session_manager)
-                    {
-                        sm.configure(
-                            agent_reg,
-                            ss.clone(),
-                            daemon.registry.clone(),
-                            daemon.default_model.clone(),
-                            Some(daemon.event_broadcaster.clone()),
-                            daemon.registry.dispatch_bus.clone(),
-                            daemon.registry.notes.clone(),
-                            sm_memory_stores,
-                            sm_memory_stores_by_id,
-                            sm_default_project,
-                        );
-                        info!("session manager configured for spawn_session");
-                    }
-                }
-                Err(e) => {
-                    warn!(error = %e, "failed to open agent registry for triggers");
-                }
+            // Configure SessionManager with all dependencies for spawn_session().
+            if let Some(ref ss) = daemon.session_store
+                && let Some(sm) = Arc::get_mut(&mut daemon.session_manager)
+            {
+                sm.configure(
+                    agent_reg,
+                    ss.clone(),
+                    daemon.default_model.clone(),
+                    Some(daemon.event_broadcaster.clone()),
+                    daemon.dispatch_bus.clone(),
+                    daemon.notes.clone(),
+                    sm_memory_stores,
+                    sm_memory_stores_by_id,
+                    sm_default_project,
+                    config.shared_primer.clone(),
+                    config.companies.first().and_then(|c| c.primer.clone()),
+                );
+                info!("session manager configured for spawn_session");
             }
             daemon.run().await?;
         }
@@ -775,6 +798,7 @@ async fn telegram_message_loop(
     event_broadcaster: Arc<aeqi_orchestrator::EventBroadcaster>,
     default_chat_id: i64,
     telegram_routes: Arc<HashMap<i64, TelegramChatRouteConfig>>,
+    shared_scheduler: Arc<std::sync::RwLock<Option<Arc<Scheduler>>>>,
 ) {
     struct BufferedMsg {
         text: String,
@@ -819,7 +843,7 @@ async fn telegram_message_loop(
                 // Check for slow tasks (> 2min) and send progress.
                 for (_qid, chat_id, message_id, _source) in engine_cl.get_slow_tasks().await {
                     if message_id > 0 {
-                        let _ = tg_deliver.react(chat_id, message_id, "⏳").await;
+                        let _ = tg_deliver.react(chat_id, message_id, "\u{23f3}").await;
                     }
                     let _ = tg_deliver.send_typing(chat_id).await;
                 }
@@ -827,10 +851,14 @@ async fn telegram_message_loop(
                 // Check for completed tasks and deliver replies.
                 for completion in engine_cl.check_completions().await {
                     let emoji = match completion.status {
-                        aeqi_orchestrator::message_router::CompletionStatus::Done => "👍",
-                        aeqi_orchestrator::message_router::CompletionStatus::Blocked => "❓",
-                        aeqi_orchestrator::message_router::CompletionStatus::Cancelled => "❌",
-                        aeqi_orchestrator::message_router::CompletionStatus::TimedOut => "😢",
+                        aeqi_orchestrator::message_router::CompletionStatus::Done => "\u{1f44d}",
+                        aeqi_orchestrator::message_router::CompletionStatus::Blocked => "\u{2753}",
+                        aeqi_orchestrator::message_router::CompletionStatus::Cancelled => {
+                            "\u{274c}"
+                        }
+                        aeqi_orchestrator::message_router::CompletionStatus::TimedOut => {
+                            "\u{1f622}"
+                        }
                     };
                     let out = aeqi_core::traits::OutgoingMessage {
                         channel: "telegram".to_string(),
@@ -979,12 +1007,16 @@ async fn telegram_message_loop(
                         let fast_engine = engine.clone();
                         let fast_text = user_text.clone();
                         let fast_sender = sender.clone();
-                        let fast_reg = engine.registry.clone();
                         let fast_project = project_hint.clone();
                         let fast_department = department_hint.clone();
                         let fast_channel = channel_name.clone();
+                        let fast_scheduler = shared_scheduler.read().ok().and_then(|g| g.clone());
                         tokio::spawn(async move {
-                            let reply = handle_fast_lane(&fast_text, &fast_reg).await;
+                            let reply = if let Some(ref sched) = fast_scheduler {
+                                handle_fast_lane(&fast_text, sched).await
+                            } else {
+                                "Scheduler not yet initialized.".to_string()
+                            };
                             let chat_msg = aeqi_orchestrator::message_router::IncomingMessage {
                                 message: fast_text,
                                 chat_id,
@@ -1008,7 +1040,7 @@ async fn telegram_message_loop(
                                 warn!(error = %e, "failed to send fast-lane reply");
                             }
                             if message_id > 0 {
-                                let _ = tg_fast.react(chat_id, message_id, "⚡").await;
+                                let _ = tg_fast.react(chat_id, message_id, "\u{26a1}").await;
                             }
                         });
                         continue;
@@ -1038,7 +1070,7 @@ async fn telegram_message_loop(
                             };
                             let _ = tg_intent.send(out).await;
                             if message_id > 0 {
-                                let _ = tg_intent.react(chat_id, message_id, "✅").await;
+                                let _ = tg_intent.react(chat_id, message_id, "\u{2705}").await;
                             }
                         });
                         continue;
@@ -1063,7 +1095,7 @@ async fn telegram_message_loop(
 
                         match engine2.handle_message_full(&chat_msg, None).await {
                             Ok(handle) => {
-                                info!(task = %handle.task_id, "telegram message → task created");
+                                info!(task = %handle.task_id, "telegram message -> task created");
                             }
                             Err(e) => {
                                 warn!(error = %e, "failed to process telegram message");

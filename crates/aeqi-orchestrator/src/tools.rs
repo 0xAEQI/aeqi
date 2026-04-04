@@ -8,9 +8,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use crate::agent_registry::AgentRegistry;
 use crate::message::DispatchBus;
-use crate::registry::CompanyRegistry;
-use aeqi_core::traits::{Memory, MemoryCategory, MemoryQuery, MemoryScope};
+use aeqi_core::traits::{Memory, MemoryCategory, MemoryQuery};
 
 /// Tool that surfaces OpenRouter key usage and per-project worker execution
 /// costs aggregated from `~/.aeqi/usage.jsonl`.
@@ -179,12 +179,6 @@ impl Tool for MemoryStoreTool {
             .get("content")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing content"))?;
-        let scope = match args.get("scope").and_then(|v| v.as_str()) {
-            Some("system") => MemoryScope::System,
-            Some("entity") | Some("companion") => MemoryScope::Entity,
-            Some("department") => MemoryScope::Department,
-            _ => MemoryScope::Domain,
-        };
         let category = match args.get("category").and_then(|v| v.as_str()) {
             Some("procedure") => MemoryCategory::Procedure,
             Some("preference") => MemoryCategory::Preference,
@@ -192,16 +186,10 @@ impl Tool for MemoryStoreTool {
             Some("evergreen") => MemoryCategory::Evergreen,
             _ => MemoryCategory::Fact,
         };
-        let entity_id = args.get("entity_id").and_then(|v| v.as_str());
+        let agent_id = args.get("agent_id").and_then(|v| v.as_str());
 
-        match self
-            .memory
-            .store(key, content, category, scope, entity_id)
-            .await
-        {
-            Ok(id) => Ok(ToolResult::success(format!(
-                "Stored memory {id} [{scope}] {key}"
-            ))),
+        match self.memory.store(key, content, category, agent_id).await {
+            Ok(id) => Ok(ToolResult::success(format!("Stored memory {id} {key}"))),
             Err(e) => Ok(ToolResult::error(format!("Failed to store: {e}"))),
         }
     }
@@ -215,9 +203,8 @@ impl Tool for MemoryStoreTool {
                 "properties": {
                     "key": { "type": "string", "description": "Short label for the memory (e.g. 'jwt-auth-preference')" },
                     "content": { "type": "string", "description": "The memory content to store" },
-                    "scope": { "type": "string", "enum": ["domain", "system", "entity"], "description": "Memory scope (default: domain)" },
                     "category": { "type": "string", "enum": ["fact", "procedure", "preference", "context", "evergreen"], "description": "Memory category (default: fact)" },
-                    "entity_id": { "type": "string", "description": "Entity ID for entity-scoped memories" }
+                    "agent_id": { "type": "string", "description": "Agent ID to associate with this memory" }
                 },
                 "required": ["key", "content"]
             }),
@@ -250,16 +237,8 @@ impl Tool for MemoryRecallTool {
 
         let mut query = MemoryQuery::new(query_text, top_k);
 
-        if let Some(scope) = args.get("scope").and_then(|v| v.as_str()) {
-            query.scope = Some(match scope {
-                "system" => MemoryScope::System,
-                "entity" | "companion" => MemoryScope::Entity,
-                "department" => MemoryScope::Department,
-                _ => MemoryScope::Domain,
-            });
-        }
-        if let Some(eid) = args.get("entity_id").and_then(|v| v.as_str()) {
-            query = query.with_entity(eid);
+        if let Some(agent_id) = args.get("agent_id").and_then(|v| v.as_str()) {
+            query = query.with_agent(agent_id);
         }
 
         match self.memory.search(&query).await {
@@ -301,8 +280,7 @@ impl Tool for MemoryRecallTool {
                 "properties": {
                     "query": { "type": "string", "description": "Natural language search query" },
                     "top_k": { "type": "integer", "description": "Max results to return (default: 5)" },
-                    "scope": { "type": "string", "enum": ["domain", "system", "entity"], "description": "Filter by scope" },
-                    "entity_id": { "type": "string", "description": "Filter to specific entity's memories" }
+                    "agent_id": { "type": "string", "description": "Filter to a specific agent's memories" }
                 },
                 "required": ["query"]
             }),
@@ -314,14 +292,45 @@ impl Tool for MemoryRecallTool {
     }
 }
 
+/// Format an `aeqi_tasks::Task` into a human-readable detail string.
+fn format_task_detail(task: &aeqi_tasks::Task) -> String {
+    let mut out = format!(
+        "Task: {} \nStatus: {:?}\nPriority: {}\nSubject: {}\n",
+        task.id, task.status, task.priority, task.subject,
+    );
+    if !task.description.is_empty() {
+        out.push_str(&format!("Description: {}\n", task.description));
+    }
+    if let Some(ref assignee) = task.assignee {
+        out.push_str(&format!("Assignee: {}\n", assignee));
+    }
+    if let Some(outcome) = task.task_outcome() {
+        out.push_str(&format!("Outcome: {}\n", outcome.kind));
+        out.push_str(&format!("Outcome summary: {}\n", outcome.summary));
+        if let Some(reason) = outcome.reason {
+            out.push_str(&format!("Outcome reason: {}\n", reason));
+        }
+    }
+    if let Some(ref reason) = task.closed_reason {
+        out.push_str(&format!("Closed reason: {}\n", reason));
+    }
+    if task.retry_count > 0 {
+        out.push_str(&format!("Retries: {}\n", task.retry_count));
+    }
+    if !task.checkpoints.is_empty() {
+        out.push_str(&format!("Checkpoints: {}\n", task.checkpoints.len()));
+    }
+    out
+}
+
 /// Tool for reading full task details by ID.
 pub struct QuestDetailTool {
-    registry: Arc<CompanyRegistry>,
+    agent_registry: Arc<AgentRegistry>,
 }
 
 impl QuestDetailTool {
-    pub fn new(registry: Arc<CompanyRegistry>) -> Self {
-        Self { registry }
+    pub fn new(agent_registry: Arc<AgentRegistry>) -> Self {
+        Self { agent_registry }
     }
 }
 
@@ -333,43 +342,11 @@ impl Tool for QuestDetailTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing task_id"))?;
 
-        let projects = self.registry.project_names().await;
-        for project_name in &projects {
-            if let Some(project) = self.registry.get_project(project_name).await {
-                let store = project.tasks.lock().await;
-                if let Some(task) = store.get(task_id) {
-                    let mut out = format!(
-                        "Task: {} ({})\nStatus: {:?}\nPriority: {}\nSubject: {}\n",
-                        task.id, project_name, task.status, task.priority, task.subject,
-                    );
-                    if !task.description.is_empty() {
-                        out.push_str(&format!("Description: {}\n", task.description));
-                    }
-                    if let Some(ref assignee) = task.assignee {
-                        out.push_str(&format!("Assignee: {}\n", assignee));
-                    }
-                    if let Some(outcome) = task.task_outcome() {
-                        out.push_str(&format!("Outcome: {}\n", outcome.kind));
-                        out.push_str(&format!("Outcome summary: {}\n", outcome.summary));
-                        if let Some(reason) = outcome.reason {
-                            out.push_str(&format!("Outcome reason: {}\n", reason));
-                        }
-                    }
-                    if let Some(ref reason) = task.closed_reason {
-                        out.push_str(&format!("Closed reason: {}\n", reason));
-                    }
-                    if task.retry_count > 0 {
-                        out.push_str(&format!("Retries: {}\n", task.retry_count));
-                    }
-                    if !task.checkpoints.is_empty() {
-                        out.push_str(&format!("Checkpoints: {}\n", task.checkpoints.len()));
-                    }
-                    return Ok(ToolResult::success(out));
-                }
-            }
+        match self.agent_registry.get_task(task_id).await {
+            Ok(Some(task)) => Ok(ToolResult::success(format_task_detail(&task))),
+            Ok(None) => Ok(ToolResult::error(format!("Task not found: {task_id}"))),
+            Err(e) => Ok(ToolResult::error(format!("Failed to get task: {e}"))),
         }
-
-        Ok(ToolResult::error(format!("Task not found: {task_id}")))
     }
 
     fn spec(&self) -> ToolSpec {
@@ -393,12 +370,12 @@ impl Tool for QuestDetailTool {
 
 /// Tool for cancelling a task by ID.
 pub struct QuestCancelTool {
-    registry: Arc<CompanyRegistry>,
+    agent_registry: Arc<AgentRegistry>,
 }
 
 impl QuestCancelTool {
-    pub fn new(registry: Arc<CompanyRegistry>) -> Self {
-        Self { registry }
+    pub fn new(agent_registry: Arc<AgentRegistry>) -> Self {
+        Self { agent_registry }
     }
 }
 
@@ -414,30 +391,25 @@ impl Tool for QuestCancelTool {
             .and_then(|v| v.as_str())
             .unwrap_or("Cancelled by leader agent");
 
-        let projects = self.registry.project_names().await;
-        for project_name in &projects {
-            if let Some(project) = self.registry.get_project(project_name).await {
-                let mut store = project.tasks.lock().await;
-                if store.get(task_id).is_some() {
-                    match store.update(task_id, |q| {
-                        q.status = aeqi_tasks::TaskStatus::Cancelled;
-                        q.assignee = None;
-                        q.closed_reason = Some(reason.to_string());
-                        q.set_task_outcome(&aeqi_tasks::TaskOutcomeRecord::new(
-                            aeqi_tasks::TaskOutcomeKind::Cancelled,
-                            reason,
-                        ));
-                    }) {
-                        Ok(_) => {
-                            return Ok(ToolResult::success(format!("Task {task_id} cancelled.")));
-                        }
-                        Err(e) => return Ok(ToolResult::error(format!("Failed to cancel: {e}"))),
-                    }
-                }
-            }
+        let reason_owned = reason.to_string();
+        match self
+            .agent_registry
+            .update_task(task_id, |q| {
+                q.status = aeqi_tasks::TaskStatus::Cancelled;
+                q.assignee = None;
+                q.closed_reason = Some(reason_owned.clone());
+                q.set_task_outcome(&aeqi_tasks::TaskOutcomeRecord::new(
+                    aeqi_tasks::TaskOutcomeKind::Cancelled,
+                    &reason_owned,
+                ));
+            })
+            .await
+        {
+            Ok(_) => Ok(ToolResult::success(format!("Task {task_id} cancelled."))),
+            Err(e) => Ok(ToolResult::error(format!(
+                "Failed to cancel task {task_id}: {e}"
+            ))),
         }
-
-        Ok(ToolResult::error(format!("Task not found: {task_id}")))
     }
 
     fn spec(&self) -> ToolSpec {
@@ -462,12 +434,12 @@ impl Tool for QuestCancelTool {
 
 /// Tool for reprioritizing a task.
 pub struct QuestReprioritizeTool {
-    registry: Arc<CompanyRegistry>,
+    agent_registry: Arc<AgentRegistry>,
 }
 
 impl QuestReprioritizeTool {
-    pub fn new(registry: Arc<CompanyRegistry>) -> Self {
-        Self { registry }
+    pub fn new(agent_registry: Arc<AgentRegistry>) -> Self {
+        Self { agent_registry }
     }
 }
 
@@ -495,28 +467,20 @@ impl Tool for QuestReprioritizeTool {
             }
         };
 
-        let projects = self.registry.project_names().await;
-        for project_name in &projects {
-            if let Some(project) = self.registry.get_project(project_name).await {
-                let mut store = project.tasks.lock().await;
-                if store.get(task_id).is_some() {
-                    match store.update(task_id, |q| {
-                        q.priority = priority;
-                    }) {
-                        Ok(_) => {
-                            return Ok(ToolResult::success(format!(
-                                "Task {task_id} reprioritized to {priority}."
-                            )));
-                        }
-                        Err(e) => {
-                            return Ok(ToolResult::error(format!("Failed to reprioritize: {e}")));
-                        }
-                    }
-                }
-            }
+        match self
+            .agent_registry
+            .update_task(task_id, |q| {
+                q.priority = priority;
+            })
+            .await
+        {
+            Ok(_) => Ok(ToolResult::success(format!(
+                "Task {task_id} reprioritized to {priority}."
+            ))),
+            Err(e) => Ok(ToolResult::error(format!(
+                "Failed to reprioritize task {task_id}: {e}"
+            ))),
         }
-
-        Ok(ToolResult::error(format!("Task not found: {task_id}")))
     }
 
     fn spec(&self) -> ToolSpec {
@@ -753,7 +717,9 @@ impl Tool for NotesTool {
 /// Including `channel_reply` causes double-delivery: the tool sends once, and the
 /// task's closed_reason (the LLM's confirmation text) gets sent again.
 pub fn build_orchestration_tools(
-    registry: Arc<CompanyRegistry>,
+    leader_name: String,
+    default_project: String,
+    project_name: Option<String>,
     dispatch_bus: Arc<DispatchBus>,
     _channels: Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
     api_key: Option<String>,
@@ -766,17 +732,11 @@ pub fn build_orchestration_tools(
     session_store: Option<Arc<crate::SessionStore>>,
     session_manager: Option<Arc<crate::session_manager::SessionManager>>,
     default_model: String,
+    agent_registry: Arc<crate::agent_registry::AgentRegistry>,
 ) -> Vec<Arc<dyn Tool>> {
-    let leader_name = registry.leader_agent_name.clone();
-    let default_project = registry
-        .config_project_names
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "*".to_string());
-    let project_name = registry.config_project_names.first().cloned();
     let mut delegate_tool = crate::delegate::DelegateTool::new(dispatch_bus, leader_name.clone())
-        .with_registry(registry.clone())
-        .with_project(project_name);
+        .with_project(project_name)
+        .with_agent_registry(agent_registry.clone());
     if let Some(broadcaster) = event_broadcaster {
         delegate_tool = delegate_tool.with_event_broadcaster(broadcaster);
     }
@@ -793,10 +753,15 @@ pub fn build_orchestration_tools(
         delegate_tool = delegate_tool.with_session_store(ss.clone());
     }
     delegate_tool = delegate_tool.with_default_model(default_model);
+
+    let detail_tool = QuestDetailTool::new(agent_registry.clone());
+    let cancel_tool = QuestCancelTool::new(agent_registry.clone());
+    let reprioritize_tool = QuestReprioritizeTool::new(agent_registry);
+
     let mut tools: Vec<Arc<dyn Tool>> = vec![
-        Arc::new(QuestDetailTool::new(registry.clone())),
-        Arc::new(QuestCancelTool::new(registry.clone())),
-        Arc::new(QuestReprioritizeTool::new(registry)),
+        Arc::new(detail_tool),
+        Arc::new(cancel_tool),
+        Arc::new(reprioritize_tool),
         Arc::new(delegate_tool),
         Arc::new(UsageStatsTool::new(api_key)),
     ];

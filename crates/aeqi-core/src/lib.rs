@@ -11,6 +11,7 @@ pub mod chat_stream;
 pub mod checkpoint;
 pub mod config;
 pub mod identity;
+pub mod prompt;
 pub mod sanitize;
 pub mod security;
 pub mod shell_hooks;
@@ -28,4 +29,5 @@ pub use config::{
     discover_agents, load_agent_config,
 };
 pub use identity::Identity;
+pub use prompt::{AssembledPrompt, PromptEntry, PromptPosition, PromptScope, ToolRestrictions};
 pub use security::SecretStore;

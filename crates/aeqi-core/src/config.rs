@@ -1,3 +1,4 @@
+use crate::SecretStore;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -947,17 +948,32 @@ impl AEQIConfig {
     pub fn parse(content: &str) -> Result<Self> {
         let mut config: Self = toml::from_str(content).context("failed to parse aeqi.toml")?;
 
-        // Resolve environment variables in API keys.
+        // Resolve API keys: try env vars first, then the encrypted SecretStore.
+        let secret_store = {
+            let data_dir = expand_tilde(&config.aeqi.data_dir);
+            SecretStore::open(Path::new(&data_dir).join("secrets").as_path()).ok()
+        };
+
         if let Some(ref mut or) = config.providers.openrouter {
             or.api_key = resolve_env(&or.api_key);
+            if or.api_key.is_empty()
+                && let Some(ref store) = secret_store
+            {
+                or.api_key = store.get("OPENROUTER_API_KEY").unwrap_or_default();
+            }
             if or.api_key.is_empty() {
-                warn!("OpenRouter API key is empty — check environment variable");
+                warn!("OpenRouter API key is empty — check environment variable or secret store");
             }
         }
         if let Some(ref mut a) = config.providers.anthropic {
             a.api_key = resolve_env(&a.api_key);
+            if a.api_key.is_empty()
+                && let Some(ref store) = secret_store
+            {
+                a.api_key = store.get("ANTHROPIC_API_KEY").unwrap_or_default();
+            }
             if a.api_key.is_empty() {
-                warn!("Anthropic API key is empty — check environment variable");
+                warn!("Anthropic API key is empty — check environment variable or secret store");
             }
         }
 

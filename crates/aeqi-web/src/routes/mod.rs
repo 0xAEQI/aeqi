@@ -59,6 +59,9 @@ pub fn api_routes() -> Router<AppState> {
         .route("/sessions/{id}/close", post(close_session))
         .route("/sessions/{id}/messages", get(session_messages))
         .route("/sessions/{id}/children", get(session_children))
+        .route("/vfs", get(vfs_list))
+        .route("/vfs/search", get(vfs_search))
+        .route("/vfs/{*path}", get(vfs_read))
 }
 
 // --- Status ---
@@ -720,6 +723,34 @@ async fn webhook_handler(
         )
             .into_response(),
     }
+}
+
+// --- VFS (Virtual Filesystem) ---
+
+#[derive(Deserialize, Default)]
+struct VfsListQuery {
+    path: Option<String>,
+}
+
+async fn vfs_list(State(state): State<AppState>, Query(q): Query<VfsListQuery>) -> Response {
+    let path = q.path.unwrap_or_else(|| "/".to_string());
+    ipc_proxy(state, "vfs_list", serde_json::json!({"path": path})).await
+}
+
+async fn vfs_read(
+    State(state): State<AppState>,
+    axum::extract::Path(path): axum::extract::Path<String>,
+) -> Response {
+    ipc_proxy(state, "vfs_read", serde_json::json!({"path": path})).await
+}
+
+#[derive(Deserialize, Default)]
+struct VfsSearchQuery {
+    query: String,
+}
+
+async fn vfs_search(State(state): State<AppState>, Query(q): Query<VfsSearchQuery>) -> Response {
+    ipc_proxy(state, "vfs_search", serde_json::json!({"query": q.query})).await
 }
 
 // --- Helper ---

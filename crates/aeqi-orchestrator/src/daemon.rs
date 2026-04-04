@@ -7,14 +7,18 @@ use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
 use crate::agent_registry::AgentRegistry;
+use crate::cost_ledger::CostLedger;
+use crate::event_store::EventStore;
 use crate::execution_events::{EventBroadcaster, ExecutionEvent};
 use crate::message::{Dispatch, DispatchBus, DispatchHealth, DispatchKind};
 use crate::message_router::{IncomingMessage, MessageRouter, MessageSource};
+use crate::metrics::AEQIMetrics;
+use crate::notes::Notes;
 use crate::progress_tracker::ProgressTracker;
-use crate::registry::CompanyRegistry;
+use crate::scheduler::Scheduler;
 use crate::session_manager::SessionManager;
 use crate::session_store::{
-    agency_chat_id, department_chat_id, named_channel_chat_id, project_chat_id,
+    SessionStore, agency_chat_id, department_chat_id, named_channel_chat_id, project_chat_id,
 };
 use crate::trigger::TriggerStore;
 
@@ -163,29 +167,15 @@ fn merge_timeline_metadata(
 }
 
 async fn find_task_snapshot(
-    registry: &Arc<CompanyRegistry>,
-    project_hint: Option<&str>,
+    agent_registry: &Arc<AgentRegistry>,
     task_id: &str,
 ) -> Option<serde_json::Value> {
-    // Use try_lock() to avoid blocking on patrol — this is a read path.
-    if let Some(project_name) = project_hint
-        && let Some(board) = registry.get_task_board(project_name).await
-        && let Ok(board) = board.try_lock()
-        && let Some(task) = board.get(task_id)
-    {
-        return Some(task_snapshot(task));
-    }
-
-    for project_name in registry.project_names().await {
-        if let Some(board) = registry.get_task_board(&project_name).await
-            && let Ok(board) = board.try_lock()
-            && let Some(task) = board.get(task_id)
-        {
-            return Some(task_snapshot(task));
-        }
-    }
-
-    None
+    agent_registry
+        .get_task(task_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|t| task_snapshot(&t))
 }
 
 fn attach_chat_id(mut payload: serde_json::Value, chat_id: i64) -> serde_json::Value {
@@ -193,15 +183,35 @@ fn attach_chat_id(mut payload: serde_json::Value, chat_id: i64) -> serde_json::V
     payload
 }
 
-/// The Daemon: background process that runs the CompanyRegistry patrol loop
+/// Context struct bundling shared service references for IPC handlers.
+/// Avoids passing many individual parameters to socket_accept_loop / handle_socket_connection.
+struct IpcContext {
+    cost_ledger: Arc<CostLedger>,
+    metrics: Arc<AEQIMetrics>,
+    notes: Option<Arc<Notes>>,
+    event_store: Arc<EventStore>,
+    session_store: Option<Arc<SessionStore>>,
+    leader_agent_name: String,
+    config_project_names: Vec<String>,
+}
+
+/// The Daemon: background process that runs the scheduler patrol loop
 /// and trigger system.
 pub struct Daemon {
-    pub registry: Arc<CompanyRegistry>,
+    pub cost_ledger: Arc<CostLedger>,
+    pub metrics: Arc<AEQIMetrics>,
+    pub notes: Option<Arc<Notes>>,
+    pub event_store: Arc<EventStore>,
+    pub session_store: Option<Arc<SessionStore>>,
+    pub leader_agent_name: String,
+    pub config_project_names: Vec<String>,
+    pub shared_primer: Option<String>,
+    pub project_primer: Option<String>,
     pub dispatch_bus: Arc<DispatchBus>,
     pub patrol_interval_secs: u64,
     pub background_automation_enabled: bool,
     pub trigger_store: Option<Arc<TriggerStore>>,
-    pub agent_registry: Option<Arc<AgentRegistry>>,
+    pub agent_registry: Arc<AgentRegistry>,
     pub message_router: Option<Arc<MessageRouter>>,
     pub write_queue: Arc<std::sync::Mutex<aeqi_memory::debounce::WriteQueue>>,
     pub event_broadcaster: Arc<EventBroadcaster>,
@@ -216,17 +226,34 @@ pub struct Daemon {
     config_reloaded: Arc<std::sync::atomic::AtomicBool>,
     shutdown_notify: Arc<tokio::sync::Notify>,
     readiness: ReadinessContext,
+    /// Global scheduler for the unified schedule() loop.
+    pub scheduler: Arc<Scheduler>,
 }
 
 impl Daemon {
-    pub fn new(registry: Arc<CompanyRegistry>, dispatch_bus: Arc<DispatchBus>) -> Self {
+    pub fn new(
+        cost_ledger: Arc<CostLedger>,
+        metrics: Arc<AEQIMetrics>,
+        dispatch_bus: Arc<DispatchBus>,
+        scheduler: Arc<Scheduler>,
+        agent_registry: Arc<AgentRegistry>,
+        event_store: Arc<EventStore>,
+    ) -> Self {
         Self {
-            registry,
+            cost_ledger,
+            metrics,
+            notes: None,
+            event_store,
+            session_store: None,
+            leader_agent_name: String::new(),
+            config_project_names: Vec::new(),
+            shared_primer: None,
+            project_primer: None,
             dispatch_bus,
             patrol_interval_secs: 30,
             background_automation_enabled: true,
             trigger_store: None,
-            agent_registry: None,
+            agent_registry,
             message_router: None,
             write_queue: Arc::new(std::sync::Mutex::new(
                 aeqi_memory::debounce::WriteQueue::default(),
@@ -243,6 +270,7 @@ impl Daemon {
             config_reloaded: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_notify: Arc::new(tokio::sync::Notify::new()),
             readiness: ReadinessContext::default(),
+            scheduler,
         }
     }
 
@@ -252,31 +280,23 @@ impl Daemon {
 
     /// Fire a trigger: look up the owning agent, create a task with the trigger's skill.
     async fn fire_trigger(&self, trigger: &crate::trigger::Trigger) {
-        // Look up agent to determine project.
-        let project = if let Some(ref registry) = self.agent_registry {
-            match registry.get(&trigger.agent_id).await {
-                Ok(Some(agent)) => match agent.project {
-                    Some(p) => p,
-                    None => {
-                        warn!(
-                            agent = %trigger.agent_id,
-                            "trigger agent has no project scope, skipping"
-                        );
-                        return;
-                    }
-                },
-                Ok(None) => {
-                    warn!(agent_id = %trigger.agent_id, "trigger agent not found");
-                    return;
+        // Look up agent to determine parent (project context).
+        let _project = match self.agent_registry.get(&trigger.agent_id).await {
+            Ok(Some(agent)) => match agent.parent_id {
+                Some(p) => p,
+                None => {
+                    // Root agent — use agent name as project key.
+                    agent.name.clone()
                 }
-                Err(e) => {
-                    warn!(agent_id = %trigger.agent_id, error = %e, "failed to look up trigger agent");
-                    return;
-                }
+            },
+            Ok(None) => {
+                warn!(agent_id = %trigger.agent_id, "trigger agent not found");
+                return;
             }
-        } else {
-            warn!("no agent registry available for trigger firing");
-            return;
+            Err(e) => {
+                warn!(agent_id = %trigger.agent_id, error = %e, "failed to look up trigger agent");
+                return;
+            }
         };
 
         // Advance-before-execute: update last_fired BEFORE creating the task.
@@ -294,28 +314,29 @@ impl Daemon {
         );
 
         match self
-            .registry
-            .assign_with_skill_and_agent(
-                &project,
+            .agent_registry
+            .create_task(
+                &trigger.agent_id,
                 &subject,
                 &description,
-                &trigger.skill,
-                Some(&trigger.agent_id),
+                Some(&trigger.skill),
+                &[],
             )
             .await
         {
             Ok(task) => {
+                self.scheduler.wake.notify_one();
                 info!(
                     task = %task.id,
                     trigger = %trigger.name,
-                    project = %project,
+                    agent_id = %trigger.agent_id,
                     "trigger created task"
                 );
             }
             Err(e) => {
                 warn!(
                     trigger = %trigger.name,
-                    project = %project,
+                    agent_id = %trigger.agent_id,
                     error = %e,
                     "trigger failed to create task"
                 );
@@ -342,19 +363,14 @@ impl Daemon {
     /// This is the primary consumption path — agents don't need DispatchReceived
     /// event triggers to receive delegated work.
     async fn consume_agent_dispatches(&self) {
-        let agent_registry = match &self.agent_registry {
-            Some(ar) => ar,
-            None => return,
-        };
-
-        let agents = match agent_registry.list_active().await {
+        let agents = match self.agent_registry.list_active().await {
             Ok(a) => a,
             Err(_) => return,
         };
 
         for agent in &agents {
-            // Leader dispatches are already consumed in patrol_all(). Skip to avoid double-processing.
-            if agent.name == self.registry.leader_agent_name {
+            // Leader dispatches are already consumed elsewhere. Skip to avoid double-processing.
+            if agent.name == self.leader_agent_name {
                 continue;
             }
 
@@ -368,13 +384,18 @@ impl Daemon {
                 self.process_agent_dispatches(
                     &agent.id,
                     &agent.name,
-                    &agent.project,
+                    &agent.parent_id,
                     &id_dispatches,
                 )
                 .await;
             } else {
-                self.process_agent_dispatches(&agent.id, &agent.name, &agent.project, &dispatches)
-                    .await;
+                self.process_agent_dispatches(
+                    &agent.id,
+                    &agent.name,
+                    &agent.parent_id,
+                    &dispatches,
+                )
+                .await;
             }
         }
     }
@@ -387,7 +408,7 @@ impl Daemon {
         project: &Option<String>,
         dispatches: &[crate::message::Dispatch],
     ) {
-        let project = match project {
+        let _project = match project {
             Some(p) => p.clone(),
             None => {
                 warn!(agent = %agent_name, "agent has no project scope, cannot create task for dispatch");
@@ -437,18 +458,12 @@ impl Daemon {
                     let skill_name = skill.as_deref().unwrap_or("process-dispatch");
 
                     match self
-                        .registry
-                        .assign_with_skill_agent_labels(
-                            &project,
-                            &subject,
-                            &description,
-                            skill_name,
-                            Some(agent_id),
-                            &labels,
-                        )
+                        .agent_registry
+                        .create_task(agent_id, &subject, &description, Some(skill_name), &labels)
                         .await
                     {
                         Ok(task) => {
+                            self.scheduler.wake.notify_one();
                             info!(
                                 task = %task.id,
                                 agent = %agent_name,
@@ -487,7 +502,7 @@ impl Daemon {
                     );
                     // Re-route to leader.
                     let mut rerouted = dispatch.clone();
-                    rerouted.to = self.registry.leader_agent_name.clone();
+                    rerouted.to = self.leader_agent_name.clone();
                     rerouted.read = false;
                     self.dispatch_bus.send(rerouted).await;
                 }
@@ -518,11 +533,6 @@ impl Daemon {
     /// Set the trigger store for agent-owned triggers.
     pub fn set_trigger_store(&mut self, store: Arc<TriggerStore>) {
         self.trigger_store = Some(store);
-    }
-
-    /// Set the agent registry for trigger agent lookups.
-    pub fn set_agent_registry(&mut self, registry: Arc<AgentRegistry>) {
-        self.agent_registry = Some(registry);
     }
 
     /// Set a PID file path (written on start, removed on stop).
@@ -662,8 +672,8 @@ impl Daemon {
         // Event trigger listener — matches events against trigger patterns, fires tasks.
         if let Some(ref trigger_store) = self.trigger_store {
             let ts = trigger_store.clone();
-            let registry = self.registry.clone();
             let agent_reg = self.agent_registry.clone();
+            let scheduler = self.scheduler.clone();
             let dispatch_bus = self.dispatch_bus.clone();
             let mut rx = self.event_broadcaster.subscribe();
             tokio::spawn(async move {
@@ -703,13 +713,9 @@ impl Daemon {
                         }
                         cooldowns.insert(trigger.id.clone(), Utc::now());
 
-                        let project = if let Some(ref ar) = agent_reg {
-                            match ar.get(&trigger.agent_id).await {
-                                Ok(Some(a)) => a.project,
-                                _ => None,
-                            }
-                        } else {
-                            None
+                        let project = match agent_reg.get(&trigger.agent_id).await {
+                            Ok(Some(a)) => a.parent_id.or_else(|| Some(a.name.clone())),
+                            _ => None,
                         };
                         if let Some(project) = project {
                             let subject = format!("[trigger:{}] {}", trigger.name, trigger.skill);
@@ -764,28 +770,31 @@ impl Daemon {
                                 trigger.name, trigger.skill, dispatch_context
                             );
                             let trigger_agent_id = trigger.agent_id.clone();
-                            if let Err(e) = registry
-                                .assign_with_skill_agent_labels(
-                                    &project,
+                            match agent_reg
+                                .create_task(
+                                    &trigger_agent_id,
                                     &subject,
                                     &desc,
-                                    &trigger.skill,
-                                    Some(&trigger_agent_id),
+                                    Some(&trigger.skill),
                                     &delegation_labels,
                                 )
                                 .await
                             {
-                                warn!(
-                                    trigger = %trigger.name,
-                                    error = %e,
-                                    "event trigger failed to create task"
-                                );
-                            } else {
-                                info!(
-                                    trigger = %trigger.name,
-                                    project = %project,
-                                    "event trigger fired"
-                                );
+                                Ok(_task) => {
+                                    scheduler.wake.notify_one();
+                                    info!(
+                                        trigger = %trigger.name,
+                                        project = %project,
+                                        "event trigger fired"
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        trigger = %trigger.name,
+                                        error = %e,
+                                        "event trigger failed to create task"
+                                    );
+                                }
                             }
                             let _ = ts.record_fire(&trigger.id, 0.0).await;
                         }
@@ -831,7 +840,15 @@ impl Daemon {
         }
         match tokio::net::UnixListener::bind(sock_path) {
             Ok(listener) => {
-                let registry = self.registry.clone();
+                let ipc_ctx = Arc::new(IpcContext {
+                    cost_ledger: self.cost_ledger.clone(),
+                    metrics: self.metrics.clone(),
+                    notes: self.notes.clone(),
+                    event_store: self.event_store.clone(),
+                    session_store: self.session_store.clone(),
+                    leader_agent_name: self.leader_agent_name.clone(),
+                    config_project_names: self.config_project_names.clone(),
+                });
                 let dispatch_bus = self.dispatch_bus.clone();
                 let trigger_store = self.trigger_store.clone();
                 let agent_registry = self.agent_registry.clone();
@@ -843,11 +860,12 @@ impl Daemon {
                 let default_model = self.default_model.clone();
                 let session_manager = self.session_manager.clone();
                 let event_broadcaster = self.event_broadcaster.clone();
+                let scheduler = self.scheduler.clone();
                 info!(path = %sock_path.display(), "IPC socket listening");
                 tokio::spawn(async move {
                     Self::socket_accept_loop(
                         listener,
-                        registry,
+                        ipc_ctx,
                         dispatch_bus,
                         trigger_store,
                         agent_registry,
@@ -859,6 +877,7 @@ impl Daemon {
                         default_model,
                         session_manager,
                         event_broadcaster,
+                        scheduler,
                     )
                     .await;
                 });
@@ -881,7 +900,7 @@ impl Daemon {
             Ok(_) => {}
             Err(e) => warn!(error = %e, "failed to load dispatch bus"),
         }
-        match self.registry.cost_ledger.load() {
+        match self.cost_ledger.load() {
             Ok(n) if n > 0 => info!(count = n, "loaded persisted cost entries"),
             Ok(_) => {}
             Err(e) => warn!(error = %e, "failed to load cost ledger"),
@@ -890,9 +909,9 @@ impl Daemon {
 
     /// Run one patrol iteration: triggers, config reload, persistence, metrics, pruning.
     async fn run_patrol_iteration(&mut self) {
-        // 1. Patrol cycle: reap finished workers, assign + launch new ones.
-        if let Err(e) = self.registry.patrol_all().await {
-            warn!(error = %e, "patrol cycle failed");
+        // 1. Patrol cycle: unified scheduler handles reap -> query -> spawn.
+        if let Err(e) = self.scheduler.schedule().await {
+            warn!(error = %e, "scheduler cycle failed");
         }
 
         // 1b. Consume dispatches for all active agents.
@@ -931,7 +950,7 @@ impl Daemon {
         if let Err(e) = self.dispatch_bus.save().await {
             warn!(error = %e, "failed to save dispatch bus");
         }
-        if let Err(e) = self.registry.cost_ledger.save() {
+        if let Err(e) = self.cost_ledger.save() {
             warn!(error = %e, "failed to save cost ledger");
         }
 
@@ -945,10 +964,7 @@ impl Daemon {
                 "retrying unacknowledged dispatch"
             );
         }
-        self.registry
-            .metrics
-            .dispatch_retries
-            .inc_by(retried.len() as u64);
+        self.metrics.dispatch_retries.inc_by(retried.len() as u64);
         let dead_letters = self.dispatch_bus.dead_letters().await;
         for dispatch in &dead_letters {
             warn!(
@@ -960,31 +976,27 @@ impl Daemon {
         }
 
         // 6. Update daily cost gauge and dispatch health metrics.
-        let (spent, _, _) = self.registry.cost_ledger.budget_status();
-        self.registry.metrics.daily_cost_usd.set(spent);
+        let (spent, _, _) = self.cost_ledger.budget_status();
+        self.metrics.daily_cost_usd.set(spent);
         let dispatch_health = self.dispatch_bus.health(ACK_RETRY_AGE_SECS).await;
-        self.registry
-            .metrics
+        self.metrics
             .dispatch_queue_depth
             .set(dispatch_health.unread as f64);
-        self.registry
-            .metrics
+        self.metrics
             .dispatches_awaiting_ack
             .set(dispatch_health.awaiting_ack as f64);
-        self.registry
-            .metrics
+        self.metrics
             .dispatches_overdue_ack
             .set(dispatch_health.overdue_ack as f64);
-        self.registry
-            .metrics
+        self.metrics
             .dispatch_dead_letters
             .set(dispatch_health.dead_letters as f64);
 
         // 7. Prune old cost entries (older than 7 days).
-        self.registry.cost_ledger.prune_old();
+        self.cost_ledger.prune_old();
 
         // 8. Prune expired blackboard entries.
-        if let Some(ref bb) = self.registry.notes
+        if let Some(ref bb) = self.notes
             && let Err(e) = bb.prune_expired()
         {
             warn!(error = %e, "failed to prune blackboard");
@@ -997,49 +1009,17 @@ impl Daemon {
         self.session_manager.reap_dead().await;
     }
 
-    /// Handle SIGHUP config reload: apply budgets, worker pool params, patrol interval.
+    /// Handle SIGHUP config reload: apply budgets, patrol interval.
     async fn apply_config_reload(&mut self) {
         info!("config reload requested (SIGHUP received)");
         match aeqi_core::config::AEQIConfig::discover() {
             Ok((new_config, path)) => {
-                self.registry
-                    .cost_ledger
+                self.cost_ledger
                     .set_daily_budget(new_config.security.max_cost_per_day_usd);
 
-                let orch = &new_config.orchestrator;
                 for pcfg in &new_config.companies {
                     if let Some(budget) = pcfg.max_cost_per_day_usd {
-                        self.registry
-                            .cost_ledger
-                            .set_project_budget(&pcfg.name, budget);
-                    }
-
-                    if let Some(pool) = self.registry.get_worker_pool(&pcfg.name).await {
-                        let mut s = pool.lock().await;
-                        s.max_workers = pcfg.max_workers;
-
-                        let proj_orch = pcfg.orchestrator.as_ref().unwrap_or(orch);
-                        s.max_resolution_attempts = proj_orch.max_resolution_attempts;
-                        s.max_description_chars = proj_orch.max_description_chars;
-                        s.max_task_retries = proj_orch.max_task_retries;
-
-                        s.expertise_routing = proj_orch.expertise_routing;
-                        s.preflight_enabled = proj_orch.preflight_enabled;
-                        s.preflight_model = proj_orch.preflight_model.clone();
-                        s.preflight_max_cost_usd = proj_orch.preflight_max_cost_usd;
-                        s.adaptive_retry = proj_orch.adaptive_retry;
-                        s.failure_analysis_model = proj_orch.failure_analysis_model.clone();
-                        s.infer_deps_threshold = proj_orch.infer_deps_threshold;
-
-                        debug!(
-                            project = %pcfg.name,
-                            max_workers = s.max_workers,
-                            max_retries = s.max_task_retries,
-                            expertise_routing = s.expertise_routing,
-                            preflight = s.preflight_enabled,
-                            adaptive_retry = s.adaptive_retry,
-                            "worker_pool config updated via SIGHUP"
-                        );
+                        self.cost_ledger.set_project_budget(&pcfg.name, budget);
                     }
                 }
 
@@ -1078,13 +1058,7 @@ impl Daemon {
                     "context" => aeqi_core::traits::MemoryCategory::Context,
                     _ => aeqi_core::traits::MemoryCategory::Fact,
                 };
-                let scope = match w.scope.as_str() {
-                    "entity" => aeqi_core::traits::MemoryScope::Entity,
-                    "department" => aeqi_core::traits::MemoryScope::Department,
-                    "system" => aeqi_core::traits::MemoryScope::System,
-                    _ => aeqi_core::traits::MemoryScope::Domain,
-                };
-                match mem.store(&w.key, &w.content, category, scope, None).await {
+                match mem.store(&w.key, &w.content, category, None).await {
                     Ok(id) => debug!(
                         project = %w.project,
                         id = %id,
@@ -1112,10 +1086,11 @@ impl Daemon {
         while self.running.load(std::sync::atomic::Ordering::SeqCst) {
             self.run_patrol_iteration().await;
 
+            let wake = self.scheduler.wake.clone();
             tokio::select! {
                 _ = tokio::time::sleep(std::time::Duration::from_secs(self.patrol_interval_secs)) => {},
-                _ = self.registry.wake.notified() => {
-                    debug!("woken by new task");
+                _ = wake.notified() => {
+                    debug!("woken by scheduler");
                 },
                 _ = self.shutdown_notify.notified() => break,
             }
@@ -1134,10 +1109,10 @@ impl Daemon {
     #[allow(clippy::too_many_arguments)]
     async fn socket_accept_loop(
         listener: tokio::net::UnixListener,
-        registry: Arc<CompanyRegistry>,
+        ipc_ctx: Arc<IpcContext>,
         dispatch_bus: Arc<DispatchBus>,
         trigger_store: Option<Arc<TriggerStore>>,
-        agent_registry: Option<Arc<AgentRegistry>>,
+        agent_registry: Arc<AgentRegistry>,
         message_router: Option<Arc<MessageRouter>>,
         event_buffer: Arc<Mutex<EventBuffer>>,
         running: Arc<std::sync::atomic::AtomicBool>,
@@ -1146,6 +1121,7 @@ impl Daemon {
         default_model: String,
         session_manager: Arc<SessionManager>,
         event_broadcaster: Arc<EventBroadcaster>,
+        scheduler: Arc<Scheduler>,
     ) {
         loop {
             if !running.load(std::sync::atomic::Ordering::SeqCst) {
@@ -1153,7 +1129,7 @@ impl Daemon {
             }
             match listener.accept().await {
                 Ok((stream, _)) => {
-                    let registry = registry.clone();
+                    let ipc_ctx = ipc_ctx.clone();
                     let dispatch_bus = dispatch_bus.clone();
                     let trigger_store = trigger_store.clone();
                     let agent_registry = agent_registry.clone();
@@ -1164,10 +1140,11 @@ impl Daemon {
                     let default_model = default_model.clone();
                     let session_manager = session_manager.clone();
                     let event_broadcaster = event_broadcaster.clone();
+                    let scheduler = scheduler.clone();
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_socket_connection(
                             stream,
-                            registry,
+                            ipc_ctx,
                             dispatch_bus,
                             trigger_store,
                             agent_registry,
@@ -1178,6 +1155,7 @@ impl Daemon {
                             default_model,
                             session_manager,
                             event_broadcaster,
+                            scheduler,
                         )
                         .await
                         {
@@ -1198,10 +1176,10 @@ impl Daemon {
     #[allow(clippy::too_many_arguments)]
     async fn handle_socket_connection(
         stream: tokio::net::UnixStream,
-        registry: Arc<CompanyRegistry>,
+        ipc_ctx: Arc<IpcContext>,
         dispatch_bus: Arc<DispatchBus>,
         trigger_store: Option<Arc<TriggerStore>>,
-        agent_registry: Option<Arc<AgentRegistry>>,
+        agent_registry: Arc<AgentRegistry>,
         message_router: Option<Arc<MessageRouter>>,
         event_buffer: Arc<Mutex<EventBuffer>>,
         readiness: ReadinessContext,
@@ -1209,6 +1187,7 @@ impl Daemon {
         default_model: String,
         session_manager: Arc<SessionManager>,
         _event_broadcaster: Arc<EventBroadcaster>,
+        scheduler: Arc<Scheduler>,
     ) -> Result<()> {
         const MAX_IPC_LINE_BYTES: usize = 10 * 1024 * 1024; // 10 MB
         let (reader, mut writer) = stream.into_split();
@@ -1240,8 +1219,12 @@ impl Daemon {
                 "ping" => serde_json::json!({"ok": true, "pong": true}),
 
                 "status" => {
-                    let project_names: Vec<String> = registry.project_names().await;
-                    let worker_count = registry.total_max_workers().await;
+                    let project_names: Vec<String> = agent_registry
+                        .list_active()
+                        .await
+                        .map(|agents| agents.iter().map(|a| a.name.clone()).collect())
+                        .unwrap_or_default();
+                    let worker_count = scheduler.config.max_workers;
                     let dispatch_health = dispatch_bus.health(ACK_RETRY_AGE_SECS).await;
                     let mail_count = dispatch_health.unread;
                     let trigger_count = if let Some(ref ts) = trigger_store {
@@ -1250,8 +1233,8 @@ impl Daemon {
                         0
                     };
 
-                    let (spent, budget, remaining) = registry.cost_ledger.budget_status();
-                    let project_budgets = registry.cost_ledger.all_project_budget_statuses();
+                    let (spent, budget, remaining) = ipc_ctx.cost_ledger.budget_status();
+                    let project_budgets = ipc_ctx.cost_ledger.all_project_budget_statuses();
                     let project_budget_info: serde_json::Map<String, serde_json::Value> =
                         project_budgets
                             .into_iter()
@@ -1266,6 +1249,10 @@ impl Daemon {
                                 )
                             })
                             .collect();
+
+                    let active = scheduler.active_count().await;
+                    let agent_counts = scheduler.agent_counts().await;
+                    let workers = scheduler.worker_status().await;
 
                     serde_json::json!({
                         "ok": true,
@@ -1285,15 +1272,29 @@ impl Daemon {
                         "daily_budget_usd": budget,
                         "budget_remaining_usd": remaining,
                         "project_budgets": project_budget_info,
+                        "scheduler_active": true,
+                        "scheduler_active_workers": active,
+                        "scheduler_agent_counts": agent_counts,
+                        "scheduler_workers": workers,
                     })
                 }
 
                 "readiness" => {
-                    let worker_limits = registry.project_worker_limits().await;
+                    // Build worker limits from agent_registry: each active agent gets max_workers from scheduler config.
+                    let worker_limits: Vec<(String, u32)> = agent_registry
+                        .list_active()
+                        .await
+                        .map(|agents| {
+                            agents
+                                .iter()
+                                .map(|a| (a.name.clone(), scheduler.config.max_workers))
+                                .collect()
+                        })
+                        .unwrap_or_default();
                     let dispatch_health = dispatch_bus.health(ACK_RETRY_AGE_SECS).await;
-                    let (spent, budget, remaining) = registry.cost_ledger.budget_status();
+                    let (spent, budget, remaining) = ipc_ctx.cost_ledger.budget_status();
                     readiness_response(
-                        &registry.leader_agent_name,
+                        &ipc_ctx.leader_agent_name,
                         worker_limits,
                         dispatch_health,
                         (spent, budget, remaining),
@@ -1302,7 +1303,7 @@ impl Daemon {
                 }
 
                 "worker_progress" => {
-                    let workers = registry.worker_progress().await;
+                    let workers = scheduler.worker_status().await;
                     serde_json::json!({"ok": true, "workers": workers})
                 }
 
@@ -1322,28 +1323,47 @@ impl Daemon {
                 }
 
                 "companies" => {
-                    let summaries = registry.list_project_summaries().await;
-                    let projects: Vec<serde_json::Value> = summaries
-                        .iter()
-                        .map(|s| {
-                            serde_json::json!({
-                                "name": s.name,
-                                "prefix": s.prefix,
-                                "open_tasks": s.open_tasks,
-                                "total_tasks": s.total_tasks,
-                                "pending_tasks": s.pending_tasks,
-                                "in_progress_tasks": s.in_progress_tasks,
-                                "done_tasks": s.done_tasks,
-                                "cancelled_tasks": s.cancelled_tasks,
-                                "departments": s.departments.iter().map(|d| serde_json::json!({
-                                    "name": d.name,
-                                    "lead": d.lead,
-                                    "agents": d.agents,
-                                    "description": d.description,
-                                })).collect::<Vec<_>>(),
+                    // List agents and their task counts from agent_registry.
+                    let agents = agent_registry.list_active().await.unwrap_or_default();
+                    let mut projects: Vec<serde_json::Value> = Vec::new();
+                    for agent in &agents {
+                        let task_counts = agent_registry
+                            .list_tasks(None, Some(&agent.id))
+                            .await
+                            .map(|tasks| {
+                                let total = tasks.len();
+                                let open = tasks.iter().filter(|t| !t.is_closed()).count();
+                                let pending = tasks
+                                    .iter()
+                                    .filter(|t| t.status == aeqi_tasks::TaskStatus::Pending)
+                                    .count();
+                                let in_progress = tasks
+                                    .iter()
+                                    .filter(|t| t.status == aeqi_tasks::TaskStatus::InProgress)
+                                    .count();
+                                let done = tasks
+                                    .iter()
+                                    .filter(|t| t.status == aeqi_tasks::TaskStatus::Done)
+                                    .count();
+                                let cancelled = tasks
+                                    .iter()
+                                    .filter(|t| t.status == aeqi_tasks::TaskStatus::Cancelled)
+                                    .count();
+                                (total, open, pending, in_progress, done, cancelled)
                             })
-                        })
-                        .collect();
+                            .unwrap_or_default();
+                        projects.push(serde_json::json!({
+                            "name": agent.name,
+                            "prefix": "",
+                            "open_tasks": task_counts.1,
+                            "total_tasks": task_counts.0,
+                            "pending_tasks": task_counts.2,
+                            "in_progress_tasks": task_counts.3,
+                            "done_tasks": task_counts.4,
+                            "cancelled_tasks": task_counts.5,
+                            "departments": [],
+                        }));
+                    }
                     serde_json::json!({"ok": true, "projects": projects})
                 }
 
@@ -1399,14 +1419,14 @@ impl Daemon {
                 }
 
                 "metrics" => {
-                    let text = registry.metrics.render();
+                    let text = ipc_ctx.metrics.render();
                     serde_json::json!({"ok": true, "metrics": text})
                 }
 
                 "cost" => {
-                    let (spent, budget, remaining) = registry.cost_ledger.budget_status();
-                    let report = registry.cost_ledger.daily_report();
-                    let project_budgets = registry.cost_ledger.all_project_budget_statuses();
+                    let (spent, budget, remaining) = ipc_ctx.cost_ledger.budget_status();
+                    let report = ipc_ctx.cost_ledger.daily_report();
+                    let project_budgets = ipc_ctx.cost_ledger.all_project_budget_statuses();
                     let project_budget_info: serde_json::Map<String, serde_json::Value> =
                         project_budgets
                             .into_iter()
@@ -1432,32 +1452,34 @@ impl Daemon {
                 }
 
                 "audit" => {
-                    let project_filter = request.get("project").and_then(|v| v.as_str());
+                    let task_filter = request
+                        .get("task_id")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
                     let last = request.get("last").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
-                    match &registry.audit_log {
-                        Some(audit) => {
-                            let events = if let Some(proj) = project_filter {
-                                audit.query_by_project(proj).unwrap_or_default()
-                            } else {
-                                audit.query_recent(last).unwrap_or_default()
-                            };
+                    let filter = crate::event_store::EventFilter {
+                        event_type: Some("decision".to_string()),
+                        task_id: task_filter,
+                        ..Default::default()
+                    };
+                    match ipc_ctx.event_store.query(&filter, last, 0).await {
+                        Ok(events) => {
                             let items: Vec<serde_json::Value> = events
                                 .iter()
                                 .map(|e| {
                                     serde_json::json!({
-                                        "timestamp": e.timestamp.to_rfc3339(),
-                                        "project": e.project,
-                                        "decision_type": e.decision_type.to_string(),
+                                        "timestamp": e.created_at.to_rfc3339(),
+                                        "decision_type": e.content.get("decision_type").and_then(|v| v.as_str()).unwrap_or(""),
                                         "task_id": e.task_id,
-                                        "agent": e.agent,
-                                        "reasoning": e.reasoning,
+                                        "agent": e.content.get("agent").and_then(|v| v.as_str()).unwrap_or(""),
+                                        "reasoning": e.content.get("reasoning").and_then(|v| v.as_str()).unwrap_or(""),
                                     })
                                 })
                                 .collect();
                             serde_json::json!({"ok": true, "events": items})
                         }
-                        None => {
-                            serde_json::json!({"ok": false, "error": "audit log not initialized"})
+                        Err(e) => {
+                            serde_json::json!({"ok": false, "error": e.to_string()})
                         }
                     }
                 }
@@ -1497,7 +1519,7 @@ impl Daemon {
                         .and_then(|v| v.as_str())
                         .map(String::from);
 
-                    match &registry.notes {
+                    match &ipc_ctx.notes {
                         Some(bb) => {
                             let entries = if cross_project {
                                 bb.query_cross_project(&tags, since, limit)
@@ -1551,7 +1573,7 @@ impl Daemon {
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
                     let key = request.get("key").and_then(|v| v.as_str()).unwrap_or("");
-                    match &registry.notes {
+                    match &ipc_ctx.notes {
                         Some(bb) => match bb.get_by_key(project, key) {
                             Ok(Some(entry)) => serde_json::json!({
                                 "ok": true,
@@ -1595,7 +1617,7 @@ impl Daemon {
                     if resource.is_empty() || project.is_empty() {
                         serde_json::json!({"ok": false, "error": "resource and project are required"})
                     } else {
-                        match &registry.notes {
+                        match &ipc_ctx.notes {
                             Some(bb) => match bb.claim(resource, agent, project, content) {
                                 Ok(crate::notes::ClaimResult::Acquired) => {
                                     serde_json::json!({"ok": true, "result": "acquired", "resource": resource})
@@ -1633,7 +1655,7 @@ impl Daemon {
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
 
-                    match &registry.notes {
+                    match &ipc_ctx.notes {
                         Some(bb) => match bb.release(resource, agent, project, force) {
                             Ok(true) => serde_json::json!({"ok": true, "released": true}),
                             Ok(false) => {
@@ -1654,7 +1676,7 @@ impl Daemon {
                         .unwrap_or("");
                     let key = request.get("key").and_then(|v| v.as_str()).unwrap_or("");
 
-                    match &registry.notes {
+                    match &ipc_ctx.notes {
                         Some(bb) => match bb.delete_by_key(project, key) {
                             Ok(true) => serde_json::json!({"ok": true, "deleted": true}),
                             Ok(false) => serde_json::json!({"ok": true, "deleted": false}),
@@ -1676,7 +1698,7 @@ impl Daemon {
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
 
-                    match &registry.notes {
+                    match &ipc_ctx.notes {
                         Some(bb) => match bb.check_claim(resource, project) {
                             Ok(Some((agent, content))) => serde_json::json!({
                                 "ok": true, "claimed": true, "agent": agent, "content": content
@@ -1690,80 +1712,67 @@ impl Daemon {
                     }
                 }
 
-                "expertise" => {
-                    let domain = request
-                        .get("domain")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("general");
-                    match &registry.expertise_ledger {
-                        Some(ledger) => {
-                            let scores = ledger.rank_for_domain(domain).unwrap_or_default();
-                            let items: Vec<serde_json::Value> = scores
-                                .iter()
-                                .map(|s| {
-                                    serde_json::json!({
-                                        "agent": s.agent_name,
-                                        "success_rate": s.success_rate,
-                                        "avg_cost": s.avg_cost,
-                                        "total_tasks": s.total_tasks,
-                                        "confidence": s.confidence,
-                                    })
-                                })
-                                .collect();
-                            serde_json::json!({"ok": true, "scores": items})
-                        }
-                        None => {
-                            serde_json::json!({"ok": false, "error": "expertise ledger not initialized"})
-                        }
+                "expertise" => match ipc_ctx.event_store.query_expertise().await {
+                    Ok(scores) => {
+                        serde_json::json!({"ok": true, "scores": scores})
                     }
-                }
+                    Err(e) => {
+                        serde_json::json!({"ok": false, "error": e.to_string()})
+                    }
+                },
 
                 "tasks" => {
                     let project_filter = request.get("project").and_then(|v| v.as_str());
                     let status_filter = request.get("status").and_then(|v| v.as_str());
 
-                    let project_names: Vec<String> = if let Some(name) = project_filter {
-                        vec![name.to_string()]
+                    // AgentRegistry path: unified task store.
+                    let agent_filter = request.get("agent_id").and_then(|v| v.as_str());
+                    // If project filter provided, try to resolve to an agent_id.
+                    let resolved_agent = if agent_filter.is_some() {
+                        agent_filter.map(|s| s.to_string())
+                    } else if let Some(proj) = project_filter {
+                        agent_registry
+                            .resolve_by_hint(proj)
+                            .await
+                            .ok()
+                            .flatten()
+                            .map(|a| a.id)
                     } else {
-                        registry.project_names().await
+                        None
                     };
-
-                    let mut all_tasks = Vec::new();
-                    let mut partial = false;
-                    for name in &project_names {
-                        if let Some(board) = registry.get_task_board(name).await {
-                            let Ok(board) = board.try_lock() else {
-                                partial = true;
-                                continue;
-                            };
-                            for task in board.all() {
-                                if let Some(status) = status_filter
-                                    && task.status.to_string() != status
-                                {
-                                    continue;
-                                }
-                                all_tasks.push(serde_json::json!({
-                                    "id": task.id.0,
-                                    "subject": task.subject,
-                                    "description": task.description,
-                                    "status": task.status.to_string(),
-                                    "priority": task.priority.to_string(),
-                                    "assignee": task.assignee,
-                                    "skill": task.skill,
-                                    "labels": task.labels,
-                                    "retry_count": task.retry_count,
-                                    "project": name,
-                                    "created_at": task.created_at.to_rfc3339(),
-                                    "updated_at": task.updated_at.map(|t| t.to_rfc3339()),
-                                    "closed_at": task.closed_at.map(|t| t.to_rfc3339()),
-                                    "closed_reason": task.closed_reason,
-                                    "runtime": task.runtime(),
-                                    "task_outcome": task.task_outcome(),
-                                }));
-                            }
+                    match agent_registry
+                        .list_tasks(status_filter, resolved_agent.as_deref())
+                        .await
+                    {
+                        Ok(tasks) => {
+                            let all_tasks: Vec<serde_json::Value> = tasks
+                                .iter()
+                                .map(|task| {
+                                    serde_json::json!({
+                                        "id": task.id.0,
+                                        "subject": task.subject,
+                                        "description": task.description,
+                                        "status": task.status.to_string(),
+                                        "priority": task.priority.to_string(),
+                                        "assignee": task.assignee,
+                                        "agent_id": task.agent_id,
+                                        "skill": task.skill,
+                                        "labels": task.labels,
+                                        "retry_count": task.retry_count,
+                                        "project": task.agent_id.as_deref().unwrap_or(""),
+                                        "created_at": task.created_at.to_rfc3339(),
+                                        "updated_at": task.updated_at.map(|t| t.to_rfc3339()),
+                                        "closed_at": task.closed_at.map(|t| t.to_rfc3339()),
+                                        "closed_reason": task.closed_reason,
+                                        "runtime": task.runtime(),
+                                        "task_outcome": task.task_outcome(),
+                                    })
+                                })
+                                .collect();
+                            serde_json::json!({"ok": true, "tasks": all_tasks, "partial": false})
                         }
+                        Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                     }
-                    serde_json::json!({"ok": true, "tasks": all_tasks, "partial": partial})
                 }
 
                 "create_task" => {
@@ -1781,41 +1790,56 @@ impl Daemon {
                         .unwrap_or("");
                     let explicit_agent_id = request.get("agent_id").and_then(|v| v.as_str());
 
-                    // Fall back to project default agent when no explicit agent_id.
-                    let resolved_agent_id: Option<String> = if explicit_agent_id.is_some() {
-                        explicit_agent_id.map(|s| s.to_string())
-                    } else if let Some(ref ar) = agent_registry {
-                        ar.default_for_project(Some(project))
-                            .await
-                            .ok()
-                            .flatten()
-                            .map(|a| a.id)
-                    } else {
-                        None
-                    };
-
                     if project.is_empty() || subject.is_empty() {
                         serde_json::json!({"ok": false, "error": "project and subject are required"})
                     } else {
-                        match registry
-                            .assign_with_agent(
-                                project,
-                                subject,
-                                description,
-                                resolved_agent_id.as_deref(),
-                            )
-                            .await
-                        {
-                            Ok(task) => serde_json::json!({
-                                "ok": true,
-                                "task": {
-                                    "id": task.id.0,
-                                    "subject": task.subject,
-                                    "status": task.status.to_string(),
-                                    "project": project,
+                        // AgentRegistry path: resolve agent, then create task in unified store.
+                        let agent = if let Some(aid) = explicit_agent_id {
+                            agent_registry.resolve_by_hint(aid).await.ok().flatten()
+                        } else {
+                            agent_registry
+                                .default_agent(Some(project))
+                                .await
+                                .ok()
+                                .flatten()
+                        };
+                        match agent {
+                            Some(agent) => {
+                                let skill = request.get("skill").and_then(|v| v.as_str());
+                                let labels: Vec<String> = request
+                                    .get("labels")
+                                    .and_then(|v| v.as_array())
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                match agent_registry
+                                    .create_task(&agent.id, subject, description, skill, &labels)
+                                    .await
+                                {
+                                    Ok(task) => {
+                                        scheduler.wake.notify_one();
+                                        serde_json::json!({
+                                            "ok": true,
+                                            "task": {
+                                                "id": task.id.0,
+                                                "subject": task.subject,
+                                                "status": task.status.to_string(),
+                                                "agent_id": task.agent_id,
+                                                "project": project,
+                                            }
+                                        })
+                                    }
+                                    Err(e) => {
+                                        serde_json::json!({"ok": false, "error": e.to_string()})
+                                    }
                                 }
-                            }),
-                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                            }
+                            None => {
+                                serde_json::json!({"ok": false, "error": "no agent found for project"})
+                            }
                         }
                     }
                 }
@@ -1829,78 +1853,30 @@ impl Daemon {
                         .get("reason")
                         .and_then(|v| v.as_str())
                         .unwrap_or("closed via web");
-                    let project = request.get("project").and_then(|v| v.as_str());
 
                     if task_id.is_empty() {
                         serde_json::json!({"ok": false, "error": "task_id is required"})
                     } else {
-                        // Find project by explicit param or by task ID prefix.
-                        let project_name = if let Some(p) = project {
-                            Some(p.to_string())
-                        } else {
-                            let _prefix = task_id.split('-').next().unwrap_or("");
-                            let mut found = None;
-                            for name in registry.project_names().await {
-                                if let Some(board) = registry.get_task_board(&name).await {
-                                    let board = board.lock().await;
-                                    if board.get(task_id).is_some() {
-                                        found = Some(name);
-                                        break;
-                                    }
+                        // AgentRegistry path: update status to Done via unified store.
+                        match agent_registry
+                            .update_task(task_id, |task| {
+                                task.status = aeqi_tasks::TaskStatus::Done;
+                                task.closed_at = Some(chrono::Utc::now());
+                                task.closed_reason = Some(reason.to_string());
+                            })
+                            .await
+                        {
+                            Ok(task) => serde_json::json!({
+                                "ok": true,
+                                "task": {
+                                    "id": task.id.0,
+                                    "status": task.status.to_string(),
+                                    "closed_reason": task.closed_reason,
+                                    "runtime": task.runtime(),
+                                    "task_outcome": task.task_outcome(),
                                 }
-                            }
-                            found
-                        };
-
-                        match project_name {
-                            Some(name) => {
-                                if let Some(board) = registry.get_task_board(&name).await {
-                                    let mut board = board.lock().await;
-                                    match board.close(task_id, reason) {
-                                        Ok(task) => {
-                                            // Clean up task:* blackboard entries on close.
-                                            if let Some(ref bb) = registry.notes {
-                                                let prefix = format!("task:{}:", task_id);
-                                                if let Ok(entries) = bb.list_project(&name, 200) {
-                                                    let mut cleaned = 0u32;
-                                                    for entry in &entries {
-                                                        if entry.key.starts_with(&prefix) {
-                                                            let _ =
-                                                                bb.delete_by_key(&name, &entry.key);
-                                                            cleaned += 1;
-                                                        }
-                                                    }
-                                                    if cleaned > 0 {
-                                                        tracing::debug!(
-                                                            task_id,
-                                                            cleaned,
-                                                            "cleaned blackboard entries on task close"
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                            serde_json::json!({
-                                                "ok": true,
-                                                "task": {
-                                                    "id": task.id.0,
-                                                    "status": task.status.to_string(),
-                                                    "closed_reason": task.closed_reason,
-                                                    "runtime": task.runtime(),
-                                                    "task_outcome": task.task_outcome(),
-                                                }
-                                            })
-                                        }
-                                        Err(e) => {
-                                            serde_json::json!({"ok": false, "error": e.to_string()})
-                                        }
-                                    }
-                                } else {
-                                    serde_json::json!({"ok": false, "error": "project not found"})
-                                }
-                            }
-                            None => {
-                                serde_json::json!({"ok": false, "error": "could not find project for task"})
-                            }
+                            }),
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                         }
                     }
                 }
@@ -1936,7 +1912,7 @@ impl Daemon {
                     if key.is_empty() || content.is_empty() {
                         serde_json::json!({"ok": false, "error": "key and content are required"})
                     } else {
-                        match &registry.notes {
+                        match &ipc_ctx.notes {
                             Some(bb) => match bb
                                 .post(key, content, agent, project, &tags, durability)
                             {
@@ -2114,7 +2090,7 @@ impl Daemon {
 
                     // If agent_id is provided, look up timeline (messages + tool events) by agent UUID.
                     if let Some(ref aid) = agent_id_param {
-                        if let Some(ref ss) = registry.session_store {
+                        if let Some(ref ss) = ipc_ctx.session_store {
                             match ss.get_timeline_by_agent_id(aid, limit).await {
                                 Ok(events) => {
                                     let msgs: Vec<serde_json::Value> = events
@@ -2205,11 +2181,7 @@ impl Daemon {
                                                 .get("task_id")
                                                 .and_then(|value| value.as_str())
                                             {
-                                                let project_hint = metadata
-                                                    .get("project")
-                                                    .and_then(|value| value.as_str());
-                                                find_task_snapshot(&registry, project_hint, task_id)
-                                                    .await
+                                                find_task_snapshot(&agent_registry, task_id).await
                                             } else {
                                                 None
                                             }
@@ -2356,18 +2328,18 @@ impl Daemon {
                                         if let Some(err_resp) = sig_error {
                                             err_resp
                                         } else {
-                                            // Look up agent to get project.
-                                            let project = match &agent_registry {
-                                                Some(reg) => match reg.get(&trigger.agent_id).await
-                                                {
-                                                    Ok(Some(agent)) => agent.project.clone(),
+                                            // Look up agent to get parent (project context).
+                                            let project =
+                                                match agent_registry.get(&trigger.agent_id).await {
+                                                    Ok(Some(agent)) => agent
+                                                        .parent_id
+                                                        .clone()
+                                                        .or_else(|| Some(agent.name.clone())),
                                                     _ => None,
-                                                },
-                                                None => None,
-                                            };
+                                                };
 
                                             match project {
-                                                Some(project) => {
+                                                Some(_project) => {
                                                     // Advance before execute.
                                                     let _ = store
                                                         .advance_before_execute(&trigger.id)
@@ -2384,17 +2356,18 @@ impl Daemon {
                                                         trigger.agent_id
                                                     );
 
-                                                    match registry
-                                                        .assign_with_skill_and_agent(
-                                                            &project,
+                                                    match agent_registry
+                                                        .create_task(
+                                                            &trigger.agent_id,
                                                             &subject,
                                                             &description,
-                                                            &trigger.skill,
-                                                            Some(&trigger.agent_id),
+                                                            Some(&trigger.skill),
+                                                            &[],
                                                         )
                                                         .await
                                                     {
                                                         Ok(task) => {
+                                                            scheduler.wake.notify_one();
                                                             let _ = store
                                                                 .record_fire(&trigger.id, 0.0)
                                                                 .await;
@@ -2569,19 +2542,11 @@ impl Daemon {
                         serde_json::json!({"ok": true, "projects": project_memories})
                     } else if let Some(ref engine) = message_router {
                         if let Some(mem) = engine.memory_stores.get(project) {
-                            let scope_param = request.get("scope").and_then(|v| v.as_str());
-                            let entity_id_param = request.get("entity_id").and_then(|v| v.as_str());
+                            let agent_id_param = request.get("agent_id").and_then(|v| v.as_str());
 
                             let mut mq = aeqi_core::traits::MemoryQuery::new(query, limit);
-                            if let Some(eid) = entity_id_param {
-                                mq = mq.with_entity(eid);
-                            } else if let Some(scope_str) = scope_param {
-                                mq = mq.with_scope(match scope_str {
-                                    "system" => aeqi_core::traits::MemoryScope::System,
-                                    "entity" => aeqi_core::traits::MemoryScope::Entity,
-                                    "department" => aeqi_core::traits::MemoryScope::Department,
-                                    _ => aeqi_core::traits::MemoryScope::Domain,
-                                });
+                            if let Some(aid) = agent_id_param {
+                                mq = mq.with_agent(aid);
                             }
                             match mem.search(&mq).await {
                                 Ok(entries) => {
@@ -2593,8 +2558,7 @@ impl Daemon {
                                                 "key": e.key,
                                                 "content": e.content,
                                                 "category": format!("{:?}", e.category),
-                                                "scope": format!("{:?}", e.scope),
-                                                "entity_id": e.entity_id,
+                                                "agent_id": e.agent_id,
                                                 "created_at": e.created_at.to_rfc3339(),
                                             })
                                         })
@@ -2933,8 +2897,7 @@ impl Daemon {
                             && let Some(mem) = engine.memory_stores.get(project)
                         {
                             let q = if query.is_empty() { project } else { query };
-                            let mq = aeqi_core::traits::MemoryQuery::new(q, limit)
-                                .with_scope(aeqi_core::traits::MemoryScope::Domain);
+                            let mq = aeqi_core::traits::MemoryQuery::new(q, limit);
                             if let Ok(results) = mem.search(&mq).await {
                                 for entry in results {
                                     items.push(serde_json::json!({
@@ -2942,7 +2905,7 @@ impl Daemon {
                                         "key": entry.key,
                                         "content": entry.content,
                                         "category": format!("{:?}", entry.category).to_lowercase(),
-                                        "scope": format!("{:?}", entry.scope).to_lowercase(),
+                                        "agent_id": entry.agent_id,
                                         "source": "memory",
                                         "created_at": entry.created_at.to_rfc3339(),
                                         "project": project,
@@ -2952,7 +2915,7 @@ impl Daemon {
                         }
 
                         // 2. Fetch blackboard entries for this project.
-                        if let Some(ref bb) = registry.notes
+                        if let Some(ref bb) = ipc_ctx.notes
                             && let Ok(entries) = bb.list_project(project, limit as u32)
                         {
                             for entry in entries {
@@ -2988,10 +2951,6 @@ impl Daemon {
                         .get("category")
                         .and_then(|v| v.as_str())
                         .unwrap_or("fact");
-                    let scope = request
-                        .get("scope")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("domain");
 
                     if project.is_empty() || key.is_empty() || content.is_empty() {
                         serde_json::json!({"ok": false, "error": "project, key, and content required"})
@@ -3004,14 +2963,8 @@ impl Daemon {
                                 "evergreen" => aeqi_core::traits::MemoryCategory::Evergreen,
                                 _ => aeqi_core::traits::MemoryCategory::Fact,
                             };
-                            let sc = match scope {
-                                "system" => aeqi_core::traits::MemoryScope::System,
-                                "entity" => aeqi_core::traits::MemoryScope::Entity,
-                                "department" => aeqi_core::traits::MemoryScope::Department,
-                                _ => aeqi_core::traits::MemoryScope::Domain,
-                            };
-                            let entity_id = request.get("entity_id").and_then(|v| v.as_str());
-                            match mem.store(key, content, cat, sc, entity_id).await {
+                            let agent_id = request.get("agent_id").and_then(|v| v.as_str());
+                            match mem.store(key, content, cat, agent_id).await {
                                 Ok(id) => serde_json::json!({"ok": true, "id": id}),
                                 Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                             }
@@ -3048,26 +3001,31 @@ impl Daemon {
 
                 // ── Persistent Agent Registry ──
                 "agents_registry" => {
-                    match &agent_registry {
-                        Some(reg) => {
-                            let project = request.get("project").and_then(|v| v.as_str());
-                            let status_filter = request.get("status").and_then(|v| v.as_str());
-                            let status = status_filter.and_then(|s| match s {
-                                "active" => Some(crate::agent_registry::AgentStatus::Active),
-                                "paused" => Some(crate::agent_registry::AgentStatus::Paused),
-                                "retired" => Some(crate::agent_registry::AgentStatus::Retired),
-                                _ => None,
-                            });
-                            match reg.list(project, status).await {
-                                Ok(agents) => {
-                                    let items: Vec<serde_json::Value> = agents.iter().map(|a| {
+                    let parent_id = request.get("parent_id").and_then(|v| v.as_str());
+                    let parent_filter: Option<Option<&str>> = if request.get("parent_id").is_some()
+                    {
+                        Some(parent_id)
+                    } else {
+                        None
+                    };
+                    let status_filter = request.get("status").and_then(|v| v.as_str());
+                    let status = status_filter.and_then(|s| match s {
+                        "active" => Some(crate::agent_registry::AgentStatus::Active),
+                        "paused" => Some(crate::agent_registry::AgentStatus::Paused),
+                        "retired" => Some(crate::agent_registry::AgentStatus::Retired),
+                        _ => None,
+                    });
+                    match agent_registry.list(parent_filter, status).await {
+                        Ok(agents) => {
+                            let items: Vec<serde_json::Value> = agents
+                                .iter()
+                                .map(|a| {
                                     serde_json::json!({
                                         "id": a.id,
                                         "name": a.name,
                                         "display_name": a.display_name,
                                         "template": a.template,
-                                        "project": a.project,
-                                        "department_id": a.department_id,
+                                        "parent_id": a.parent_id,
                                         "model": a.model,
                                         "capabilities": a.capabilities,
                                         "status": a.status,
@@ -3080,268 +3038,202 @@ impl Daemon {
                                         "faces": a.faces,
                                         "session_id": a.session_id,
                                     })
-                                }).collect();
-                                    serde_json::json!({"ok": true, "agents": items})
-                                }
-                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
-                            }
+                                })
+                                .collect();
+                            serde_json::json!({"ok": true, "agents": items})
                         }
-                        None => serde_json::json!({"ok": true, "agents": []}),
+                        Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                     }
                 }
 
-                "departments" => match &agent_registry {
-                    Some(reg) => {
-                        let project = request.get("project").and_then(|v| v.as_str());
-                        match reg.list_departments(project).await {
-                            Ok(depts) => {
-                                let items: Vec<serde_json::Value> = depts
+                "agent_children" => {
+                    let agent_id = request
+                        .get("agent_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if agent_id.is_empty() {
+                        serde_json::json!({"ok": false, "error": "agent_id is required"})
+                    } else {
+                        match agent_registry.get_children(agent_id).await {
+                            Ok(children) => {
+                                let items: Vec<serde_json::Value> = children
                                     .iter()
-                                    .map(|d| {
+                                    .map(|a| {
                                         serde_json::json!({
-                                            "id": d.id,
-                                            "name": d.name,
-                                            "project": d.project,
-                                            "manager_id": d.manager_id,
-                                            "parent_id": d.parent_id,
-                                            "created_at": d.created_at,
+                                            "id": a.id,
+                                            "name": a.name,
+                                            "display_name": a.display_name,
+                                            "template": a.template,
+                                            "parent_id": a.parent_id,
+                                            "model": a.model,
+                                            "status": a.status,
+                                            "created_at": a.created_at.to_rfc3339(),
                                         })
                                     })
                                     .collect();
-                                serde_json::json!({"ok": true, "departments": items})
+                                serde_json::json!({"ok": true, "children": items})
                             }
                             Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                         }
                     }
-                    None => serde_json::json!({"ok": true, "departments": []}),
-                },
+                }
 
-                "create_department" => match &agent_registry {
-                    Some(reg) => {
-                        let name = request_field(&request, "name").unwrap_or("");
-                        let project = request.get("project").and_then(|v| v.as_str());
-                        if name.is_empty() {
-                            serde_json::json!({"ok": false, "error": "name is required"})
+                "agent_spawn" => {
+                    let template = request
+                        .get("template")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if template.is_empty() {
+                        serde_json::json!({"ok": false, "error": "template is required"})
+                    } else {
+                        // Read template file from agents/ directory
+                        let cwd = std::env::current_dir().unwrap_or_default();
+                        let md_path = cwd.join("agents").join(template).join("agent.md");
+                        let toml_path = cwd.join("agents").join(template).join("agent.toml");
+                        let template_content = if md_path.exists() {
+                            std::fs::read_to_string(&md_path).ok()
+                        } else if toml_path.exists() {
+                            std::fs::read_to_string(&toml_path).ok()
                         } else {
-                            let project_str = project.map(String::from);
-                            match reg
-                                .create_department(name, project_str.as_deref(), None, None)
-                                .await
-                            {
-                                Ok(dept) => serde_json::json!({
-                                    "ok": true,
-                                    "id": dept.id,
-                                    "name": dept.name,
-                                }),
-                                Err(e) => {
-                                    serde_json::json!({"ok": false, "error": e.to_string()})
-                                }
-                            }
-                        }
-                    }
-                    None => {
-                        serde_json::json!({"ok": false, "error": "agent registry not available"})
-                    }
-                },
-
-                "agent_spawn" => match &agent_registry {
-                    Some(reg) => {
-                        let template = request
-                            .get("template")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        if template.is_empty() {
-                            serde_json::json!({"ok": false, "error": "template is required"})
-                        } else {
-                            // Read template file from agents/ directory
-                            let cwd = std::env::current_dir().unwrap_or_default();
-                            let md_path = cwd.join("agents").join(template).join("agent.md");
-                            let toml_path = cwd.join("agents").join(template).join("agent.toml");
-                            let template_content = if md_path.exists() {
-                                std::fs::read_to_string(&md_path).ok()
-                            } else if toml_path.exists() {
-                                std::fs::read_to_string(&toml_path).ok()
-                            } else {
-                                None
-                            };
-                            match template_content {
-                                Some(content) => {
-                                    let project = request.get("project").and_then(|v| v.as_str());
-                                    match reg.spawn_from_template(&content, project).await {
-                                        Ok(agent) => serde_json::json!({
-                                            "ok": true,
-                                            "agent": {
-                                                "id": agent.id,
-                                                "name": agent.name,
-                                                "display_name": agent.display_name,
-                                                "status": agent.status,
-                                            }
-                                        }),
-                                        Err(e) => {
-                                            serde_json::json!({"ok": false, "error": e.to_string()})
+                            None
+                        };
+                        match template_content {
+                            Some(content) => {
+                                let project = request.get("project").and_then(|v| v.as_str());
+                                match agent_registry.spawn_from_template(&content, project).await {
+                                    Ok(agent) => serde_json::json!({
+                                        "ok": true,
+                                        "agent": {
+                                            "id": agent.id,
+                                            "name": agent.name,
+                                            "display_name": agent.display_name,
+                                            "status": agent.status,
                                         }
-                                    }
-                                }
-                                None => {
-                                    serde_json::json!({"ok": false, "error": format!("template not found: {template}")})
-                                }
-                            }
-                        }
-                    }
-                    None => {
-                        serde_json::json!({"ok": false, "error": "agent registry not available"})
-                    }
-                },
-
-                "agent_set_status" => match &agent_registry {
-                    Some(reg) => {
-                        let name = request.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                        let status_str =
-                            request.get("status").and_then(|v| v.as_str()).unwrap_or("");
-                        if name.is_empty() || status_str.is_empty() {
-                            serde_json::json!({"ok": false, "error": "name and status required"})
-                        } else {
-                            let status = match status_str {
-                                "active" => Some(crate::agent_registry::AgentStatus::Active),
-                                "paused" => Some(crate::agent_registry::AgentStatus::Paused),
-                                "retired" => Some(crate::agent_registry::AgentStatus::Retired),
-                                _ => None,
-                            };
-                            match status {
-                                Some(s) => match reg.set_status(name, s).await {
-                                    Ok(_) => serde_json::json!({"ok": true}),
+                                    }),
                                     Err(e) => {
                                         serde_json::json!({"ok": false, "error": e.to_string()})
                                     }
-                                },
-                                None => {
-                                    serde_json::json!({"ok": false, "error": format!("invalid status: {status_str}")})
                                 }
                             }
+                            None => {
+                                serde_json::json!({"ok": false, "error": format!("template not found: {template}")})
+                            }
                         }
                     }
-                    None => {
-                        serde_json::json!({"ok": false, "error": "agent registry not available"})
-                    }
-                },
+                }
 
-                "agent_info" => match &agent_registry {
-                    Some(reg) => {
-                        let name = request.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                        if name.is_empty() {
-                            serde_json::json!({"ok": false, "error": "name is required"})
-                        } else {
-                            match reg.get_active_by_name(name).await {
-                                Ok(Some(agent)) => serde_json::json!({
-                                    "ok": true,
-                                    "id": agent.id,
-                                    "name": agent.name,
-                                    "display_name": agent.display_name,
-                                    "template": agent.template,
-                                    "system_prompt": agent.system_prompt,
-                                    "project": agent.project,
-                                    "department_id": agent.department_id,
-                                    "model": agent.model,
-                                    "capabilities": agent.capabilities,
-                                    "status": agent.status,
-                                }),
-                                Ok(None) => {
-                                    serde_json::json!({"ok": false, "error": format!("agent '{}' not found", name)})
+                "agent_set_status" => {
+                    let name = request.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let status_str = request.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                    if name.is_empty() || status_str.is_empty() {
+                        serde_json::json!({"ok": false, "error": "name and status required"})
+                    } else {
+                        let status = match status_str {
+                            "active" => Some(crate::agent_registry::AgentStatus::Active),
+                            "paused" => Some(crate::agent_registry::AgentStatus::Paused),
+                            "retired" => Some(crate::agent_registry::AgentStatus::Retired),
+                            _ => None,
+                        };
+                        match status {
+                            Some(s) => match agent_registry.set_status(name, s).await {
+                                Ok(_) => serde_json::json!({"ok": true}),
+                                Err(e) => {
+                                    serde_json::json!({"ok": false, "error": e.to_string()})
                                 }
-                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                            },
+                            None => {
+                                serde_json::json!({"ok": false, "error": format!("invalid status: {status_str}")})
                             }
                         }
                     }
-                    None => {
-                        serde_json::json!({"ok": false, "error": "agent registry not available"})
-                    }
-                },
+                }
 
-                // ── Budget Policies ──
-                "budget_policies" => match &agent_registry {
-                    Some(reg) => match reg.list_budget_policies().await {
-                        Ok(policies) => serde_json::json!({"ok": true, "policies": policies}),
-                        Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
-                    },
-                    None => {
-                        serde_json::json!({"ok": false, "error": "agent registry not available"})
-                    }
-                },
-
-                "create_budget_policy" => match &agent_registry {
-                    Some(reg) => {
-                        let scope_type = request_field(&request, "scope_type").unwrap_or("");
-                        let scope_id = request_field(&request, "scope_id").unwrap_or("");
-                        let window = request_field(&request, "window").unwrap_or("");
-                        let amount_usd = request
-                            .get("amount_usd")
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(0.0);
-
-                        if scope_type.is_empty()
-                            || scope_id.is_empty()
-                            || window.is_empty()
-                            || amount_usd <= 0.0
-                        {
-                            serde_json::json!({"ok": false, "error": "scope_type, scope_id, window, and positive amount_usd are required"})
-                        } else {
-                            match reg
-                                .create_budget_policy(scope_type, scope_id, window, amount_usd)
-                                .await
-                            {
-                                Ok(id) => serde_json::json!({"ok": true, "id": id}),
-                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
-                            }
-                        }
-                    }
-                    None => {
-                        serde_json::json!({"ok": false, "error": "agent registry not available"})
-                    }
-                },
-
-                // ── Approval Queue ──
-                "approvals" => match &agent_registry {
-                    Some(reg) => {
-                        let status = request_field(&request, "status");
-                        match reg.list_approvals(status).await {
-                            Ok(approvals) => {
-                                serde_json::json!({"ok": true, "approvals": approvals})
+                "agent_info" => {
+                    let name = request.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    if name.is_empty() {
+                        serde_json::json!({"ok": false, "error": "name is required"})
+                    } else {
+                        match agent_registry.get_active_by_name(name).await {
+                            Ok(Some(agent)) => serde_json::json!({
+                                "ok": true,
+                                "id": agent.id,
+                                "name": agent.name,
+                                "display_name": agent.display_name,
+                                "template": agent.template,
+                                "system_prompt": agent.system_prompt,
+                                "parent_id": agent.parent_id,
+                                "model": agent.model,
+                                "capabilities": agent.capabilities,
+                                "status": agent.status,
+                            }),
+                            Ok(None) => {
+                                serde_json::json!({"ok": false, "error": format!("agent '{}' not found", name)})
                             }
                             Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                         }
                     }
-                    None => {
-                        serde_json::json!({"ok": false, "error": "agent registry not available"})
-                    }
+                }
+
+                // ── Budget Policies ──
+                "budget_policies" => match agent_registry.list_budget_policies().await {
+                    Ok(policies) => serde_json::json!({"ok": true, "policies": policies}),
+                    Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                 },
 
-                "resolve_approval" => match &agent_registry {
-                    Some(reg) => {
-                        let approval_id = request_field(&request, "approval_id").unwrap_or("");
-                        let status = request_field(&request, "status").unwrap_or("");
-                        let decided_by = request_field(&request, "decided_by").unwrap_or("");
-                        let note = request_field(&request, "note");
+                "create_budget_policy" => {
+                    let agent_id = request_field(&request, "agent_id").unwrap_or("");
+                    let window = request_field(&request, "window").unwrap_or("");
+                    let amount_usd = request
+                        .get("amount_usd")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0);
 
-                        if approval_id.is_empty() || status.is_empty() || decided_by.is_empty() {
-                            serde_json::json!({"ok": false, "error": "approval_id, status, and decided_by are required"})
-                        } else {
-                            match reg
-                                .resolve_approval(approval_id, status, decided_by, note)
-                                .await
-                            {
-                                Ok(()) => serde_json::json!({"ok": true}),
-                                Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
-                            }
+                    if agent_id.is_empty() || window.is_empty() || amount_usd <= 0.0 {
+                        serde_json::json!({"ok": false, "error": "agent_id, window, and positive amount_usd are required"})
+                    } else {
+                        match agent_registry
+                            .create_budget_policy(agent_id, window, amount_usd)
+                            .await
+                        {
+                            Ok(id) => serde_json::json!({"ok": true, "id": id}),
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                         }
                     }
-                    None => {
-                        serde_json::json!({"ok": false, "error": "agent registry not available"})
+                }
+
+                // ── Approval Queue ──
+                "approvals" => {
+                    let status = request_field(&request, "status");
+                    match agent_registry.list_approvals(status).await {
+                        Ok(approvals) => {
+                            serde_json::json!({"ok": true, "approvals": approvals})
+                        }
+                        Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                     }
-                },
+                }
+
+                "resolve_approval" => {
+                    let approval_id = request_field(&request, "approval_id").unwrap_or("");
+                    let status = request_field(&request, "status").unwrap_or("");
+                    let decided_by = request_field(&request, "decided_by").unwrap_or("");
+                    let note = request_field(&request, "note");
+
+                    if approval_id.is_empty() || status.is_empty() || decided_by.is_empty() {
+                        serde_json::json!({"ok": false, "error": "approval_id, status, and decided_by are required"})
+                    } else {
+                        match agent_registry
+                            .resolve_approval(approval_id, status, decided_by, note)
+                            .await
+                        {
+                            Ok(()) => serde_json::json!({"ok": true}),
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                        }
+                    }
+                }
 
                 // ── Sessions ──
                 "list_sessions" => {
-                    if let Some(ref ss) = registry.session_store {
+                    if let Some(ref ss) = ipc_ctx.session_store {
                         let hint = request_field(&request, "agent_id").unwrap_or("");
                         if hint.is_empty() {
                             serde_json::json!({"ok": false, "error": "agent_id is required"})
@@ -3349,15 +3241,13 @@ impl Daemon {
                             // Resolve hint to agent UUID if needed.
                             let resolved_id = if hint.len() == 36 && hint.contains('-') {
                                 hint.to_string()
-                            } else if let Some(ref reg) = agent_registry {
-                                match reg.resolve_by_hint(hint).await {
+                            } else {
+                                match agent_registry.resolve_by_hint(hint).await {
                                     Ok(Some(agent)) => agent.id,
                                     _ => hint.to_string(),
                                 }
-                            } else {
-                                hint.to_string()
                             };
-                            match ss.list_sessions(Some(&resolved_id), None, 100).await {
+                            match ss.list_sessions(Some(&resolved_id), 100).await {
                                 Ok(sessions) => {
                                     serde_json::json!({"ok": true, "sessions": sessions})
                                 }
@@ -3372,15 +3262,11 @@ impl Daemon {
                 // ── Sessions ──
                 "sessions" => {
                     let agent_id = request_field(&request, "agent_id").map(|s| s.to_string());
-                    let project_id = request_field(&request, "project_id").map(|s| s.to_string());
                     let limit =
                         request.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
 
-                    if let Some(ref ss) = registry.session_store {
-                        match ss
-                            .list_sessions(agent_id.as_deref(), project_id.as_deref(), limit)
-                            .await
-                        {
+                    if let Some(ref ss) = ipc_ctx.session_store {
+                        match ss.list_sessions(agent_id.as_deref(), limit).await {
                             Ok(sessions) => {
                                 serde_json::json!({"ok": true, "sessions": sessions})
                             }
@@ -3392,7 +3278,7 @@ impl Daemon {
                 }
 
                 "create_session" => {
-                    if let Some(ref ss) = registry.session_store {
+                    if let Some(ref ss) = ipc_ctx.session_store {
                         let agent_id = request_field(&request, "agent_id").unwrap_or("");
                         if agent_id.is_empty() {
                             serde_json::json!({"ok": false, "error": "agent_id is required"})
@@ -3400,8 +3286,6 @@ impl Daemon {
                             match ss
                                 .create_session(
                                     agent_id,
-                                    None,
-                                    None,
                                     "perpetual",
                                     "Permanent Session",
                                     None,
@@ -3429,7 +3313,7 @@ impl Daemon {
                         let was_running = session_manager.close(session_id).await;
 
                         // Close in DB via session_store.
-                        let db_closed = if let Some(ref ss) = registry.session_store {
+                        let db_closed = if let Some(ref ss) = ipc_ctx.session_store {
                             ss.close_session(session_id).await.is_ok()
                         } else {
                             false
@@ -3444,7 +3328,7 @@ impl Daemon {
                 }
 
                 "session_messages" => {
-                    if let Some(ref ss) = registry.session_store {
+                    if let Some(ref ss) = ipc_ctx.session_store {
                         let session_id = request_field(&request, "session_id").unwrap_or("");
                         let limit =
                             request.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
@@ -3477,7 +3361,7 @@ impl Daemon {
                 }
 
                 "session_children" => {
-                    if let Some(ref ss) = registry.session_store {
+                    if let Some(ref ss) = ipc_ctx.session_store {
                         let session_id = request_field(&request, "session_id").unwrap_or("");
                         match ss.list_children(session_id).await {
                             Ok(children) => serde_json::json!({"ok": true, "sessions": children}),
@@ -3514,7 +3398,7 @@ impl Daemon {
                                 )
                             });
 
-                        let session_store = registry.session_store.clone();
+                        let session_store = ipc_ctx.session_store.clone();
 
                         // Ensure session and record user message.
                         let store_session_id = if let Some(ref cs) = session_store {
@@ -3533,7 +3417,6 @@ impl Daemon {
                                     "web",
                                     &agent_hint,
                                     agent_id_direct.as_deref(),
-                                    None,
                                 )
                                 .await
                                 .ok();
@@ -3560,17 +3443,15 @@ impl Daemon {
                             // If we have a direct agent UUID, skip resolve_by_hint (saves 2 queries).
                             let agent_uuid = if let Some(ref aid) = agent_id_direct {
                                 Some(aid.clone())
-                            } else if let Some(ref ar) = agent_registry {
-                                match ar.resolve_by_hint(&agent_hint).await {
+                            } else {
+                                match agent_registry.resolve_by_hint(&agent_hint).await {
                                     Ok(Some(agent)) => Some(agent.id),
                                     _ => None,
                                 }
-                            } else {
-                                None
                             };
                             if let Some(ref uuid) = agent_uuid {
                                 if let Some(ref ss) = session_store {
-                                    match ss.list_sessions(Some(uuid), None, 1).await {
+                                    match ss.list_sessions(Some(uuid), 1).await {
                                         Ok(sessions) => sessions
                                             .first()
                                             .filter(|s| s.status == "active")
@@ -3752,7 +3633,7 @@ impl Daemon {
                                             resp.prompt_tokens,
                                             resp.completion_tokens,
                                         );
-                                        let _ = registry.cost_ledger.record(
+                                        let _ = ipc_ctx.cost_ledger.record(
                                             crate::cost_ledger::CostEntry {
                                                 project: "session".to_string(),
                                                 task_id: resolved_session_id.clone(),
@@ -3915,8 +3796,8 @@ impl Daemon {
                                         prompt_tokens,
                                         completion_tokens,
                                     );
-                                    let _ = registry.cost_ledger.record(
-                                        crate::cost_ledger::CostEntry {
+                                    let _ =
+                                        ipc_ctx.cost_ledger.record(crate::cost_ledger::CostEntry {
                                             project: "session".to_string(),
                                             task_id: session_id.clone(),
                                             worker: agent_hint.clone(),
@@ -3930,8 +3811,7 @@ impl Daemon {
                                             cached_tokens: 0,
                                             model: default_model.clone(),
                                             provider: String::new(),
-                                        },
-                                    );
+                                        });
 
                                     if stream_mode {
                                         let done = serde_json::json!({
@@ -3970,6 +3850,60 @@ impl Daemon {
                             }
                         } else {
                             serde_json::json!({"ok": false, "error": "no provider available"})
+                        }
+                    }
+                }
+
+                // --- VFS commands ---
+                "vfs_list" => {
+                    let path = request.get("path").and_then(|v| v.as_str()).unwrap_or("/");
+                    let vfs = crate::vfs::VfsTree::with_direct_deps(
+                        agent_registry.clone(),
+                        ipc_ctx.session_store.clone(),
+                        ipc_ctx.notes.clone(),
+                        ipc_ctx.cost_ledger.clone(),
+                    );
+                    match vfs.list(path).await {
+                        Ok(resp) => serde_json::to_value(resp)
+                            .unwrap_or_else(|_| serde_json::json!({"ok": false})),
+                        Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                    }
+                }
+
+                "vfs_read" => {
+                    let path = request.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                    if path.is_empty() {
+                        serde_json::json!({"ok": false, "error": "path required"})
+                    } else {
+                        let vfs = crate::vfs::VfsTree::with_direct_deps(
+                            agent_registry.clone(),
+                            ipc_ctx.session_store.clone(),
+                            ipc_ctx.notes.clone(),
+                            ipc_ctx.cost_ledger.clone(),
+                        );
+                        match vfs.read(path).await {
+                            Ok(resp) => serde_json::to_value(resp)
+                                .unwrap_or_else(|_| serde_json::json!({"ok": false})),
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
+                        }
+                    }
+                }
+
+                "vfs_search" => {
+                    let query = request.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                    if query.is_empty() {
+                        serde_json::json!({"ok": false, "error": "query required"})
+                    } else {
+                        let vfs = crate::vfs::VfsTree::with_direct_deps(
+                            agent_registry.clone(),
+                            ipc_ctx.session_store.clone(),
+                            ipc_ctx.notes.clone(),
+                            ipc_ctx.cost_ledger.clone(),
+                        );
+                        match vfs.search(query).await {
+                            Ok(resp) => serde_json::to_value(resp)
+                                .unwrap_or_else(|_| serde_json::json!({"ok": false})),
+                            Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
                         }
                     }
                 }

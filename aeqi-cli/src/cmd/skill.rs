@@ -138,7 +138,7 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
                 provider,
                 filtered_tools,
                 observer,
-                skill_identity,
+                skill_identity.system_prompt(),
             );
             if let Ok(mem) = open_memory(&config, Some(&company)) {
                 agent = agent.with_memory(Arc::new(mem));

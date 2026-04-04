@@ -101,8 +101,8 @@ pub(crate) async fn cmd_agent(
                 agent.display_name.as_deref().unwrap_or("-")
             );
             println!(
-                "  Project: {}",
-                agent.project.as_deref().unwrap_or("(root)")
+                "  Parent:  {}",
+                agent.parent_id.as_deref().unwrap_or("(root)")
             );
             println!(
                 "  Model:   {}",
@@ -125,7 +125,7 @@ pub(crate) async fn cmd_agent(
                     println!("  Display:  {d}");
                 }
                 println!("  Status:   {}", a.status);
-                println!("  Project:  {}", a.project.as_deref().unwrap_or("(root)"));
+                println!("  Parent:   {}", a.parent_id.as_deref().unwrap_or("(root)"));
                 println!("  Model:    {}", a.model.as_deref().unwrap_or("(default)"));
                 println!("  Caps:     {:?}", a.capabilities);
                 println!("  Sessions: {}", a.session_count);
@@ -169,7 +169,7 @@ pub(crate) async fn cmd_agent(
             let (config, _) = load_config(config_path)?;
             let registry =
                 aeqi_orchestrator::agent_registry::AgentRegistry::open(&config.data_dir())?;
-            let agents = registry.list(company.as_deref(), None).await?;
+            let agents = registry.list(Some(company.as_deref()), None).await?;
             if agents.is_empty() {
                 println!("No persistent agents registered.");
                 println!("Spawn one: aeqi agent spawn <template.md>");
@@ -185,7 +185,7 @@ pub(crate) async fn cmd_agent(
                     "{:<20} {:<10} {:<15} {:<10} {:<8}",
                     a.name,
                     a.status.to_string(),
-                    a.project.as_deref().unwrap_or("(root)"),
+                    a.parent_id.as_deref().unwrap_or("(root)"),
                     a.session_count,
                     a.total_tokens,
                 );

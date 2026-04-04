@@ -16,9 +16,9 @@ use std::sync::Arc;
 use tracing::info;
 
 use crate::SessionStore;
+use crate::agent_registry::AgentRegistry;
 use crate::execution_events::{EventBroadcaster, ExecutionEvent};
 use crate::message::{Dispatch, DispatchBus, DispatchKind};
-use crate::registry::CompanyRegistry;
 use crate::session_manager::SessionManager;
 
 // ---------------------------------------------------------------------------
@@ -35,8 +35,8 @@ pub struct DelegateTool {
     dispatch_bus: Arc<DispatchBus>,
     /// The name of the calling agent (used as the "from" field in dispatches).
     agent_name: String,
-    /// Optional company registry — AgentRegistry is read lazily at call time.
-    registry: Option<Arc<CompanyRegistry>>,
+    /// Optional agent registry for resolving default agents.
+    agent_registry: Option<Arc<AgentRegistry>>,
     /// Project name for scoping default-agent lookups.
     project_name: Option<String>,
     /// Fallback target when no project-default agent is found (system escalation target).
@@ -60,7 +60,7 @@ impl DelegateTool {
         Self {
             dispatch_bus,
             agent_name,
-            registry: None,
+            agent_registry: None,
             project_name: None,
             fallback_target: None,
             event_broadcaster: None,
@@ -78,9 +78,9 @@ impl DelegateTool {
         self
     }
 
-    /// Set the company registry for lazy agent registry lookups.
-    pub fn with_registry(mut self, registry: Arc<CompanyRegistry>) -> Self {
-        self.registry = Some(registry);
+    /// Set the agent registry for resolving default agents.
+    pub fn with_agent_registry(mut self, agent_registry: Arc<AgentRegistry>) -> Self {
+        self.agent_registry = Some(agent_registry);
         self
     }
 
@@ -180,30 +180,26 @@ impl DelegateTool {
     /// Tries the agent registry's project-default first, then falls back
     /// to the configured system escalation target.
     async fn resolve_subagent_target(&self) -> Option<String> {
-        // Read AgentRegistry lazily from CompanyRegistry at call time.
-        if let Some(ref company_reg) = self.registry {
-            let agent_reg = company_reg.agent_registry.read().await;
-            if let Some(ref agent_reg) = *agent_reg {
-                // Try project-default agent.
-                if let Some(ref project) = self.project_name
-                    && let Ok(Some(agent)) = agent_reg.default_for_project(Some(project)).await
-                {
-                    info!(
-                        project = %project,
-                        agent = %agent.name,
-                        "resolved project-default agent for subagent dispatch"
-                    );
-                    return Some(agent.name.clone());
-                }
+        if let Some(ref agent_reg) = self.agent_registry {
+            // Try project-default agent.
+            if let Some(ref project) = self.project_name
+                && let Ok(Some(agent)) = agent_reg.default_agent(Some(project.as_str())).await
+            {
+                info!(
+                    project = %project,
+                    agent = %agent.name,
+                    "resolved project-default agent for subagent dispatch"
+                );
+                return Some(agent.name.clone());
+            }
 
-                // Fallback to any active agent.
-                if let Ok(Some(agent)) = agent_reg.default_for_project(None).await {
-                    info!(
-                        agent = %agent.name,
-                        "resolved fallback active agent for subagent dispatch"
-                    );
-                    return Some(agent.name.clone());
-                }
+            // Fallback to any active agent.
+            if let Ok(Some(agent)) = agent_reg.default_agent(None).await {
+                info!(
+                    agent = %agent.name,
+                    "resolved fallback active agent for subagent dispatch"
+                );
+                return Some(agent.name.clone());
             }
         }
 
