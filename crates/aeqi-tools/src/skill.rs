@@ -52,10 +52,10 @@ impl Skill {
             .with_context(|| format!("failed to read prompt: {}", path.display()))?;
         let mut skill = Self::parse(&content)
             .with_context(|| format!("failed to parse prompt: {}", path.display()))?;
-        if skill.name.is_empty() {
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                skill.name = stem.to_string();
-            }
+        if skill.name.is_empty()
+            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+        {
+            skill.name = stem.to_string();
         }
         skill.source_path = Some(path.to_path_buf());
         Ok(skill)

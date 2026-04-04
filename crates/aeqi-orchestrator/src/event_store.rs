@@ -879,14 +879,14 @@ impl EventStore {
         self.prune_and_limit_dispatches(&dispatch.to).await;
 
         // Emit DispatchReceived event for trigger system.
-        if let Ok(guard) = self.event_broadcaster.read() {
-            if let Some(ref broadcaster) = *guard {
-                broadcaster.publish(crate::execution_events::ExecutionEvent::DispatchReceived {
-                    from_agent: dispatch.from.clone(),
-                    to_agent: dispatch.to.clone(),
-                    kind: dispatch.kind.subject_tag().to_string(),
-                });
-            }
+        if let Ok(guard) = self.event_broadcaster.read()
+            && let Some(ref broadcaster) = *guard
+        {
+            broadcaster.publish(crate::execution_events::ExecutionEvent::DispatchReceived {
+                from_agent: dispatch.from.clone(),
+                to_agent: dispatch.to.clone(),
+                kind: dispatch.kind.subject_tag().to_string(),
+            });
         }
     }
 

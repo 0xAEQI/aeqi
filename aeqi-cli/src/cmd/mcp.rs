@@ -158,28 +158,14 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
             }),
         },
         ToolDef {
-            name: "aeqi_skills".to_string(),
-            description: "List or retrieve skills — domain knowledge, procedures, and checklists. Filter by phase to get phase-relevant knowledge.".to_string(),
+            name: "aeqi_prompts".to_string(),
+            description: "List or retrieve prompts — unified format for identities, skills, workflows, and knowledge. Filter by tags (e.g. 'workflow', 'identity', 'discover', 'autonomous').".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["list", "get"], "default": "list"},
-                    "project": {"type": "string", "description": "Filter by project (optional)"},
-                    "phase": {"type": "string", "enum": ["discover", "plan", "implement", "verify", "finalize", "workflow"], "description": "Filter by pipeline phase (optional)"},
-                    "name": {"type": "string", "description": "Skill name (required for get)"}
-                }
-            }),
-        },
-        ToolDef {
-            name: "aeqi_agents".to_string(),
-            description: "List or retrieve agent definitions — autonomous actor templates with specialized prompts. Filter by pipeline phase (discover/plan/implement/verify/finalize) to get only relevant agents.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["list", "get"], "default": "list"},
-                    "project": {"type": "string", "description": "Filter by project (optional)"},
-                    "phase": {"type": "string", "enum": ["discover", "plan", "implement", "verify", "finalize", "workflow"], "description": "Filter by pipeline phase (optional)"},
-                    "name": {"type": "string", "description": "Agent name (required for get)"}
+                    "tags": {"type": "string", "description": "Filter by tag (optional). Returns prompts that have this tag."},
+                    "name": {"type": "string", "description": "Prompt name (required for get)"}
                 }
             }),
         },
@@ -463,9 +449,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                             let filtered: Vec<serde_json::Value> = all_skills
                                 .into_iter()
                                 .filter(|(s, _source)| {
-                                    let tag_ok =
-                                        tag_filter.is_none_or(|tf| s.tags.iter().any(|t| t == tf));
-                                    tag_ok
+                                    tag_filter.is_none_or(|tf| s.tags.iter().any(|t| t == tf))
                                 })
                                 .map(|(s, source)| {
                                     serde_json::json!({

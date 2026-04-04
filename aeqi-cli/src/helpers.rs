@@ -393,10 +393,10 @@ pub(crate) fn load_system_prompt(
     let mut parts = Vec::new();
 
     // Shared workflow.
-    if let Some(ref sd) = shared_dir {
-        if let Ok(Some(v)) = load_optional_file(sd, "WORKFLOW.md") {
-            parts.push(format!("# Shared Workflow\n\n{v}"));
-        }
+    if let Some(ref sd) = shared_dir
+        && let Ok(Some(v)) = load_optional_file(sd, "WORKFLOW.md")
+    {
+        parts.push(format!("# Shared Workflow\n\n{v}"));
     }
 
     // Agent-level files.
@@ -442,10 +442,10 @@ pub(crate) fn load_system_prompt_from_dir(dir: &std::path::Path) -> String {
 
     let mut parts = Vec::new();
 
-    if let Some(ref sd) = shared_dir {
-        if let Ok(Some(v)) = load_optional_file(sd, "WORKFLOW.md") {
-            parts.push(format!("# Shared Workflow\n\n{v}"));
-        }
+    if let Some(ref sd) = shared_dir
+        && let Ok(Some(v)) = load_optional_file(sd, "WORKFLOW.md")
+    {
+        parts.push(format!("# Shared Workflow\n\n{v}"));
     }
 
     for (heading, file) in [
