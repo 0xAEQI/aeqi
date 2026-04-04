@@ -488,7 +488,7 @@ pub async fn run(
     let (event_tx, event_rx) = mpsc::channel::<ChatStreamEvent>();
     let (cmd_tx, cmd_rx) = mpsc::channel::<WsCommand>();
     let mut ws_handle: Option<std::thread::JoinHandle<()>> = None;
-    let mut _direct_input_tx: Option<tokio::sync::mpsc::UnboundedSender<aeqi_core::UserInput>> =
+    let mut _direct_input_tx: Option<tokio::sync::mpsc::UnboundedSender<aeqi_core::SessionInput>> =
         None;
 
     if daemon_running {
@@ -521,7 +521,7 @@ pub async fn run(
                                         parsed.get("message").and_then(|v| v.as_str())
                                     {
                                         let _ = input_tx_for_bridge
-                                            .send(aeqi_core::UserInput::text(msg));
+                                            .send(aeqi_core::SessionInput::text(msg));
                                     }
                                 }
                             }
@@ -705,7 +705,7 @@ fn spawn_direct_agent(
     agent_record: Option<&aeqi_orchestrator::agent_registry::Agent>,
     event_tx: mpsc::Sender<ChatStreamEvent>,
 ) -> Result<(
-    tokio::sync::mpsc::UnboundedSender<aeqi_core::UserInput>,
+    tokio::sync::mpsc::UnboundedSender<aeqi_core::SessionInput>,
     tokio::task::JoinHandle<()>,
 )> {
     use crate::helpers::{build_provider_for_runtime, build_tools};

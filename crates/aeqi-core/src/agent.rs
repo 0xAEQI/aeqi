@@ -569,16 +569,18 @@ const SYNTHETIC_TOOL_RESULT: &str = "[Tool result unavailable — context was co
 /// The same struct handles the first message (which can bootstrap the session with
 /// prompts and tasks) and subsequent messages (which can amend them). One codepath.
 #[derive(Debug, Clone, Default)]
-pub struct UserInput {
+pub struct SessionInput {
     /// The user's message text.
     pub content: String,
     /// Session prompts to add (loaded once from files, appended to system prompt).
     pub session_prompts: Vec<String>,
     /// Turn prompts to add (re-read from disk each turn).
     pub turn_prompts: Vec<TurnPromptSpec>,
+    /// Task/quest ID to attach to this session.
+    pub task_id: Option<String>,
 }
 
-impl UserInput {
+impl SessionInput {
     pub fn text(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
@@ -613,7 +615,7 @@ pub struct Agent {
     notification_rx: Option<Arc<Mutex<NotificationReceiver>>>,
     /// Receiver for user input in perpetual session mode. The agent loop waits
     /// on this channel after each EndTurn instead of exiting.
-    input_rx: Option<Arc<Mutex<mpsc::UnboundedReceiver<UserInput>>>>,
+    input_rx: Option<Arc<Mutex<mpsc::UnboundedReceiver<SessionInput>>>>,
     /// Cancellation signal. When set to true, the agent loop exits at the next
     /// iteration boundary. Used for interrupt propagation from parent agents.
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
@@ -676,7 +678,7 @@ impl Agent {
     /// Attach an input receiver for perpetual session mode.
     /// The agent loop waits on this channel after each EndTurn instead of exiting.
     /// Returns the sender half for the caller to push messages into.
-    pub fn with_perpetual_input(mut self) -> (Self, mpsc::UnboundedSender<UserInput>) {
+    pub fn with_perpetual_input(mut self) -> (Self, mpsc::UnboundedSender<SessionInput>) {
         let (tx, rx) = mpsc::unbounded_channel();
         self.input_rx = Some(Arc::new(Mutex::new(rx)));
         (self, tx)
