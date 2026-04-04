@@ -403,8 +403,8 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                         }
                     }
 
-                    // ── Skills (prompts — knowledge, procedures, checklists) ──
-                    "aeqi_skills" => {
+                    // ── Prompts (unified: identities, skills, workflows, knowledge) ──
+                    "aeqi_prompts" => {
                         let action = args
                             .get("action")
                             .and_then(|v| v.as_str())
@@ -412,27 +412,37 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                         let tag_filter = args.get("tags").and_then(|v| v.as_str());
                         let name_filter = args.get("name").and_then(|v| v.as_str());
 
-                        // Discover all .md prompts.
-                        let mut all_skills: Vec<(Skill, String)> = Vec::new();
-                        all_skills.extend(discover_skills(
-                            &base_dir.join("projects/shared/skills"),
-                            "shared",
-                        ));
-                        for entry in std::fs::read_dir(base_dir.join("projects"))
-                            .into_iter()
-                            .flatten()
-                            .flatten()
-                        {
-                            let p = entry.file_name().to_string_lossy().to_string();
-                            if p == "shared" {
-                                continue;
+                        // Discover from both skills/ and agents/ directories.
+                        let mut all_prompts: Vec<(Skill, String)> = Vec::new();
+                        let project_dirs: Vec<(String, std::path::PathBuf)> =
+                            std::fs::read_dir(base_dir.join("projects"))
+                                .into_iter()
+                                .flatten()
+                                .flatten()
+                                .filter_map(|e| {
+                                    let name = e.file_name().to_string_lossy().to_string();
+                                    if name == "shared" {
+                                        None
+                                    } else {
+                                        Some((name, e.path()))
+                                    }
+                                })
+                                .collect();
+
+                        // Shared + per-project skills and agents.
+                        for subdir in &["skills", "agents"] {
+                            all_prompts.extend(discover_skills(
+                                &base_dir.join("projects/shared").join(subdir),
+                                "shared",
+                            ));
+                            for (name, path) in &project_dirs {
+                                all_prompts.extend(discover_skills(&path.join(subdir), name));
                             }
-                            all_skills.extend(discover_skills(&entry.path().join("skills"), &p));
                         }
 
                         if action == "get" {
                             let name = name_filter.unwrap_or("");
-                            match all_skills.into_iter().find(|(s, _)| s.name == name) {
+                            match all_prompts.into_iter().find(|(s, _)| s.name == name) {
                                 Some((s, source)) => Ok(serde_json::json!({
                                     "name": s.name,
                                     "source": source,
@@ -442,13 +452,13 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                                     "tools": { "allow": s.tools, "deny": s.deny },
                                 })),
                                 None => Ok(
-                                    serde_json::json!({"ok": false, "error": format!("skill '{name}' not found")}),
+                                    serde_json::json!({"ok": false, "error": format!("prompt '{name}' not found")}),
                                 ),
                             }
                         } else {
-                            let filtered: Vec<serde_json::Value> = all_skills
+                            let filtered: Vec<serde_json::Value> = all_prompts
                                 .into_iter()
-                                .filter(|(s, _source)| {
+                                .filter(|(s, _)| {
                                     tag_filter.is_none_or(|tf| s.tags.iter().any(|t| t == tf))
                                 })
                                 .map(|(s, source)| {
@@ -461,76 +471,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                                 })
                                 .collect();
                             Ok(
-                                serde_json::json!({"ok": true, "count": filtered.len(), "skills": filtered}),
-                            )
-                        }
-                    }
-
-                    // ── Agents (autonomous actor templates) ──
-                    "aeqi_agents" => {
-                        let action = args
-                            .get("action")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("list");
-                        let project_filter = args.get("project").and_then(|v| v.as_str());
-                        let phase_filter = args.get("phase").and_then(|v| v.as_str());
-                        let name_filter = args.get("name").and_then(|v| v.as_str());
-
-                        let mut all_agents = Vec::new();
-                        all_agents.extend(scan_agent_dir(
-                            &base_dir.join("projects/shared/agents"),
-                            "shared",
-                        ));
-                        for entry in std::fs::read_dir(base_dir.join("projects"))
-                            .into_iter()
-                            .flatten()
-                            .flatten()
-                        {
-                            let p = entry.file_name().to_string_lossy().to_string();
-                            if p == "shared" {
-                                continue;
-                            }
-                            all_agents.extend(scan_agent_dir(&entry.path().join("agents"), &p));
-                        }
-
-                        if action == "get" {
-                            let name = name_filter.unwrap_or("");
-                            match all_agents.into_iter().find(|a| {
-                                a.get("name")
-                                    .and_then(|n| n.as_str())
-                                    .is_some_and(|n| n == name)
-                            }) {
-                                Some(a) => Ok(a),
-                                None => Ok(
-                                    serde_json::json!({"ok": false, "error": format!("agent '{name}' not found")}),
-                                ),
-                            }
-                        } else {
-                            let filtered: Vec<serde_json::Value> = all_agents
-                                .into_iter()
-                                .filter(|a| {
-                                    let project_ok = project_filter.is_none_or(|pf| {
-                                        let src =
-                                            a.get("source").and_then(|v| v.as_str()).unwrap_or("");
-                                        src == pf || src == "shared"
-                                    });
-                                    let phase_ok = phase_filter.is_none_or(|pf| {
-                                        a.get("phase")
-                                            .and_then(|v| v.as_str())
-                                            .is_some_and(|p| p == pf)
-                                    });
-                                    project_ok && phase_ok
-                                })
-                                .map(|a| {
-                                    serde_json::json!({
-                                        "name": a["name"], "source": a["source"],
-                                        "phase": a["phase"], "model": a["model"],
-                                        "preview": a["preview"],
-                                    })
-                                })
-                                .collect();
-                            Ok(
-                                serde_json::json!({"ok": true, "count": filtered.len(), "agents": filtered}),
+                                serde_json::json!({"ok": true, "count": filtered.len(), "prompts": filtered}),
                             )
                         }
                     }

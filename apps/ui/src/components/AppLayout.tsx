@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import AgentTree from "./Sidebar";
 import ContextPanel from "./ContextPanel";
-import UserAvatar from "./UserAvatar";
+import BlockAvatar from "./BlockAvatar";
 import CommandPalette from "./CommandPalette";
 import AgentSessionView from "./AgentSessionView";
 import DashboardHome from "./DashboardHome";

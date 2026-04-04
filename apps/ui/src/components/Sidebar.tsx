@@ -2,46 +2,8 @@ import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useChatStore } from "@/store/chat";
 import { useDaemonStore } from "@/store/daemon";
+import BlockAvatar from "./BlockAvatar";
 import type { Agent, AgentRef } from "@/lib/types";
-
-// Deterministic blocky avatar — 5x5 grid mirrored, greytones
-function AgentBlockAvatar({ name, size = 22 }: { name: string; size?: number }) {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
-
-  // Generate a 3x5 grid (mirrored to 5x5)
-  const cells: boolean[] = [];
-  let h = Math.abs(hash);
-  for (let i = 0; i < 15; i++) {
-    cells.push((h >> i) & 1 ? true : false);
-  }
-
-  // Grey tone from hash
-  const grey = 160 + (Math.abs(hash >> 8) % 60); // 160-220
-  const bg = `rgb(${grey},${grey},${grey})`;
-  const fg = `rgb(${grey - 90},${grey - 90},${grey - 90})`;
-
-  const cellSize = size / 5;
-  const rects: React.ReactNode[] = [];
-  for (let row = 0; row < 5; row++) {
-    for (let col = 0; col < 3; col++) {
-      if (cells[row * 3 + col]) {
-        // Left side
-        rects.push(<rect key={`${row}-${col}`} x={col * cellSize} y={row * cellSize} width={cellSize} height={cellSize} fill={fg} />);
-        // Mirror right side (col 0→4, col 1→3, col 2 is center)
-        if (col < 2) {
-          rects.push(<rect key={`${row}-${4 - col}`} x={(4 - col) * cellSize} y={row * cellSize} width={cellSize} height={cellSize} fill={fg} />);
-        }
-      }
-    }
-  }
-
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ borderRadius: 4, flexShrink: 0, background: bg, display: "block" }}>
-      {rects}
-    </svg>
-  );
-}
 
 function Chevron({ expanded }: { expanded: boolean }) {
   return (
@@ -150,7 +112,7 @@ function AgentNodeView({
           })
         }
       >
-        <AgentBlockAvatar name={node.name} size={22} />
+        <BlockAvatar name={node.name} size={22} />
         <span className="agent-row-label">{label}</span>
         {hasChildren && (
           <span

@@ -4,6 +4,7 @@ import Markdown from "react-markdown";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 import { useDaemonStore } from "@/store/daemon";
+import BlockAvatar from "./BlockAvatar";
 
 // ── Types ──
 
@@ -579,12 +580,7 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
         {messages.length === 0 && !streaming && (
           <div className="asv-empty">
             <div className="asv-empty-icon">
-              <svg width="24" height="24" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 5l5-3 5 3" />
-                <path d="M3 5v6l5 3 5-3V5" />
-                <path d="M8 8v6" />
-                <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none" />
-              </svg>
+              <BlockAvatar name={agentName} size={48} />
             </div>
             <div className="asv-empty-title">Message {displayName}</div>
             <div className="asv-empty-hint">{activeSessionId ? "Continue this conversation." : "Your message starts a new session."}</div>
@@ -614,10 +610,15 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
               </div>
             );
           }
+          const userName = localStorage.getItem("aeqi_user_name") || "operator";
           return (
             <div key={i} className={`asv-msg asv-msg-${msg.role}`}>
+              <div className="asv-msg-avatar">
+                <BlockAvatar name={msg.role === "assistant" ? agentName : userName} size={24} />
+              </div>
+              <div className="asv-msg-body">
               <div className="asv-msg-header">
-                <span className="asv-msg-role">{msg.role}</span>
+                <span className="asv-msg-role">{msg.role === "assistant" ? displayName : "you"}</span>
                 {msg.timestamp && <span className="asv-msg-time">{formatTime(msg.timestamp)}</span>}
                 {msg.duration && <span className="asv-msg-duration">{msg.duration}</span>}
                 {msg.costUsd != null && msg.costUsd > 0 && (
@@ -659,6 +660,7 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
                   {msg.role === "assistant" && <CopyButton text={msg.content} />}
                 </>
               )}
+              </div>
             </div>
           );
         })}
