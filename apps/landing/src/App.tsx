@@ -16,8 +16,8 @@ function Nav() {
       {...fade(0.1)}
     >
       <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-        <a href="/" className="text-[18px] font-semibold tracking-tight text-black">
-          aeqi
+        <a href="/" className="text-[22px] font-bold tracking-tighter text-black">
+          æ
         </a>
         <div className="flex items-center gap-5">
           <a
@@ -57,8 +57,14 @@ function Hero() {
   return (
     <section className="pt-36 pb-24 px-6">
       <div className="max-w-3xl mx-auto text-center">
+        <motion.div {...fade(0.1)} className="mb-8">
+          <span className="text-[120px] md:text-[180px] font-bold tracking-tighter leading-none text-black select-none">
+            æ
+          </span>
+        </motion.div>
+
         <motion.h1
-          className="text-5xl md:text-7xl font-bold tracking-tight text-black leading-[1.08]"
+          className="text-3xl md:text-5xl font-bold tracking-tight text-black leading-[1.08]"
           {...fade(0.2)}
         >
           aeqi
