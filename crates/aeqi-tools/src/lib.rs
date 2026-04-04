@@ -8,7 +8,7 @@ pub mod html_utils;
 pub mod porkbun;
 pub mod secrets;
 pub mod shell;
-pub mod skill;
+pub mod prompt;
 pub mod tasks;
 pub mod web_fetch;
 pub mod web_search;
@@ -22,7 +22,7 @@ pub use grep::GrepTool;
 pub use porkbun::PorkbunTool;
 pub use secrets::SecretsTool;
 pub use shell::ShellTool;
-pub use skill::Skill;
+pub use prompt::Prompt;
 pub use tasks::{
     QuestCloseTool, QuestCreateTool, QuestDepTool, QuestReadyTool, QuestShowTool, QuestUpdateTool,
 };

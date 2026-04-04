@@ -1,6 +1,6 @@
 use aeqi_core::traits::{LogObserver, Observer, Tool};
 use aeqi_core::{Agent, AgentConfig};
-use aeqi_tools::Skill;
+use aeqi_tools::Prompt;
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -13,7 +13,7 @@ use crate::helpers::{
     one_shot_agent_name, open_insights,
 };
 
-fn discover_project_skills(project_dir: &Path) -> Result<Vec<Skill>> {
+fn discover_project_prompts(project_dir: &Path) -> Result<Vec<Prompt>> {
     let mut merged = BTreeMap::new();
     let mut dirs = Vec::new();
     if let Some(parent) = project_dir.parent() {
@@ -22,7 +22,7 @@ fn discover_project_skills(project_dir: &Path) -> Result<Vec<Skill>> {
     dirs.push(project_dir.join("skills"));
 
     for dir in dirs {
-        for skill in Skill::discover(&dir)? {
+        for skill in Prompt::discover(&dir)? {
             merged.insert(skill.name.clone(), skill);
         }
     }
@@ -47,7 +47,7 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
 
             for name in projects {
                 if let Ok(project_dir) = find_project_dir(name) {
-                    let skills = discover_project_skills(&project_dir)?;
+                    let skills = discover_project_prompts(&project_dir)?;
                     if !skills.is_empty() {
                         println!("=== {} ===", name);
                         for skill in &skills {
@@ -80,7 +80,7 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
                 .company(&company)
                 .context(format!("company not found: {company}"))?;
             let project_dir = find_project_dir(&company)?;
-            let skills = discover_project_skills(&project_dir)?;
+            let skills = discover_project_prompts(&project_dir)?;
 
             let skill = skills
                 .iter()

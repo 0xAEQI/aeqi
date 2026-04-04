@@ -5,7 +5,7 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use aeqi_tools::skill::Skill;
+use aeqi_tools::prompt::Prompt;
 
 use crate::helpers::load_config;
 
@@ -57,78 +57,13 @@ fn ipc_request_sync(
     Ok(response)
 }
 
-fn extract_frontmatter_field(content: &str, field: &str) -> Option<String> {
-    let mut in_frontmatter = false;
-    for line in content.lines() {
-        if line.trim() == "---" {
-            if in_frontmatter {
-                return None;
-            }
-            in_frontmatter = true;
-            continue;
-        }
-        if in_frontmatter {
-            let prefix = format!("{field}: ");
-            if let Some(val) = line.strip_prefix(&prefix) {
-                return Some(val.trim().to_string());
-            }
-        }
-    }
-    None
-}
-
-/// Discover skills in a directory using the canonical Skill parser, tagged with source.
-fn discover_skills(dir: &std::path::Path, source: &str) -> Vec<(Skill, String)> {
-    Skill::discover(dir)
+/// Discover prompts in a directory, tagged with source.
+fn discover_prompts(dir: &std::path::Path, source: &str) -> Vec<(Prompt, String)> {
+    Prompt::discover(dir)
         .unwrap_or_default()
         .into_iter()
         .map(|s| (s, source.to_string()))
         .collect()
-}
-
-/// Scan a directory for agent template .md files (YAML frontmatter).
-fn scan_agent_dir(dir: &std::path::Path, source: &str) -> Vec<serde_json::Value> {
-    let mut items = Vec::new();
-    if !dir.exists() {
-        return items;
-    }
-    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        let path = entry.path();
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if ext != "md" {
-            continue;
-        }
-        let name = path
-            .file_stem()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
-        let content = std::fs::read_to_string(&path).unwrap_or_default();
-        let description = extract_frontmatter_field(&content, "description").unwrap_or_default();
-        let phase = extract_frontmatter_field(&content, "phase").unwrap_or_default();
-        let model = extract_frontmatter_field(&content, "model").unwrap_or_default();
-        let preview: String = if description.is_empty() {
-            content
-                .lines()
-                .take(3)
-                .collect::<Vec<_>>()
-                .join(" ")
-                .chars()
-                .take(120)
-                .collect()
-        } else {
-            description.chars().take(120).collect()
-        };
-        items.push(serde_json::json!({
-            "name": name,
-            "source": source,
-            "preview": preview,
-            "phase": phase,
-            "model": model,
-            "content": content,
-        }));
-    }
-    items
 }
 
 pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
@@ -413,7 +348,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                         let name_filter = args.get("name").and_then(|v| v.as_str());
 
                         // Discover from both skills/ and agents/ directories.
-                        let mut all_prompts: Vec<(Skill, String)> = Vec::new();
+                        let mut all_prompts: Vec<(Prompt, String)> = Vec::new();
                         let project_dirs: Vec<(String, std::path::PathBuf)> =
                             std::fs::read_dir(base_dir.join("projects"))
                                 .into_iter()
@@ -431,12 +366,12 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
 
                         // Shared + per-project skills and agents.
                         for subdir in &["skills", "agents"] {
-                            all_prompts.extend(discover_skills(
+                            all_prompts.extend(discover_prompts(
                                 &base_dir.join("projects/shared").join(subdir),
                                 "shared",
                             ));
                             for (name, path) in &project_dirs {
-                                all_prompts.extend(discover_skills(&path.join(subdir), name));
+                                all_prompts.extend(discover_prompts(&path.join(subdir), name));
                             }
                         }
 

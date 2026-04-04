@@ -1,5 +1,5 @@
 use aeqi_core::SecretStore;
-use aeqi_tools::Skill;
+use aeqi_tools::Prompt;
 use anyhow::{Result, bail};
 use std::path::PathBuf;
 
@@ -162,7 +162,7 @@ pub(crate) async fn cmd_doctor(
                         // Check skills directory
                         let skills_dir = d.join("skills");
                         let skill_count = if skills_dir.exists() {
-                            Skill::discover(&skills_dir).map(|s| s.len()).unwrap_or(0)
+                            Prompt::discover(&skills_dir).map(|s| s.len()).unwrap_or(0)
                         } else {
                             0
                         };

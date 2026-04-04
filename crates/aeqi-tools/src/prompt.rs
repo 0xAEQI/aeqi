@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 /// Frontmatter holds content metadata only. Runtime concerns (model, budget,
 /// parallelism) belong on the consumer, not the file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Skill {
+pub struct Prompt {
     pub name: String,
     pub description: String,
     /// Tags for categorization and filtering (replaces `phase` / `group`).
@@ -45,7 +45,7 @@ pub struct Skill {
     pub source_path: Option<PathBuf>,
 }
 
-impl Skill {
+impl Prompt {
     /// Load a prompt from an MD file with YAML frontmatter.
     pub fn load(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
@@ -102,7 +102,7 @@ impl Skill {
             prompt
         } else {
             format!(
-                "{}\n\n---\n\n# Skill: {}\n\n{}",
+                "{}\n\n---\n\n# Prompt: {}\n\n{}",
                 base_identity, self.name, prompt
             )
         }
@@ -152,7 +152,7 @@ tools: [shell, read_file]
 
 Deploy $service to $env"#;
 
-        let skill = Skill::parse(md).unwrap();
+        let skill = Prompt::parse(md).unwrap();
         assert_eq!(skill.name, "deploy");
         assert_eq!(skill.tags, vec!["workflow", "implement"]);
         assert_eq!(
@@ -175,7 +175,7 @@ tools: [shell]
 
 Check health"#;
 
-        let skill = Skill::parse(md).unwrap();
+        let skill = Prompt::parse(md).unwrap();
         assert_eq!(skill.name, "health-check");
         assert_eq!(skill.tags, vec!["autonomous"]);
         assert!(!skill.has_auto_trigger());
@@ -192,7 +192,7 @@ arguments: [name, target]
 
 Deploy $name to $target environment"#;
 
-        let skill = Skill::parse(md).unwrap();
+        let skill = Prompt::parse(md).unwrap();
         let mut args = std::collections::HashMap::new();
         args.insert("name".to_string(), "myapp".to_string());
         args.insert("target".to_string(), "production".to_string());
@@ -211,7 +211,7 @@ allow_shell: true
 
 Date: !`echo 2026-04-01` and host: !`echo testhost`"#;
 
-        let skill = Skill::parse(md).unwrap();
+        let skill = Prompt::parse(md).unwrap();
         let prompt = skill.system_prompt("");
         assert!(prompt.contains("2026-04-01"), "got: {prompt}");
         assert!(prompt.contains("testhost"), "got: {prompt}");
@@ -227,7 +227,7 @@ description: test
 
 Should not expand: !`echo danger`"#;
 
-        let skill = Skill::parse(md).unwrap();
+        let skill = Prompt::parse(md).unwrap();
         let prompt = skill.system_prompt("");
         assert!(prompt.contains("!`echo danger`"));
     }
@@ -243,7 +243,7 @@ deny: [write_file]
 
 test"#;
 
-        let skill = Skill::parse(md).unwrap();
+        let skill = Prompt::parse(md).unwrap();
         assert!(skill.is_tool_allowed("shell"));
         assert!(skill.is_tool_allowed("read_file"));
         assert!(!skill.is_tool_allowed("write_file"));
@@ -260,7 +260,7 @@ tags: [workflow, implement, rust]
 
 body"#;
 
-        let skill = Skill::parse(md).unwrap();
+        let skill = Prompt::parse(md).unwrap();
         assert!(skill.tags.contains(&"workflow".to_string()));
         assert!(skill.tags.contains(&"implement".to_string()));
         assert!(skill.tags.contains(&"rust".to_string()));

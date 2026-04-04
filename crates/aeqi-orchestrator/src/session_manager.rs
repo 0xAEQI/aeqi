@@ -427,12 +427,12 @@ impl SessionManager {
             .and_then(|p| p.parent())
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
-        let mut all_skills: Vec<aeqi_tools::Skill> = Vec::new();
-        if let Ok(shared) = aeqi_tools::Skill::discover(&base_dir.join("projects/shared/skills")) {
+        let mut all_skills: Vec<aeqi_tools::Prompt> = Vec::new();
+        if let Ok(shared) = aeqi_tools::Prompt::discover(&base_dir.join("projects/shared/skills")) {
             all_skills.extend(shared);
         }
         if !self.default_project.is_empty()
-            && let Ok(proj_skills) = aeqi_tools::Skill::discover(
+            && let Ok(proj_skills) = aeqi_tools::Prompt::discover(
                 &base_dir
                     .join("projects")
                     .join(&self.default_project)
