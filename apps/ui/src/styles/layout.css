@@ -118,22 +118,26 @@
   gap: 1px;
 }
 
-/* Chevron toggle — pushed to the right */
+/* Chevron toggle + count — pushed to the right */
 .agent-tree-toggle {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
+  gap: 2px;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   flex-shrink: 0;
   margin-left: auto;
+  padding: 2px 4px;
   transition: all 0.1s ease;
 }
 .agent-tree-toggle:hover {
   background: var(--bg-overlay);
   color: var(--text-secondary);
+}
+.agent-tree-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .agent-tree-empty {

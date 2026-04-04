@@ -4,12 +4,43 @@ import { useChatStore } from "@/store/chat";
 import { useDaemonStore } from "@/store/daemon";
 import type { Agent, AgentRef } from "@/lib/types";
 
-// Deterministic avatar from agent name — picks an emoji
-const AVATARS = ["🤖","🧠","⚡","🔮","🎯","🛡️","📊","🔬","🏗️","🎨","📡","🧬","💎","🌐","🔥","🦾","👁️","🗂️","🧭","⚙️"];
-function agentAvatar(name: string): string {
+// Deterministic blocky avatar — 5x5 grid mirrored, greytones
+function AgentBlockAvatar({ name, size = 22 }: { name: string; size?: number }) {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
-  return AVATARS[Math.abs(hash) % AVATARS.length];
+
+  // Generate a 3x5 grid (mirrored to 5x5)
+  const cells: boolean[] = [];
+  let h = Math.abs(hash);
+  for (let i = 0; i < 15; i++) {
+    cells.push((h >> i) & 1 ? true : false);
+  }
+
+  // Grey tone from hash
+  const grey = 160 + (Math.abs(hash >> 8) % 60); // 160-220
+  const bg = `rgb(${grey},${grey},${grey})`;
+  const fg = `rgb(${grey - 90},${grey - 90},${grey - 90})`;
+
+  const cellSize = size / 5;
+  const rects: React.ReactNode[] = [];
+  for (let row = 0; row < 5; row++) {
+    for (let col = 0; col < 3; col++) {
+      if (cells[row * 3 + col]) {
+        // Left side
+        rects.push(<rect key={`${row}-${col}`} x={col * cellSize} y={row * cellSize} width={cellSize} height={cellSize} fill={fg} />);
+        // Mirror right side (col 0→4, col 1→3, col 2 is center)
+        if (col < 2) {
+          rects.push(<rect key={`${row}-${4 - col}`} x={(4 - col) * cellSize} y={row * cellSize} width={cellSize} height={cellSize} fill={fg} />);
+        }
+      }
+    }
+  }
+
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ borderRadius: 4, flexShrink: 0, background: bg, display: "block" }}>
+      {rects}
+    </svg>
+  );
 }
 
 function Chevron({ expanded }: { expanded: boolean }) {
@@ -78,6 +109,12 @@ function buildAgentTree(agents: Agent[]): AgentNode[] {
   return roots.map(toNode);
 }
 
+function countDescendants(node: AgentNode): number {
+  let count = node.children.length;
+  for (const child of node.children) count += countDescendants(child);
+  return count;
+}
+
 function AgentNodeView({
   node,
   depth,
@@ -97,6 +134,7 @@ function AgentNodeView({
   const hasChildren = node.children.length > 0;
   const isCollapsed = collapsed[node.id] ?? false;
   const label = node.display_name || node.name;
+  const descendantCount = countDescendants(node);
 
   return (
     <div className="agent-tree-node">
@@ -112,13 +150,14 @@ function AgentNodeView({
           })
         }
       >
-        <span className="agent-avatar">{agentAvatar(node.name)}</span>
+        <AgentBlockAvatar name={node.name} size={22} />
         <span className="agent-row-label">{label}</span>
         {hasChildren && (
           <span
             className="agent-tree-toggle"
             onClick={(e) => onToggle(node.id, e)}
           >
+            {isCollapsed && <span className="agent-tree-count">{descendantCount}</span>}
             <Chevron expanded={!isCollapsed} />
           </span>
         )}
