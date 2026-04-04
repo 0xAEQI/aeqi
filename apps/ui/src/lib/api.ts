@@ -177,6 +177,7 @@ export const api = {
 
   // Agent Identity
   getAgentIdentity: (name: string) => request<any>(`/agents/${name}/identity`),
+  getAgentPrompts: (name: string) => request<any>(`/agents/${name}/prompts`),
   saveAgentFile: (name: string, filename: string, content: string) =>
     request<any>(`/agents/${name}/files`, {
       method: "POST",

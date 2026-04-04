@@ -358,6 +358,51 @@
   line-height: 1.5;
 }
 
+/* Prompt entries */
+.ctx-prompt-agent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.ctx-prompt-agent-name {
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.ctx-prompt-self {
+  color: var(--text-primary);
+}
+.ctx-prompt-you {
+  font-size: 9px;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  padding: 1px 5px;
+  border-radius: var(--radius-full);
+}
+.ctx-prompt-entry {
+  margin-bottom: 8px;
+}
+.ctx-prompt-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.ctx-prompt-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+.ctx-prompt-empty {
+  font-size: var(--font-size-2xs);
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 4px 0;
+}
+
 /* Quest rows */
 .ctx-quest-row {
   display: flex;

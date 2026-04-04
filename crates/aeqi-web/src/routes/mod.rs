@@ -51,6 +51,7 @@ pub fn api_routes() -> Router<AppState> {
         .route("/knowledge/delete", post(knowledge_delete))
         .route("/rate-limit", get(rate_limit))
         .route("/agents/{name}/identity", get(agent_identity))
+        .route("/agents/{name}/prompts", get(agent_prompts))
         .route("/agents/{name}/files", post(save_agent_file))
         .route("/departments", get(departments))
         .route("/approvals", get(approvals))
@@ -432,6 +433,13 @@ async fn agent_identity(
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> Response {
     ipc_proxy(state, "agent_identity", serde_json::json!({"name": name})).await
+}
+
+async fn agent_prompts(
+    State(state): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Response {
+    ipc_proxy(state, "agent_info", serde_json::json!({"name": name})).await
 }
 
 async fn save_agent_file(

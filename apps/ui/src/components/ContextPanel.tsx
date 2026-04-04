@@ -19,67 +19,110 @@ function timeAgo(ts: string | undefined | null): string {
 
 type Tab = "prompts" | "quests" | "insights" | "events";
 
-function PromptsSection({ agentName, allAgents }: { agentName: string; allAgents: Agent[] }) {
-  const [identityFiles, setIdentityFiles] = useState<Record<string, string>>({});
-  const [ancestorChain, setAncestorChain] = useState<string[]>([]);
+interface PromptEntry {
+  content: string;
+  position: "system" | "prepend" | "append";
+  scope: "self" | "descendants";
+  tools?: { allow?: string[]; deny?: string[] };
+}
 
-  useEffect(() => {
-    // Build ancestor chain
-    const chain: string[] = [];
+interface PromptChainNode {
+  agent_name: string;
+  agent_id: string;
+  prompts: PromptEntry[];
+}
+
+function positionBadge(pos: string) {
+  const colors: Record<string, string> = {
+    system: "var(--text-primary)",
+    prepend: "var(--info)",
+    append: "var(--text-muted)",
+  };
+  return (
+    <span className="ctx-prompt-badge" style={{ color: colors[pos] || "var(--text-muted)" }}>
+      {pos}
+    </span>
+  );
+}
+
+function scopeBadge(scope: string) {
+  return (
+    <span className="ctx-prompt-badge ctx-prompt-scope">
+      {scope === "descendants" ? "↓ inherited" : "● self"}
+    </span>
+  );
+}
+
+function PromptsSection({ agentName }: { agentName: string }) {
+  const allAgents = useDaemonStore((s) => s.agents);
+
+  // Build ancestor chain client-side from the agents already in the store
+  const chain: PromptChainNode[] = (() => {
     const byName = new Map<string, Agent>();
-    for (const a of allAgents) byName.set(a.name, a);
     const byId = new Map<string, Agent>();
-    for (const a of allAgents) byId.set(a.id, a);
+    for (const a of allAgents) {
+      byName.set(a.name, a);
+      byId.set(a.id, a);
+    }
 
+    const ancestors: Agent[] = [];
     let current = byName.get(agentName);
     while (current) {
-      chain.unshift(current.name);
+      ancestors.unshift(current); // root first
       if (current.parent_id) {
         current = byId.get(current.parent_id);
       } else {
         break;
       }
     }
-    setAncestorChain(chain);
 
-    // Fetch identity/prompt files
-    api.getAgentIdentity(agentName)
-      .then((d: any) => {
-        if (d.ok && d.files) setIdentityFiles(d.files);
-        else setIdentityFiles({});
-      })
-      .catch(() => setIdentityFiles({}));
-  }, [agentName, allAgents]);
+    return ancestors.map((a) => ({
+      agent_name: a.name,
+      agent_id: a.id,
+      prompts: (a as any).prompts || [],
+    }));
+  })();
 
-  const fileNames = Object.keys(identityFiles);
+  const totalPrompts = chain.reduce((sum, node) => sum + node.prompts.length, 0);
 
   return (
     <div className="ctx-tab-content">
-      {/* Ancestor chain */}
-      {ancestorChain.length > 1 && (
-        <div className="ctx-section">
-          <div className="ctx-section-title">Prompt Chain</div>
-          <div className="ctx-chain">
-            {ancestorChain.map((name, i) => (
-              <span key={name} className={`ctx-chain-item${name === agentName ? " ctx-chain-active" : ""}`}>
-                {i > 0 && <span className="ctx-chain-arrow">&rarr;</span>}
-                {name}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Identity files */}
-      {fileNames.length > 0 ? (
-        fileNames.map((filename) => (
-          <div key={filename} className="ctx-section">
-            <div className="ctx-section-title">{filename}</div>
-            <pre className="ctx-pre">{identityFiles[filename]}</pre>
-          </div>
-        ))
+      {chain.length === 0 ? (
+        <div className="ctx-empty-state">No prompts configured</div>
       ) : (
-        <div className="ctx-empty-state">No prompt files found</div>
+        <>
+          <div className="ctx-section">
+            <div className="ctx-section-title">
+              {chain.length} agent{chain.length > 1 ? "s" : ""} · {totalPrompts} prompt{totalPrompts > 1 ? "s" : ""}
+            </div>
+          </div>
+          {chain.map((node) => (
+            <div key={node.agent_id} className="ctx-section">
+              <div className="ctx-prompt-agent">
+                <span className={`ctx-prompt-agent-name${node.agent_name === agentName ? " ctx-prompt-self" : ""}`}>
+                  {node.agent_name}
+                </span>
+                {node.agent_name === agentName && <span className="ctx-prompt-you">self</span>}
+              </div>
+              {node.prompts.length === 0 ? (
+                <div className="ctx-prompt-empty">no prompts</div>
+              ) : (
+                node.prompts.map((entry, i) => (
+                  <div key={i} className="ctx-prompt-entry">
+                    <div className="ctx-prompt-meta">
+                      {positionBadge(entry.position)}
+                      {scopeBadge(entry.scope)}
+                      {entry.tools && (entry.tools.allow?.length || entry.tools.deny?.length) ? (
+                        <span className="ctx-prompt-badge">🔧 tools</span>
+                      ) : null}
+                    </div>
+                    <pre className="ctx-pre">{entry.content}</pre>
+                  </div>
+                ))
+              )}
+            </div>
+          ))}
+        </>
       )}
     </div>
   );
@@ -247,7 +290,7 @@ export default function ContextPanel() {
         <button className={`ctx-tab${tab === "insights" ? " ctx-tab-active" : ""}`} onClick={() => setTab("insights")}>Insights</button>
         <button className={`ctx-tab${tab === "events" ? " ctx-tab-active" : ""}`} onClick={() => setTab("events")}>Events</button>
       </div>
-      {tab === "prompts" && <PromptsSection agentName={agentName} allAgents={allAgents} />}
+      {tab === "prompts" && <PromptsSection agentName={agentName} />}
       {tab === "quests" && <QuestsSection agentName={agentName} />}
       {tab === "insights" && <InsightsSection agentName={agentName} />}
       {tab === "events" && <EventsSection agentName={agentName} />}

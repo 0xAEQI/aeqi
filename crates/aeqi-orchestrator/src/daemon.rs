@@ -3017,6 +3017,7 @@ impl Daemon {
                                         "avatar": a.avatar,
                                         "faces": a.faces,
                                         "session_id": a.session_id,
+                                        "prompts": a.prompts,
                                     })
                                 })
                                 .collect();
@@ -3127,18 +3128,32 @@ impl Daemon {
                         serde_json::json!({"ok": false, "error": "name is required"})
                     } else {
                         match agent_registry.get_active_by_name(name).await {
-                            Ok(Some(agent)) => serde_json::json!({
-                                "ok": true,
-                                "id": agent.id,
-                                "name": agent.name,
-                                "display_name": agent.display_name,
-                                "template": agent.template,
-                                "system_prompt": agent.system_prompt,
-                                "parent_id": agent.parent_id,
-                                "model": agent.model,
-                                "capabilities": agent.capabilities,
-                                "status": agent.status,
-                            }),
+                            Ok(Some(agent)) => {
+                                // Collect prompts from all ancestors + self
+                                let ancestors = agent_registry.get_ancestors(&agent.id).await.unwrap_or_default();
+                                let prompt_chain: Vec<serde_json::Value> = ancestors.iter().rev().map(|a| {
+                                    serde_json::json!({
+                                        "agent_name": a.name,
+                                        "agent_id": a.id,
+                                        "prompts": a.prompts,
+                                    })
+                                }).collect();
+
+                                serde_json::json!({
+                                    "ok": true,
+                                    "id": agent.id,
+                                    "name": agent.name,
+                                    "display_name": agent.display_name,
+                                    "template": agent.template,
+                                    "system_prompt": agent.system_prompt,
+                                    "parent_id": agent.parent_id,
+                                    "model": agent.model,
+                                    "capabilities": agent.capabilities,
+                                    "status": agent.status,
+                                    "prompts": agent.prompts,
+                                    "prompt_chain": prompt_chain,
+                                })
+                            }
                             Ok(None) => {
                                 serde_json::json!({"ok": false, "error": format!("agent '{}' not found", name)})
                             }
