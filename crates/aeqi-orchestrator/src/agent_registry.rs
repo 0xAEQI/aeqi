@@ -397,7 +397,7 @@ impl AgentRegistry {
 
         // Create unified tasks table (replaces per-project JSONL TaskBoards).
         conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS tasks (
+            "CREATE TABLE IF NOT EXISTS quests (
                  id TEXT PRIMARY KEY,
                  subject TEXT NOT NULL,
                  description TEXT NOT NULL DEFAULT '',
@@ -420,10 +420,10 @@ impl AgentRegistry {
                  closed_at TEXT,
                  closed_reason TEXT
              );
-             CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-             CREATE INDEX IF NOT EXISTS idx_tasks_agent ON tasks(agent_id);
-             CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee);
-             CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
+             CREATE INDEX IF NOT EXISTS idx_quests_status ON quests(status);
+             CREATE INDEX IF NOT EXISTS idx_quests_agent ON quests(agent_id);
+             CREATE INDEX IF NOT EXISTS idx_quests_assignee ON quests(assignee);
+             CREATE INDEX IF NOT EXISTS idx_quests_created ON quests(created_at);
 
              CREATE TABLE IF NOT EXISTS task_sequences (
                  prefix TEXT PRIMARY KEY,
@@ -433,12 +433,12 @@ impl AgentRegistry {
 
         // Idempotent migration: add prompts column to tasks table.
         let has_task_prompts: bool = conn
-            .prepare("PRAGMA table_info(tasks)")?
+            .prepare("PRAGMA table_info(quests)")?
             .query_map([], |row| row.get::<_, String>(1))?
             .filter_map(|r| r.ok())
             .any(|col| col == "prompts");
         if !has_task_prompts {
-            conn.execute_batch("ALTER TABLE tasks ADD COLUMN prompts TEXT DEFAULT '[]';")?;
+            conn.execute_batch("ALTER TABLE quests ADD COLUMN prompts TEXT DEFAULT '[]';")?;
         }
 
         // Idempotent migration: add public_id column for webhook triggers.
@@ -1228,7 +1228,7 @@ impl AgentRegistry {
         description: &str,
         skill: Option<&str>,
         labels: &[String],
-    ) -> Result<aeqi_tasks::Task> {
+    ) -> Result<aeqi_quests::Quest> {
         // Resolve task prefix: agent's task_prefix, or first 2 chars of name, or "t".
         let agent = self
             .get(agent_id)
@@ -1260,12 +1260,12 @@ impl AgentRegistry {
         let now = chrono::Utc::now();
         let labels_json = serde_json::to_string(labels)?;
 
-        let task = aeqi_tasks::Task {
-            id: aeqi_tasks::TaskId(task_id.clone()),
-            subject: subject.to_string(),
+        let task = aeqi_quests::Quest {
+            id: aeqi_quests::QuestId(task_id.clone()),
+            name: subject.to_string(),
             description: description.to_string(),
-            status: aeqi_tasks::TaskStatus::Pending,
-            priority: aeqi_tasks::task::Priority::Normal,
+            status: aeqi_quests::QuestStatus::Pending,
+            priority: aeqi_quests::quest::Priority::Normal,
             assignee: Some(agent.name.clone()),
             agent_id: Some(agent_id.to_string()),
             depends_on: Vec::new(),
@@ -1285,7 +1285,7 @@ impl AgentRegistry {
         };
 
         db.execute(
-            "INSERT INTO tasks (id, subject, description, status, priority, assignee, agent_id, skill, labels, created_at)
+            "INSERT INTO quests (id, subject, description, status, priority, assignee, agent_id, skill, labels, created_at)
              VALUES (?1, ?2, ?3, 'pending', 'normal', ?4, ?5, ?6, ?7, ?8)",
             params![
                 task_id,
@@ -1304,10 +1304,10 @@ impl AgentRegistry {
     }
 
     /// Get all pending tasks that are ready to run (no unmet dependencies).
-    pub async fn ready_tasks(&self) -> Result<Vec<aeqi_tasks::Task>> {
+    pub async fn ready_tasks(&self) -> Result<Vec<aeqi_quests::Quest>> {
         let db = self.db.lock().await;
         let mut stmt = db.prepare(
-            "SELECT * FROM tasks WHERE status = 'pending' ORDER BY
+            "SELECT * FROM quests WHERE status = 'pending' ORDER BY
              CASE priority
                 WHEN 'critical' THEN 0
                 WHEN 'high' THEN 1
@@ -1317,13 +1317,13 @@ impl AgentRegistry {
              END,
              created_at ASC",
         )?;
-        let tasks: Vec<aeqi_tasks::Task> = stmt
+        let tasks: Vec<aeqi_quests::Quest> = stmt
             .query_map([], |row| Ok(row_to_task(row)))?
             .filter_map(|r| r.ok())
             .collect();
 
         // Filter out tasks with unmet dependencies.
-        let ready: Vec<aeqi_tasks::Task> = tasks
+        let ready: Vec<aeqi_quests::Quest> = tasks
             .into_iter()
             .filter(|t| {
                 if t.depends_on.is_empty() {
@@ -1332,7 +1332,7 @@ impl AgentRegistry {
                 // Check all deps are done (synchronous — we have the db lock).
                 t.depends_on.iter().all(|dep_id| {
                     db.query_row(
-                        "SELECT status FROM tasks WHERE id = ?1",
+                        "SELECT status FROM quests WHERE id = ?1",
                         params![dep_id.0],
                         |row| row.get::<_, String>(0),
                     )
@@ -1347,11 +1347,11 @@ impl AgentRegistry {
     }
 
     /// Get a task by ID.
-    pub async fn get_task(&self, task_id: &str) -> Result<Option<aeqi_tasks::Task>> {
+    pub async fn get_task(&self, task_id: &str) -> Result<Option<aeqi_quests::Quest>> {
         let db = self.db.lock().await;
         let task = db
             .query_row(
-                "SELECT * FROM tasks WHERE id = ?1",
+                "SELECT * FROM quests WHERE id = ?1",
                 params![task_id],
                 |row| Ok(row_to_task(row)),
             )
@@ -1363,7 +1363,7 @@ impl AgentRegistry {
     pub async fn update_task_status(
         &self,
         task_id: &str,
-        status: aeqi_tasks::TaskStatus,
+        status: aeqi_quests::QuestStatus,
     ) -> Result<()> {
         let now = chrono::Utc::now().to_rfc3339();
         let status_str = status.to_string();
@@ -1371,7 +1371,7 @@ impl AgentRegistry {
 
         let closed_at = if matches!(
             status,
-            aeqi_tasks::TaskStatus::Done | aeqi_tasks::TaskStatus::Cancelled
+            aeqi_quests::QuestStatus::Done | aeqi_quests::QuestStatus::Cancelled
         ) {
             Some(now.clone())
         } else {
@@ -1379,22 +1379,22 @@ impl AgentRegistry {
         };
 
         db.execute(
-            "UPDATE tasks SET status = ?1, updated_at = ?2, closed_at = COALESCE(?3, closed_at) WHERE id = ?4",
+            "UPDATE quests SET status = ?1, updated_at = ?2, closed_at = COALESCE(?3, closed_at) WHERE id = ?4",
             params![status_str, now, closed_at, task_id],
         )?;
         Ok(())
     }
 
-    /// Update a task using a closure (mirrors TaskBoard API).
-    pub async fn update_task<F: FnOnce(&mut aeqi_tasks::Task)>(
+    /// Update a task using a closure (mirrors QuestBoard API).
+    pub async fn update_task<F: FnOnce(&mut aeqi_quests::Quest)>(
         &self,
         task_id: &str,
         f: F,
-    ) -> Result<aeqi_tasks::Task> {
+    ) -> Result<aeqi_quests::Quest> {
         let db = self.db.lock().await;
         let mut task = db
             .query_row(
-                "SELECT * FROM tasks WHERE id = ?1",
+                "SELECT * FROM quests WHERE id = ?1",
                 params![task_id],
                 |row| Ok(row_to_task(row)),
             )
@@ -1411,7 +1411,7 @@ impl AgentRegistry {
         let metadata_json = serde_json::to_string(&task.metadata).unwrap_or_default();
 
         db.execute(
-            "UPDATE tasks SET
+            "UPDATE quests SET
                 subject = ?1, description = ?2, status = ?3, priority = ?4,
                 assignee = ?5, agent_id = ?6, skill = ?7, labels = ?8,
                 retry_count = ?9, checkpoints = ?10, metadata = ?11,
@@ -1420,7 +1420,7 @@ impl AgentRegistry {
                 closed_at = ?18, closed_reason = ?19
              WHERE id = ?20",
             params![
-                task.subject,
+                task.name,
                 task.description,
                 task.status.to_string(),
                 task.priority.to_string(),
@@ -1451,9 +1451,9 @@ impl AgentRegistry {
         &self,
         status: Option<&str>,
         agent_id: Option<&str>,
-    ) -> Result<Vec<aeqi_tasks::Task>> {
+    ) -> Result<Vec<aeqi_quests::Quest>> {
         let db = self.db.lock().await;
-        let mut sql = "SELECT * FROM tasks WHERE 1=1".to_string();
+        let mut sql = "SELECT * FROM quests WHERE 1=1".to_string();
         let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
         if let Some(s) = status {
@@ -1483,7 +1483,7 @@ impl AgentRegistry {
 }
 
 /// Convert a SQLite row to a Task.
-fn row_to_task(row: &rusqlite::Row) -> aeqi_tasks::Task {
+fn row_to_task(row: &rusqlite::Row) -> aeqi_quests::Quest {
     let labels_str: String = row.get("labels").unwrap_or_else(|_| "[]".to_string());
     let checkpoints_str: String = row.get("checkpoints").unwrap_or_else(|_| "[]".to_string());
     let deps_str: String = row.get("depends_on").unwrap_or_else(|_| "[]".to_string());
@@ -1492,24 +1492,24 @@ fn row_to_task(row: &rusqlite::Row) -> aeqi_tasks::Task {
 
     let status_str: String = row.get("status").unwrap_or_else(|_| "pending".to_string());
     let status = match status_str.as_str() {
-        "in_progress" => aeqi_tasks::TaskStatus::InProgress,
-        "done" => aeqi_tasks::TaskStatus::Done,
-        "blocked" => aeqi_tasks::TaskStatus::Blocked,
-        "cancelled" => aeqi_tasks::TaskStatus::Cancelled,
-        _ => aeqi_tasks::TaskStatus::Pending,
+        "in_progress" => aeqi_quests::QuestStatus::InProgress,
+        "done" => aeqi_quests::QuestStatus::Done,
+        "blocked" => aeqi_quests::QuestStatus::Blocked,
+        "cancelled" => aeqi_quests::QuestStatus::Cancelled,
+        _ => aeqi_quests::QuestStatus::Pending,
     };
 
     let priority_str: String = row.get("priority").unwrap_or_else(|_| "normal".to_string());
     let priority = match priority_str.as_str() {
-        "low" => aeqi_tasks::task::Priority::Low,
-        "high" => aeqi_tasks::task::Priority::High,
-        "critical" => aeqi_tasks::task::Priority::Critical,
-        _ => aeqi_tasks::task::Priority::Normal,
+        "low" => aeqi_quests::quest::Priority::Low,
+        "high" => aeqi_quests::quest::Priority::High,
+        "critical" => aeqi_quests::quest::Priority::Critical,
+        _ => aeqi_quests::quest::Priority::Normal,
     };
 
-    aeqi_tasks::Task {
-        id: aeqi_tasks::TaskId(row.get("id").unwrap_or_default()),
-        subject: row.get("subject").unwrap_or_default(),
+    aeqi_quests::Quest {
+        id: aeqi_quests::QuestId(row.get("id").unwrap_or_default()),
+        name: row.get("subject").unwrap_or_default(),
         description: row.get("description").unwrap_or_default(),
         status,
         priority,

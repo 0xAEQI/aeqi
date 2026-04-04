@@ -1,39 +1,39 @@
-//! Semantic Task Dependency Inference.
+//! Semantic Quest Dependency Inference.
 //!
 //! Pure computation — no LLM, no DB. Extracts entities (file paths, function
-//! names, module names) from task subjects and descriptions, then computes
+//! names, module names) from quest names and descriptions, then computes
 //! overlap to suggest implicit dependencies.
 
-use crate::task::{Task, TaskId};
+use crate::quest::{Quest, QuestId};
 use serde::{Deserialize, Serialize};
 
-/// An inferred dependency between two tasks.
+/// An inferred dependency between two quests.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferredDependency {
-    pub from: TaskId,
-    pub to: TaskId,
+    pub from: QuestId,
+    pub to: QuestId,
     pub reason: String,
     pub confidence: f64,
 }
 
-/// Infer dependencies between tasks based on entity overlap in subjects/descriptions.
+/// Infer dependencies between quests based on entity overlap in names/descriptions.
 /// Returns suggested dependencies above the confidence threshold.
-pub fn infer_dependencies(tasks: &[&Task], threshold: f64) -> Vec<InferredDependency> {
+pub fn infer_dependencies(quests: &[&Quest], threshold: f64) -> Vec<InferredDependency> {
     let mut deps = Vec::new();
 
-    // Extract entities for each task.
-    let entities: Vec<Vec<String>> = tasks
+    // Extract entities for each quest.
+    let entities: Vec<Vec<String>> = quests
         .iter()
-        .map(|t| extract_entities(&t.subject, &t.description))
+        .map(|t| extract_entities(&t.name, &t.description))
         .collect();
 
     // Compare all pairs.
-    for i in 0..tasks.len() {
-        for j in (i + 1)..tasks.len() {
+    for i in 0..quests.len() {
+        for j in (i + 1)..quests.len() {
             if let Some((confidence, reason)) = entity_overlap(&entities[i], &entities[j])
                 && confidence >= threshold
             {
-                let (from, to) = determine_direction(tasks[i], tasks[j]);
+                let (from, to) = determine_direction(quests[i], quests[j]);
                 deps.push(InferredDependency {
                     from,
                     to,
@@ -47,10 +47,10 @@ pub fn infer_dependencies(tasks: &[&Task], threshold: f64) -> Vec<InferredDepend
     deps
 }
 
-/// Extract meaningful entities from subject and description.
+/// Extract meaningful entities from name and description.
 /// Looks for: file paths, snake_case identifiers, PascalCase identifiers, module names.
-fn extract_entities(subject: &str, description: &str) -> Vec<String> {
-    let combined = format!("{subject} {description}");
+fn extract_entities(name: &str, description: &str) -> Vec<String> {
+    let combined = format!("{name} {description}");
     let mut entities = Vec::new();
 
     for word in
@@ -123,9 +123,9 @@ fn entity_overlap(a: &[String], b: &[String]) -> Option<(f64, String)> {
     Some((confidence.min(1.0), reason))
 }
 
-/// Determine dependency direction between two tasks.
-/// Heuristic: "create/setup/init" tasks come before "test/verify/deploy" tasks.
-fn determine_direction(a: &Task, b: &Task) -> (TaskId, TaskId) {
+/// Determine dependency direction between two quests.
+/// Heuristic: "create/setup/init" quests come before "test/verify/deploy" quests.
+fn determine_direction(a: &Quest, b: &Quest) -> (QuestId, QuestId) {
     let create_words = [
         "create",
         "setup",
@@ -140,13 +140,13 @@ fn determine_direction(a: &Task, b: &Task) -> (TaskId, TaskId) {
         "test", "verify", "validate", "check", "deploy", "review", "document",
     ];
 
-    let a_subject = a.subject.to_lowercase();
-    let b_subject = b.subject.to_lowercase();
+    let a_name = a.name.to_lowercase();
+    let b_name = b.name.to_lowercase();
 
-    let a_is_create = create_words.iter().any(|w| a_subject.contains(w));
-    let b_is_test = test_words.iter().any(|w| b_subject.contains(w));
-    let b_is_create = create_words.iter().any(|w| b_subject.contains(w));
-    let a_is_test = test_words.iter().any(|w| a_subject.contains(w));
+    let a_is_create = create_words.iter().any(|w| a_name.contains(w));
+    let b_is_test = test_words.iter().any(|w| b_name.contains(w));
+    let b_is_create = create_words.iter().any(|w| b_name.contains(w));
+    let a_is_test = test_words.iter().any(|w| a_name.contains(w));
 
     if a_is_create && b_is_test {
         // b depends on a (create before test)
@@ -155,7 +155,7 @@ fn determine_direction(a: &Task, b: &Task) -> (TaskId, TaskId) {
         // a depends on b
         (a.id.clone(), b.id.clone())
     } else {
-        // Default: earlier created task is the dependency
+        // Default: earlier created quest is the dependency
         if a.created_at <= b.created_at {
             (b.id.clone(), a.id.clone())
         } else {
@@ -167,14 +167,14 @@ fn determine_direction(a: &Task, b: &Task) -> (TaskId, TaskId) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task::{Priority, Task, TaskId, TaskStatus};
+    use crate::quest::{Priority, Quest, QuestId, QuestStatus};
 
-    fn make_task(id: &str, subject: &str, description: &str) -> Task {
-        Task {
-            id: TaskId(id.to_string()),
-            subject: subject.to_string(),
+    fn make_quest(id: &str, name: &str, description: &str) -> Quest {
+        Quest {
+            id: QuestId(id.to_string()),
+            name: name.to_string(),
             description: description.to_string(),
-            status: TaskStatus::Pending,
+            status: QuestStatus::Pending,
             priority: Priority::Normal,
             assignee: None,
             agent_id: None,
@@ -215,11 +215,11 @@ mod tests {
 
     #[test]
     fn test_overlap_same_file() {
-        let t1 = make_task("t-001", "Fix bug in src/auth.rs", "Authentication issue");
-        let t2 = make_task("t-002", "Add tests for src/auth.rs", "Test the auth module");
+        let t1 = make_quest("t-001", "Fix bug in src/auth.rs", "Authentication issue");
+        let t2 = make_quest("t-002", "Add tests for src/auth.rs", "Test the auth module");
 
-        let tasks: Vec<&Task> = vec![&t1, &t2];
-        let deps = infer_dependencies(&tasks, 0.1);
+        let quests: Vec<&Quest> = vec![&t1, &t2];
+        let deps = infer_dependencies(&quests, 0.1);
 
         assert!(!deps.is_empty());
         assert!(deps[0].reason.contains("src/auth.rs"));
@@ -227,8 +227,8 @@ mod tests {
 
     #[test]
     fn test_direction_create_before_test() {
-        let t1 = make_task("t-001", "Create user authentication", "Build auth system");
-        let t2 = make_task("t-002", "Test user authentication", "Verify auth works");
+        let t1 = make_quest("t-001", "Create user authentication", "Build auth system");
+        let t2 = make_quest("t-002", "Test user authentication", "Verify auth works");
 
         let (from, to) = determine_direction(&t1, &t2);
         // t2 (test) depends on t1 (create)
@@ -239,11 +239,11 @@ mod tests {
     #[test]
     fn test_no_cycle_on_apply() {
         // Ensure inferred deps don't create cycles (they're directional by creation order)
-        let t1 = make_task("t-001", "Setup database", "Init DB schema");
-        let t2 = make_task("t-002", "Test database", "Verify DB operations");
+        let t1 = make_quest("t-001", "Setup database", "Init DB schema");
+        let t2 = make_quest("t-002", "Test database", "Verify DB operations");
 
-        let tasks: Vec<&Task> = vec![&t1, &t2];
-        let deps = infer_dependencies(&tasks, 0.1);
+        let quests: Vec<&Quest> = vec![&t1, &t2];
+        let deps = infer_dependencies(&quests, 0.1);
 
         // Should not have both directions
         for dep in &deps {
@@ -257,15 +257,15 @@ mod tests {
 
     #[test]
     fn test_no_deps_between_unrelated() {
-        let t1 = make_task("t-001", "Fix login page CSS", "Adjust button colors");
-        let t2 = make_task(
+        let t1 = make_quest("t-001", "Fix login page CSS", "Adjust button colors");
+        let t2 = make_quest(
             "t-002",
             "Optimize database queries",
             "Add indexes to users table",
         );
 
-        let tasks: Vec<&Task> = vec![&t1, &t2];
-        let deps = infer_dependencies(&tasks, 0.3);
+        let quests: Vec<&Quest> = vec![&t1, &t2];
+        let deps = infer_dependencies(&quests, 0.3);
 
         assert!(deps.is_empty());
     }

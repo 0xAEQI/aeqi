@@ -1,6 +1,6 @@
 use aeqi_core::traits::Tool;
 use aeqi_core::traits::{ToolResult, ToolSpec};
-use aeqi_tasks::{Priority, TaskBoard};
+use aeqi_quests::{Priority, QuestBoard};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -8,13 +8,13 @@ use std::sync::Mutex;
 
 /// Tool for creating tasks.
 pub struct TaskCreateTool {
-    store: Mutex<TaskBoard>,
+    store: Mutex<QuestBoard>,
     prefix: String,
 }
 
 impl TaskCreateTool {
     pub fn new(tasks_dir: PathBuf, prefix: String) -> Result<Self> {
-        let store = TaskBoard::open(&tasks_dir)?;
+        let store = QuestBoard::open(&tasks_dir)?;
         Ok(Self {
             store: Mutex::new(store),
             prefix,
@@ -60,7 +60,7 @@ impl Tool for TaskCreateTool {
 
         Ok(ToolResult::success(format!(
             "Created task {} [{}] {}",
-            task.id, task.priority, task.subject
+            task.id, task.priority, task.name
         )))
     }
 
@@ -88,12 +88,12 @@ impl Tool for TaskCreateTool {
 
 /// Tool for listing ready (unblocked) tasks.
 pub struct TaskReadyTool {
-    store: Mutex<TaskBoard>,
+    store: Mutex<QuestBoard>,
 }
 
 impl TaskReadyTool {
     pub fn new(tasks_dir: PathBuf) -> Result<Self> {
-        let store = TaskBoard::open(&tasks_dir)?;
+        let store = QuestBoard::open(&tasks_dir)?;
         Ok(Self {
             store: Mutex::new(store),
         })
@@ -119,7 +119,7 @@ impl Tool for TaskReadyTool {
                 "{} [{}] {} — {}\n",
                 task.id,
                 task.priority,
-                task.subject,
+                task.name,
                 if task.description.is_empty() {
                     "(no description)"
                 } else {
@@ -148,12 +148,12 @@ impl Tool for TaskReadyTool {
 
 /// Tool for updating a task's status.
 pub struct TaskUpdateTool {
-    store: Mutex<TaskBoard>,
+    store: Mutex<QuestBoard>,
 }
 
 impl TaskUpdateTool {
     pub fn new(tasks_dir: PathBuf) -> Result<Self> {
-        let store = TaskBoard::open(&tasks_dir)?;
+        let store = QuestBoard::open(&tasks_dir)?;
         Ok(Self {
             store: Mutex::new(store),
         })
@@ -178,11 +178,11 @@ impl Tool for TaskUpdateTool {
         let task = store.update(id, |t| {
             if let Some(s) = status {
                 t.status = match s {
-                    "in_progress" => aeqi_tasks::TaskStatus::InProgress,
-                    "done" => aeqi_tasks::TaskStatus::Done,
-                    "blocked" => aeqi_tasks::TaskStatus::Blocked,
-                    "cancelled" => aeqi_tasks::TaskStatus::Cancelled,
-                    _ => aeqi_tasks::TaskStatus::Pending,
+                    "in_progress" => aeqi_quests::QuestStatus::InProgress,
+                    "done" => aeqi_quests::QuestStatus::Done,
+                    "blocked" => aeqi_quests::QuestStatus::Blocked,
+                    "cancelled" => aeqi_quests::QuestStatus::Cancelled,
+                    _ => aeqi_quests::QuestStatus::Pending,
                 };
             }
             if let Some(a) = assignee {
@@ -192,7 +192,7 @@ impl Tool for TaskUpdateTool {
 
         Ok(ToolResult::success(format!(
             "Updated {} [{}] {}",
-            task.id, task.status, task.subject
+            task.id, task.status, task.name
         )))
     }
 
@@ -219,12 +219,12 @@ impl Tool for TaskUpdateTool {
 
 /// Tool for closing a task.
 pub struct TaskCloseTool {
-    store: Mutex<TaskBoard>,
+    store: Mutex<QuestBoard>,
 }
 
 impl TaskCloseTool {
     pub fn new(tasks_dir: PathBuf) -> Result<Self> {
-        let store = TaskBoard::open(&tasks_dir)?;
+        let store = QuestBoard::open(&tasks_dir)?;
         Ok(Self {
             store: Mutex::new(store),
         })
@@ -250,7 +250,7 @@ impl Tool for TaskCloseTool {
         let task = store.close(id, reason)?;
         Ok(ToolResult::success(format!(
             "Closed {} — {}",
-            task.id, task.subject
+            task.id, task.name
         )))
     }
 
@@ -276,12 +276,12 @@ impl Tool for TaskCloseTool {
 
 /// Tool for showing task details.
 pub struct TaskShowTool {
-    store: Mutex<TaskBoard>,
+    store: Mutex<QuestBoard>,
 }
 
 impl TaskShowTool {
     pub fn new(tasks_dir: PathBuf) -> Result<Self> {
-        let store = TaskBoard::open(&tasks_dir)?;
+        let store = QuestBoard::open(&tasks_dir)?;
         Ok(Self {
             store: Mutex::new(store),
         })
@@ -325,7 +325,7 @@ impl Tool for TaskShowTool {
             let output = format!(
                 "ID: {}\nSubject: {}\nStatus: {}\nPriority: {}\nAssignee: {}\nDescription: {}\nDepends on: {}\nBlocks: {}\nCreated: {}",
                 task.id,
-                task.subject,
+                task.name,
                 task.status,
                 task.priority,
                 assignee,
@@ -365,12 +365,12 @@ impl Tool for TaskShowTool {
 
 /// Tool for adding a dependency between tasks.
 pub struct TaskDepTool {
-    store: Mutex<TaskBoard>,
+    store: Mutex<QuestBoard>,
 }
 
 impl TaskDepTool {
     pub fn new(tasks_dir: PathBuf) -> Result<Self> {
-        let store = TaskBoard::open(&tasks_dir)?;
+        let store = QuestBoard::open(&tasks_dir)?;
         Ok(Self {
             store: Mutex::new(store),
         })

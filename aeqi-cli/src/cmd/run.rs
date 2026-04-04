@@ -1,4 +1,4 @@
-use aeqi_core::traits::{LogObserver, Memory, Observer};
+use aeqi_core::traits::{Insight, LogObserver, Observer};
 use aeqi_core::{Agent, AgentConfig, Identity};
 use anyhow::Result;
 use std::path::PathBuf;
@@ -7,7 +7,7 @@ use tracing::{info, warn};
 
 use crate::helpers::{
     augment_identity_with_org_context, build_project_tools, build_provider_for_one_shot,
-    build_tools, find_agent_dir, find_project_dir, load_config, one_shot_agent_name, open_memory,
+    build_tools, find_agent_dir, find_project_dir, load_config, one_shot_agent_name, open_insights,
 };
 
 pub(crate) async fn cmd_run(
@@ -72,7 +72,7 @@ pub(crate) async fn cmd_run(
         ..Default::default()
     };
 
-    let memory: Option<Arc<dyn Memory>> = match open_memory(&config, project_name) {
+    let memory: Option<Arc<dyn Insight>> = match open_insights(&config, project_name) {
         Ok(m) => Some(Arc::new(m)),
         Err(e) => {
             warn!("memory unavailable: {e}");

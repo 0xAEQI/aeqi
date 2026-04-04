@@ -25,7 +25,6 @@ use tracing::{debug, info, warn};
 
 use crate::agent_registry::AgentRegistry;
 use crate::agent_worker::AgentWorker;
-use crate::cost_ledger::{CostEntry, CostLedger};
 use crate::escalation::{EscalationPolicy, EscalationTracker};
 use crate::event_store::EventStore;
 use crate::execution_events::{EventBroadcaster, ExecutionEvent};
@@ -39,7 +38,7 @@ use crate::middleware::{
 use crate::notes::Notes;
 use crate::session_store::SessionStore;
 use crate::trigger::TriggerStore;
-use aeqi_core::traits::{Channel, Memory, Provider, Tool};
+use aeqi_core::traits::{Channel, Insight, Provider, Tool};
 
 /// A running worker with age tracking for timeout detection.
 struct TrackedWorker {
@@ -59,6 +58,8 @@ pub struct SchedulerConfig {
     pub default_timeout_secs: u64,
     /// Default per-worker budget.
     pub worker_max_budget_usd: f64,
+    /// Global daily budget cap (replaces CostLedger daily budget).
+    pub daily_budget_usd: f64,
     /// Directories to search for skill TOML files.
     pub skills_dirs: Vec<PathBuf>,
     /// Shared primer injected into ALL agents.
@@ -81,6 +82,7 @@ impl Default for SchedulerConfig {
             max_workers: 4,
             default_timeout_secs: 3600,
             worker_max_budget_usd: 5.0,
+            daily_budget_usd: 50.0,
             skills_dirs: Vec::new(),
             shared_primer: None,
             reflect_model: String::new(),
@@ -101,12 +103,11 @@ pub struct Scheduler {
     pub dispatch_bus: Arc<DispatchBus>,
     pub provider: Arc<dyn Provider>,
     pub tools: Vec<Arc<dyn Tool>>,
-    pub cost_ledger: Arc<CostLedger>,
     pub metrics: Arc<AEQIMetrics>,
     pub event_broadcaster: Arc<EventBroadcaster>,
 
     // Optional services
-    pub memory_store: Option<Arc<dyn Memory>>,
+    pub insight_store: Option<Arc<dyn Insight>>,
     pub reflect_provider: Option<Arc<dyn Provider>>,
     pub notes: Option<Arc<Notes>>,
     pub event_store: Arc<EventStore>,
@@ -129,7 +130,6 @@ impl Scheduler {
         dispatch_bus: Arc<DispatchBus>,
         provider: Arc<dyn Provider>,
         tools: Vec<Arc<dyn Tool>>,
-        cost_ledger: Arc<CostLedger>,
         metrics: Arc<AEQIMetrics>,
         event_broadcaster: Arc<EventBroadcaster>,
         event_store: Arc<EventStore>,
@@ -140,10 +140,9 @@ impl Scheduler {
             dispatch_bus,
             provider,
             tools,
-            cost_ledger,
             metrics,
             event_broadcaster,
-            memory_store: None,
+            insight_store: None,
             reflect_provider: None,
             notes: None,
             event_store,
@@ -197,7 +196,7 @@ impl Scheduler {
             return Ok(());
         }
 
-        // Phase 3: Build concurrency map (agent_id → running count).
+        // Phase 3: Build concurrency map (agent_id -> running count).
         let running = self.running.lock().await;
         let total_running = running.len();
         let mut agent_counts: HashMap<String, u32> = HashMap::new();
@@ -244,10 +243,81 @@ impl Scheduler {
                 continue;
             }
 
-            // Budget check.
-            if !self.cost_ledger.can_afford() {
-                debug!(agent = %agent_id, "global budget exhausted");
+            // Budget check via EventStore.
+            let daily_cost = self.event_store.daily_cost().await.unwrap_or(0.0);
+            if daily_cost >= self.config.daily_budget_usd {
+                debug!(
+                    agent = %agent_id,
+                    daily_cost,
+                    budget = self.config.daily_budget_usd,
+                    "global budget exhausted"
+                );
                 continue;
+            }
+
+            // Phase 5: Expertise routing — check if a sibling agent has a better track record.
+            // Only reroute if the assigned agent has siblings and expertise data exists.
+            if let Ok(expertise) = self.event_store.query_expertise().await {
+                if let Ok(Some(assigned)) = self.agent_registry.get(&agent_id).await {
+                    // Find sibling agents (same parent) that could handle this task.
+                    if let Some(ref parent_id) = assigned.parent_id {
+                        if let Ok(siblings) = self.agent_registry.get_children(parent_id).await {
+                            let mut best_agent: Option<(String, f64)> = None;
+                            for sibling in &siblings {
+                                if sibling.id == agent_id {
+                                    continue;
+                                }
+                                // Check if sibling is under concurrency limit.
+                                let sib_max = self
+                                    .agent_registry
+                                    .get_max_concurrent(&sibling.id)
+                                    .await
+                                    .unwrap_or(1);
+                                let sib_current =
+                                    agent_counts.get(&sibling.id).copied().unwrap_or(0);
+                                if sib_current >= sib_max {
+                                    continue;
+                                }
+                                // Check expertise score.
+                                if let Some(score) =
+                                    expertise.iter().find(|s| {
+                                        s.get("agent").and_then(|a| a.as_str()) == Some(&sibling.name)
+                                    })
+                                {
+                                    let rate = score
+                                        .get("success_rate")
+                                        .and_then(|r| r.as_f64())
+                                        .unwrap_or(0.0);
+                                    if best_agent.as_ref().map_or(true, |(_, best_rate)| rate > *best_rate) {
+                                        best_agent = Some((sibling.id.clone(), rate));
+                                    }
+                                }
+                            }
+                            // Reassign if a sibling has a significantly better track record.
+                            if let Some((better_id, better_rate)) = best_agent {
+                                let own_rate = expertise
+                                    .iter()
+                                    .find(|s| {
+                                        s.get("agent").and_then(|a| a.as_str()) == Some(&assigned.name)
+                                    })
+                                    .and_then(|s| s.get("success_rate").and_then(|r| r.as_f64()))
+                                    .unwrap_or(0.0);
+                                if better_rate > own_rate + 0.2 {
+                                    debug!(
+                                        task = %task.id,
+                                        from = %agent_id,
+                                        to = %better_id,
+                                        own_rate,
+                                        better_rate,
+                                        "expertise routing: reassigning to better agent"
+                                    );
+                                    // TODO: Update task.agent_id in AgentRegistry to the better agent.
+                                    // For now just log — full reassignment needs agent_registry.update_task().
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // Spawn.
@@ -310,7 +380,7 @@ impl Scheduler {
             // Reset task to pending.
             if let Err(e) = self
                 .agent_registry
-                .update_task_status(&task_id, aeqi_tasks::TaskStatus::Pending)
+                .update_task_status(&task_id, aeqi_quests::QuestStatus::Pending)
                 .await
             {
                 warn!(task = %task_id, error = %e, "failed to reset timed-out task");
@@ -325,7 +395,7 @@ impl Scheduler {
     // Spawn
     // -----------------------------------------------------------------------
 
-    async fn spawn_worker(&self, task: &aeqi_tasks::Task) {
+    async fn spawn_worker(&self, task: &aeqi_quests::Quest) {
         let agent_id = match &task.agent_id {
             Some(id) => id.clone(),
             None => return,
@@ -364,7 +434,7 @@ impl Scheduler {
         // Mark task as in-progress.
         if let Err(e) = self
             .agent_registry
-            .update_task_status(&task.id.0, aeqi_tasks::TaskStatus::InProgress)
+            .update_task_status(&task.id.0, aeqi_quests::QuestStatus::InProgress)
             .await
         {
             warn!(task = %task.id, error = %e, "failed to mark task in-progress");
@@ -438,9 +508,9 @@ impl Scheduler {
         // Inject persistent agent identity.
         worker = worker.with_persistent_agent(agent_id.clone());
 
-        // Inject memory.
-        if let Some(ref mem) = self.memory_store {
-            worker = worker.with_memory(mem.clone());
+        // Inject insight store.
+        if let Some(ref mem) = self.insight_store {
+            worker = worker.with_insight_store(mem.clone());
         }
 
         // Inject reflection provider.
@@ -516,15 +586,15 @@ impl Scheduler {
             let task_id = cb_task_id;
             tokio::spawn(async move {
                 match status {
-                    aeqi_tasks::TaskStatus::Done
-                    | aeqi_tasks::TaskStatus::Blocked
-                    | aeqi_tasks::TaskStatus::Cancelled => {
+                    aeqi_quests::QuestStatus::Done
+                    | aeqi_quests::QuestStatus::Blocked
+                    | aeqi_quests::QuestStatus::Cancelled => {
                         let _ = registry.update_task_status(&task_id, status).await;
                     }
-                    aeqi_tasks::TaskStatus::Pending => {
+                    aeqi_quests::QuestStatus::Pending => {
                         let _ = registry
                             .update_task(&task_id, |t| {
-                                t.status = aeqi_tasks::TaskStatus::Pending;
+                                t.status = aeqi_quests::QuestStatus::Pending;
                                 t.retry_count += 1;
                                 t.assignee = None;
                             })
@@ -552,7 +622,6 @@ impl Scheduler {
         let agent_name = agent.name.clone();
         let agent_id_clone = agent_id.clone();
         let registry = self.agent_registry.clone();
-        let cost_ledger = self.cost_ledger.clone();
         let spawn_event_store = self.event_store.clone();
         let event_broadcaster = self.event_broadcaster.clone();
         let wake = self.wake.clone();
@@ -564,13 +633,21 @@ impl Scheduler {
             // Here we handle cost recording, expertise, and event broadcasting.
             let (outcome_status, cost_usd, turns) = match result {
                 Ok((_task_outcome, runtime_exec, cost, turns)) => {
-                    let _ = cost_ledger.record(CostEntry::new(
-                        "global",
-                        &task_id,
-                        &agent_name,
-                        cost,
-                        turns,
-                    ));
+                    // Record cost as an event in the unified EventStore.
+                    let _ = spawn_event_store
+                        .emit(
+                            "cost",
+                            Some(&agent_id_clone),
+                            None,
+                            Some(&task_id),
+                            &serde_json::json!({
+                                "project": "global",
+                                "agent_name": agent_name,
+                                "cost_usd": cost,
+                                "turns": turns,
+                            }),
+                        )
+                        .await;
                     let status = match runtime_exec.outcome.status {
                         crate::runtime::RuntimeOutcomeStatus::Done => "done",
                         crate::runtime::RuntimeOutcomeStatus::Blocked => "blocked",
@@ -764,5 +841,6 @@ mod tests {
         assert_eq!(config.max_workers, 4);
         assert_eq!(config.default_timeout_secs, 3600);
         assert_eq!(config.worker_max_budget_usd, 5.0);
+        assert!((config.daily_budget_usd - 50.0).abs() < 0.01);
     }
 }

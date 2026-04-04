@@ -164,7 +164,7 @@ Sessions page shows: sidebar (permanent, active work, spawned work, closed), ses
 | aeqi-orchestrator | Daemon, sessions, tasks, delegation, memory routing |
 | aeqi-tools | Shell, file, web, skills |
 | aeqi-providers | OpenRouter, Anthropic, Ollama |
-| aeqi-memory | SQLite + FTS5, vector search, hierarchical scoping |
+| aeqi-insights | SQLite + FTS5, vector search, hierarchical scoping |
 | aeqi-tasks | Task DAG, JSONL persistence, status machine |
 | aeqi-web | Axum REST + WebSocket API |
 | aeqi-gates | Telegram, Discord, Slack bridges |

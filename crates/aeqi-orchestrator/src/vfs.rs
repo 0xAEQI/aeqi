@@ -60,7 +60,6 @@ pub struct VfsTree {
     agent_registry: Arc<crate::agent_registry::AgentRegistry>,
     session_store: Option<Arc<crate::session_store::SessionStore>>,
     notes: Option<Arc<crate::notes::Notes>>,
-    cost_ledger: Arc<crate::cost_ledger::CostLedger>,
 }
 
 impl VfsTree {
@@ -69,7 +68,6 @@ impl VfsTree {
             agent_registry,
             session_store: None,
             notes: None,
-            cost_ledger: Arc::new(crate::cost_ledger::CostLedger::new(50.0)),
         }
     }
 
@@ -78,13 +76,11 @@ impl VfsTree {
         agent_registry: Arc<crate::agent_registry::AgentRegistry>,
         session_store: Option<Arc<crate::session_store::SessionStore>>,
         notes: Option<Arc<crate::notes::Notes>>,
-        cost_ledger: Arc<crate::cost_ledger::CostLedger>,
     ) -> Self {
         Self {
             agent_registry,
             session_store,
             notes,
-            cost_ledger,
         }
     }
 

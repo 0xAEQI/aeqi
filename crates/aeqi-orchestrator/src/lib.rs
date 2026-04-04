@@ -3,7 +3,7 @@
 //!
 //! Coordinates worker execution ([`AgentWorker`]), agent routing ([`AgentRouter`]),
 //! global scheduling ([`Scheduler`]), agent registry ([`agent_registry::AgentRegistry`]),
-//! dispatch bus ([`DispatchBus`]), cost ledger ([`CostLedger`]), Prometheus metrics
+//! dispatch bus ([`DispatchBus`]), event store ([`EventStore`]), Prometheus metrics
 //! ([`AEQIMetrics`]), and session storage.
 
 pub mod agent_registry;
@@ -13,7 +13,6 @@ pub mod audit;
 pub mod checkpoint;
 pub mod claude_code;
 pub mod context_budget;
-pub mod cost_ledger;
 pub mod daemon;
 pub mod delegate;
 pub mod escalation;
@@ -50,7 +49,6 @@ pub use agent_worker::{AgentWorker, WorkerState};
 pub use audit::{AuditEvent, AuditLog, DecisionType};
 pub use checkpoint::AgentCheckpoint;
 pub use context_budget::ContextBudget;
-pub use cost_ledger::CostLedger;
 pub use daemon::Daemon;
 pub use event_store::EventStore;
 pub use execution_events::{EventBroadcaster, ExecutionEvent};

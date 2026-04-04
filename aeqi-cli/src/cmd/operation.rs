@@ -14,7 +14,7 @@ pub(crate) async fn cmd_operation(
 
     match action {
         OperationAction::Create { name, task_ids } => {
-            let tasks: Vec<(aeqi_tasks::TaskId, String)> = task_ids
+            let tasks: Vec<(aeqi_quests::QuestId, String)> = task_ids
                 .iter()
                 .map(|id| {
                     let prefix = id.split('-').next().unwrap_or("");
@@ -24,7 +24,7 @@ pub(crate) async fn cmd_operation(
                         .find(|r| r.prefix == prefix)
                         .map(|r| r.name.clone())
                         .unwrap_or_else(|| "unknown".to_string());
-                    (aeqi_tasks::TaskId::from(id.as_str()), project_name)
+                    (aeqi_quests::QuestId::from(id.as_str()), project_name)
                 })
                 .collect();
 

@@ -10,12 +10,12 @@ path = "src/main.rs"
 
 [dependencies]
 aeqi-core = { workspace = true }
-aeqi-tasks = { workspace = true }
+aeqi-quests = { workspace = true }
 aeqi-providers = { workspace = true }
 aeqi-tools = { workspace = true }
 aeqi-orchestrator = { workspace = true }
 aeqi-gates = { workspace = true }
-aeqi-memory = { workspace = true }
+aeqi-insights = { workspace = true }
 aeqi-web = { workspace = true }
 aeqi-graph = { workspace = true }
 

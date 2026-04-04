@@ -1,4 +1,4 @@
-use aeqi_tasks::{Priority, Task, TaskStatus};
+use aeqi_quests::{Priority, Quest, QuestStatus};
 use anyhow::Result;
 use chrono::{Local, Utc};
 use serde::Serialize;
@@ -247,16 +247,16 @@ fn build_project_monitor(
         .copied()
         .filter(|task| !task.is_closed())
         .collect();
-    let blocked_tasks = sort_tasks(
+    let blocked_tasks = sort_quests(
         open_tasks
             .iter()
             .copied()
-            .filter(|task| task.status == TaskStatus::Blocked)
+            .filter(|task| task.status == QuestStatus::Blocked)
             .collect(),
     );
     let in_progress_tasks = open_tasks
         .iter()
-        .filter(|task| task.status == TaskStatus::InProgress)
+        .filter(|task| task.status == QuestStatus::InProgress)
         .count();
     let critical_ready_tasks = ready_tasks
         .iter()
@@ -265,7 +265,7 @@ fn build_project_monitor(
     let budget_blocked_tasks = open_tasks
         .iter()
         .filter(|task| {
-            task.status == TaskStatus::Blocked
+            task.status == QuestStatus::Blocked
                 && task
                     .labels
                     .iter()
@@ -290,18 +290,18 @@ fn build_project_monitor(
         top_ready_tasks: ready_tasks
             .iter()
             .take(3)
-            .map(|task| task_brief(task))
+            .map(|task| quest_brief(task))
             .collect(),
         top_blocked_tasks: blocked_tasks
             .iter()
             .take(3)
-            .map(|task| task_brief(task))
+            .map(|task| quest_brief(task))
             .collect(),
         task_store_error: None,
     }
 }
 
-fn sort_tasks(mut tasks: Vec<&Task>) -> Vec<&Task> {
+fn sort_quests(mut tasks: Vec<&Quest>) -> Vec<&Quest> {
     tasks.sort_by(|a, b| {
         b.priority
             .cmp(&a.priority)
@@ -310,8 +310,8 @@ fn sort_tasks(mut tasks: Vec<&Task>) -> Vec<&Task> {
     tasks
 }
 
-fn task_brief(task: &Task) -> String {
-    format!("{} [{}] {}", task.id, task.priority, task.subject)
+fn quest_brief(quest: &Quest) -> String {
+    format!("{} [{}] {}", quest.id, quest.priority, quest.name)
 }
 
 fn build_interventions(daemon: &DaemonMonitor, projects: &[ProjectMonitor]) -> Vec<String> {

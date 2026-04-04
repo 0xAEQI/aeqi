@@ -1,19 +1,19 @@
-use crate::store::TaskBoard;
-use crate::task::{Priority, Task, TaskStatus};
+use crate::store::QuestBoard;
+use crate::quest::{Priority, Quest, QuestStatus};
 
-/// Query builder for filtering tasks.
-pub struct TaskQuery<'a> {
-    store: &'a TaskBoard,
+/// Query builder for filtering quests.
+pub struct QuestQuery<'a> {
+    store: &'a QuestBoard,
     prefix: Option<String>,
-    status: Option<TaskStatus>,
+    status: Option<QuestStatus>,
     assignee: Option<String>,
     label: Option<String>,
     min_priority: Option<Priority>,
     include_closed: bool,
 }
 
-impl<'a> TaskQuery<'a> {
-    pub fn new(store: &'a TaskBoard) -> Self {
+impl<'a> QuestQuery<'a> {
+    pub fn new(store: &'a QuestBoard) -> Self {
         Self {
             store,
             prefix: None,
@@ -30,7 +30,7 @@ impl<'a> TaskQuery<'a> {
         self
     }
 
-    pub fn status(mut self, status: TaskStatus) -> Self {
+    pub fn status(mut self, status: QuestStatus) -> Self {
         self.status = Some(status);
         self
     }
@@ -55,9 +55,9 @@ impl<'a> TaskQuery<'a> {
         self
     }
 
-    /// Execute the query, returning matching tasks sorted by priority then creation time.
-    pub fn execute(self) -> Vec<&'a Task> {
-        let mut results: Vec<&Task> = self
+    /// Execute the query, returning matching quests sorted by priority then creation time.
+    pub fn execute(self) -> Vec<&'a Quest> {
+        let mut results: Vec<&Quest> = self
             .store
             .all()
             .into_iter()

@@ -66,7 +66,7 @@ impl ContextBudget {
     }
 
     /// Summarize old checkpoints, keep recent ones verbatim.
-    pub fn budget_checkpoints(&self, checkpoints: &[aeqi_tasks::Checkpoint]) -> String {
+    pub fn budget_checkpoints(&self, checkpoints: &[aeqi_quests::Checkpoint]) -> String {
         if checkpoints.is_empty() {
             return String::new();
         }
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn test_budget_checkpoints_few() {
         let budget = ContextBudget::default();
-        let cps = vec![aeqi_tasks::Checkpoint {
+        let cps = vec![aeqi_quests::Checkpoint {
             timestamp: chrono::Utc::now(),
             worker: "s1".into(),
             progress: "did thing 1".into(),
@@ -230,7 +230,7 @@ mod tests {
             ..Default::default()
         };
         let cps: Vec<_> = (0..10)
-            .map(|i| aeqi_tasks::Checkpoint {
+            .map(|i| aeqi_quests::Checkpoint {
                 timestamp: chrono::Utc::now(),
                 worker: format!("s{i}"),
                 progress: format!("progress for attempt {i}"),

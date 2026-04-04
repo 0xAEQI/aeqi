@@ -328,7 +328,7 @@ Each event type has its own React component. No translation layer. The event IS 
 aeqi-core       Agent loop, config, identity, traits
 aeqi-session    SessionManager, SessionStore, spawn logic
 aeqi-task       Task DAG, status machine
-aeqi-memory     SQLite + FTS5 + vector, three-tier scoping
+aeqi-insights     SQLite + FTS5 + vector, three-tier scoping
 aeqi-tools      Built-in tools, skill loader, MCP client
 aeqi-providers  OpenRouter, Anthropic, Ollama
 aeqi-web        Axum REST + WebSocket

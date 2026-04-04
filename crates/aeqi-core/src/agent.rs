@@ -5,9 +5,9 @@ use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, info, warn};
 
 use crate::traits::{
-    ChatRequest, ChatResponse, ContentPart, ContextAttachment, Event, LoopAction, Memory,
-    MemoryCategory, Message, MessageContent, Observer, Provider, Role, StopReason, Tool,
-    ToolResult, ToolSpec, Usage,
+    ChatRequest, ChatResponse, ContentPart, ContextAttachment, Event, Insight, InsightCategory,
+    LoopAction, Message, MessageContent, Observer, Provider, Role, StopReason, Tool, ToolResult,
+    ToolSpec, Usage,
 };
 
 /// Generic notification that can be injected into the agent loop between turns.
@@ -569,7 +569,7 @@ pub struct Agent {
     tools: Vec<Arc<dyn Tool>>,
     observer: Arc<dyn Observer>,
     system_prompt: String,
-    memory: Option<Arc<dyn Memory>>,
+    memory: Option<Arc<dyn Insight>>,
     chat_stream: Option<crate::chat_stream::ChatStreamSender>,
     /// Receiver for notifications from background agents. Drained between turns.
     notification_rx: Option<Arc<Mutex<NotificationReceiver>>>,
@@ -610,7 +610,7 @@ impl Agent {
     }
 
     /// Attach a memory backend for context recall.
-    pub fn with_memory(mut self, memory: Arc<dyn Memory>) -> Self {
+    pub fn with_memory(mut self, memory: Arc<dyn Insight>) -> Self {
         self.memory = Some(memory);
         self
     }
@@ -2181,7 +2181,7 @@ impl Agent {
     /// tool-use turns when enough context has accumulated. Stores a running
     /// session summary in memory for cheaper compaction.
     fn maybe_extract_session_memory(
-        memory: &Option<Arc<dyn Memory>>,
+        memory: &Option<Arc<dyn Insight>>,
         messages: &[Message],
         tracker: &ContextTracker,
         agent_name: &str,
@@ -2210,7 +2210,7 @@ impl Agent {
                 .store(
                     SESSION_MEMORY_KEY,
                     &summary,
-                    MemoryCategory::Context,
+                    InsightCategory::Context,
                     agent_id.as_deref(),
                 )
                 .await
@@ -3073,7 +3073,7 @@ impl Agent {
         transcript
     }
 
-    async fn store_insights(&self, text: &str, mem: &Arc<dyn Memory>) {
+    async fn store_insights(&self, text: &str, mem: &Arc<dyn Insight>) {
         for line in text.lines() {
             let line = line.trim();
             if line == "NONE" || line.is_empty() {
@@ -3106,10 +3106,10 @@ impl Agent {
             };
 
             let category = match cat_str.trim().to_uppercase().as_str() {
-                "FACT" => MemoryCategory::Fact,
-                "PROCEDURE" => MemoryCategory::Procedure,
-                "PREFERENCE" => MemoryCategory::Preference,
-                "CONTEXT" => MemoryCategory::Context,
+                "FACT" => InsightCategory::Fact,
+                "PROCEDURE" => InsightCategory::Procedure,
+                "PREFERENCE" => InsightCategory::Preference,
+                "CONTEXT" => InsightCategory::Context,
                 _ => continue,
             };
 

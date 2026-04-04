@@ -103,7 +103,7 @@ pub(crate) async fn cmd_pipeline(
                 };
                 println!(
                     "  {} [{}] {} ({})",
-                    child.id, child.status, child.subject, deps
+                    child.id, child.status, child.name, deps
                 );
             }
         }
@@ -139,21 +139,21 @@ pub(crate) async fn cmd_pipeline(
                 .context(format!("no project with prefix '{prefix}'"))?;
 
             let store = open_tasks_for_project(&project_name)?;
-            let parent_id = aeqi_tasks::TaskId::from(id.as_str());
+            let parent_id = aeqi_quests::QuestId::from(id.as_str());
 
             if let Some(parent) = store.get(&id) {
-                println!("{} [{}] {}", parent.id, parent.status, parent.subject);
+                println!("{} [{}] {}", parent.id, parent.status, parent.name);
                 let children = store.children(&parent_id);
                 let done = children.iter().filter(|c| c.is_closed()).count();
                 println!("Progress: {}/{}\n", done, children.len());
                 for child in &children {
                     let status_icon = match child.status {
-                        aeqi_tasks::TaskStatus::Done => "[x]",
-                        aeqi_tasks::TaskStatus::InProgress => "[~]",
-                        aeqi_tasks::TaskStatus::Cancelled => "[-]",
+                        aeqi_quests::QuestStatus::Done => "[x]",
+                        aeqi_quests::QuestStatus::InProgress => "[~]",
+                        aeqi_quests::QuestStatus::Cancelled => "[-]",
                         _ => "[ ]",
                     };
-                    println!("  {} {} {}", status_icon, child.id, child.subject);
+                    println!("  {} {} {}", status_icon, child.id, child.name);
                 }
             } else {
                 println!("Task not found: {id}");

@@ -20,7 +20,7 @@ pub struct Event {
     pub event_type: String,
     pub agent_id: Option<String>,
     pub session_id: Option<String>,
-    pub task_id: Option<String>,
+    pub quest_id: Option<String>,
     pub content: serde_json::Value,
     pub created_at: DateTime<Utc>,
 }
@@ -31,7 +31,7 @@ pub struct EventFilter {
     pub event_type: Option<String>,
     pub agent_id: Option<String>,
     pub session_id: Option<String>,
-    pub task_id: Option<String>,
+    pub quest_id: Option<String>,
     pub since: Option<DateTime<Utc>>,
     pub since_id: Option<String>,
 }
@@ -55,14 +55,14 @@ impl EventStore {
                  type TEXT NOT NULL,
                  agent_id TEXT,
                  session_id TEXT,
-                 task_id TEXT,
+                 quest_id TEXT,
                  content TEXT NOT NULL DEFAULT '{}',
                  created_at TEXT NOT NULL
              );
              CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
              CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent_id);
              CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
-             CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id);
+             CREATE INDEX IF NOT EXISTS idx_events_quest ON events(quest_id);
              CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);",
         )?;
 
@@ -82,7 +82,7 @@ impl EventStore {
         event_type: &str,
         agent_id: Option<&str>,
         session_id: Option<&str>,
-        task_id: Option<&str>,
+        quest_id: Option<&str>,
         content: &serde_json::Value,
     ) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
@@ -91,14 +91,14 @@ impl EventStore {
 
         let db = self.db.lock().await;
         db.execute(
-            "INSERT INTO events (id, type, agent_id, session_id, task_id, content, created_at)
+            "INSERT INTO events (id, type, agent_id, session_id, quest_id, content, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 id,
                 event_type,
                 agent_id,
                 session_id,
-                task_id,
+                quest_id,
                 content_str,
                 now
             ],
@@ -130,8 +130,8 @@ impl EventStore {
             param_values.push(Box::new(s.clone()));
             idx += 1;
         }
-        if let Some(ref t) = filter.task_id {
-            sql.push_str(&format!(" AND task_id = ?{idx}"));
+        if let Some(ref t) = filter.quest_id {
+            sql.push_str(&format!(" AND quest_id = ?{idx}"));
             param_values.push(Box::new(t.clone()));
             idx += 1;
         }
@@ -291,6 +291,88 @@ impl EventStore {
         Ok(rows)
     }
 
+    // -----------------------------------------------------------------------
+    // Cost helpers (replaces CostLedger)
+    // -----------------------------------------------------------------------
+
+    /// Record a cost event.
+    pub async fn record_cost(
+        &self,
+        agent_id: &str,
+        quest_id: &str,
+        agent_name: &str,
+        cost_usd: f64,
+        turns: u32,
+    ) -> Result<String> {
+        self.emit(
+            "cost",
+            Some(agent_id),
+            None,
+            Some(quest_id),
+            &serde_json::json!({
+                "agent_name": agent_name,
+                "cost_usd": cost_usd,
+                "turns": turns,
+            }),
+        )
+        .await
+    }
+
+    /// Get total cost for today.
+    pub async fn daily_cost(&self) -> Result<f64> {
+        let today = chrono::Utc::now()
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        let today = DateTime::<Utc>::from_naive_utc_and_offset(today, Utc);
+        self.query_sum("cost", "$.cost_usd", Some(&today)).await
+    }
+
+    /// Get all project costs for today as a map.
+    pub async fn daily_costs_by_project(&self) -> Result<std::collections::HashMap<String, f64>> {
+        let today = chrono::Utc::now()
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        let today_str = DateTime::<Utc>::from_naive_utc_and_offset(today, Utc).to_rfc3339();
+        let db = self.db.lock().await;
+        let mut stmt = db.prepare(
+            "SELECT json_extract(content, '$.project') as project,
+                    SUM(json_extract(content, '$.cost_usd')) as total
+             FROM events WHERE type = 'cost' AND created_at >= ?1
+             GROUP BY project",
+        )?;
+        let rows: Vec<(String, f64)> = stmt
+            .query_map(params![today_str], |row| {
+                Ok((
+                    row.get::<_, String>(0).unwrap_or_default(),
+                    row.get::<_, f64>(1).unwrap_or(0.0),
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows.into_iter().collect())
+    }
+
+    /// Get total cost for a specific project today.
+    pub async fn daily_cost_by_project(&self, project: &str) -> Result<f64> {
+        let today = chrono::Utc::now()
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        let today_str = DateTime::<Utc>::from_naive_utc_and_offset(today, Utc).to_rfc3339();
+        let db = self.db.lock().await;
+        let result: f64 = db.query_row(
+            "SELECT COALESCE(SUM(json_extract(content, '$.cost_usd')), 0.0)
+             FROM events WHERE type = 'cost'
+             AND json_extract(content, '$.project') = ?1
+             AND created_at >= ?2",
+            params![project, today_str],
+            |row| row.get(0),
+        )?;
+        Ok(result)
+    }
+
     /// Delete old events (for pruning).
     pub async fn prune(&self, event_type: &str, older_than: &DateTime<Utc>) -> Result<u64> {
         let db = self.db.lock().await;
@@ -300,6 +382,205 @@ impl EventStore {
         )?;
         Ok(deleted as u64)
     }
+
+    // -----------------------------------------------------------------------
+    // Dispatch helpers (replaces DispatchBus SQLite/memory backends)
+    // -----------------------------------------------------------------------
+
+    /// Send a dispatch: store as a "dispatch" event. Returns the event ID.
+    ///
+    /// Content JSON stores: from, to, kind, status, requires_ack, retry_count,
+    /// max_retries, first_sent_at, idempotency_key.
+    pub async fn send_dispatch(&self, content: &serde_json::Value) -> Result<String> {
+        // Idempotency check: if idempotency_key is set, reject duplicates.
+        if let Some(key) = content.get("idempotency_key").and_then(|v| v.as_str()) {
+            if !key.is_empty() {
+                let db = self.db.lock().await;
+                let exists: bool = db.query_row(
+                    "SELECT COUNT(*) > 0 FROM events
+                     WHERE type = 'dispatch'
+                     AND json_extract(content, '$.idempotency_key') = ?1",
+                    params![key],
+                    |row| row.get(0),
+                )?;
+                if exists {
+                    debug!(key = %key, "dispatch dropped (idempotency key already exists)");
+                    anyhow::bail!("idempotency_key_exists");
+                }
+                drop(db);
+            }
+        }
+
+        self.emit("dispatch", None, None, None, content).await
+    }
+
+    /// Read unread dispatches for a recipient, marking them as read.
+    pub async fn read_dispatches(&self, recipient: &str) -> Result<Vec<Event>> {
+        let db = self.db.lock().await;
+
+        // Find unread dispatches addressed to this recipient.
+        let mut stmt = db.prepare(
+            "SELECT * FROM events
+             WHERE type = 'dispatch'
+             AND json_extract(content, '$.to') = ?1
+             AND json_extract(content, '$.status') = 'pending'
+             ORDER BY created_at ASC",
+        )?;
+        let events: Vec<Event> = stmt
+            .query_map(params![recipient], |row| Ok(row_to_event(row)))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // Mark them as read.
+        for event in &events {
+            let _ = db.execute(
+                "UPDATE events SET content = json_set(content, '$.status', 'read')
+                 WHERE id = ?1",
+                params![event.id],
+            );
+        }
+
+        Ok(events)
+    }
+
+    /// Acknowledge a dispatch by event ID, preventing future retries.
+    pub async fn acknowledge_dispatch(&self, dispatch_id: &str) -> Result<()> {
+        let db = self.db.lock().await;
+        db.execute(
+            "UPDATE events SET content = json_set(
+                json_set(content, '$.status', 'acked'),
+                '$.requires_ack', json('false')
+             )
+             WHERE type = 'dispatch'
+             AND json_extract(content, '$.dispatch_id') = ?1",
+            params![dispatch_id],
+        )?;
+        Ok(())
+    }
+
+    /// Get all dispatches (for health checks, listing, etc.).
+    pub async fn all_dispatches(&self) -> Result<Vec<Event>> {
+        let db = self.db.lock().await;
+        let mut stmt = db.prepare(
+            "SELECT * FROM events WHERE type = 'dispatch' ORDER BY created_at ASC",
+        )?;
+        let events = stmt
+            .query_map([], |row| Ok(row_to_event(row)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(events)
+    }
+
+    /// Drain all unread dispatches (mark as read, return them).
+    pub async fn drain_dispatches(&self) -> Result<Vec<Event>> {
+        let db = self.db.lock().await;
+        let mut stmt = db.prepare(
+            "SELECT * FROM events
+             WHERE type = 'dispatch'
+             AND json_extract(content, '$.status') = 'pending'
+             ORDER BY created_at ASC",
+        )?;
+        let events: Vec<Event> = stmt
+            .query_map([], |row| Ok(row_to_event(row)))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        for event in &events {
+            let _ = db.execute(
+                "UPDATE events SET content = json_set(content, '$.status', 'read')
+                 WHERE id = ?1",
+                params![event.id],
+            );
+        }
+
+        Ok(events)
+    }
+
+    /// Count pending (unread) dispatches.
+    pub async fn pending_dispatch_count(&self) -> Result<u64> {
+        let db = self.db.lock().await;
+        let count: i64 = db.query_row(
+            "SELECT COUNT(*) FROM events
+             WHERE type = 'dispatch'
+             AND json_extract(content, '$.status') = 'pending'",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count as u64)
+    }
+
+    /// Count unread dispatches for a specific recipient.
+    pub async fn unread_dispatch_count(&self, recipient: &str) -> Result<u64> {
+        let db = self.db.lock().await;
+        let count: i64 = db.query_row(
+            "SELECT COUNT(*) FROM events
+             WHERE type = 'dispatch'
+             AND json_extract(content, '$.to') = ?1
+             AND json_extract(content, '$.status') = 'pending'",
+            params![recipient],
+            |row| row.get(0),
+        )?;
+        Ok(count as u64)
+    }
+
+    /// Retry unacknowledged dispatches older than `max_age_secs` that haven't
+    /// exceeded their retry limit. Increments retry_count, resets status to pending.
+    pub async fn retry_unacked_dispatches(&self, max_age_secs: u64) -> Result<Vec<Event>> {
+        let cutoff = (Utc::now() - chrono::Duration::seconds(max_age_secs as i64)).to_rfc3339();
+        let now = Utc::now().to_rfc3339();
+        let db = self.db.lock().await;
+
+        // Update matching dispatches: status=read, requires_ack=true,
+        // retry_count < max_retries, created_at < cutoff.
+        db.execute(
+            "UPDATE events SET content = json_set(
+                json_set(
+                    json_set(content, '$.status', 'pending'),
+                    '$.retry_count', json_extract(content, '$.retry_count') + 1
+                ),
+                '$.retried_at', ?1
+             )
+             WHERE type = 'dispatch'
+             AND json_extract(content, '$.status') = 'read'
+             AND json_extract(content, '$.requires_ack') = 1
+             AND json_extract(content, '$.retry_count') < json_extract(content, '$.max_retries')
+             AND created_at <= ?2",
+            params![now, cutoff],
+        )?;
+
+        // Return the retried dispatches.
+        let mut stmt = db.prepare(
+            "SELECT * FROM events
+             WHERE type = 'dispatch'
+             AND json_extract(content, '$.status') = 'pending'
+             AND json_extract(content, '$.requires_ack') = 1
+             AND json_extract(content, '$.retry_count') > 0
+             AND json_extract(content, '$.retry_count') < json_extract(content, '$.max_retries')
+             ORDER BY created_at ASC",
+        )?;
+        let events = stmt
+            .query_map([], |row| Ok(row_to_event(row)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(events)
+    }
+
+    /// Return dispatches that have exceeded their max retry count (dead letters).
+    pub async fn dead_letter_dispatches(&self) -> Result<Vec<Event>> {
+        let db = self.db.lock().await;
+        let mut stmt = db.prepare(
+            "SELECT * FROM events
+             WHERE type = 'dispatch'
+             AND json_extract(content, '$.requires_ack') = 1
+             AND json_extract(content, '$.retry_count') >= json_extract(content, '$.max_retries')
+             ORDER BY created_at ASC",
+        )?;
+        let events = stmt
+            .query_map([], |row| Ok(row_to_event(row)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(events)
+    }
 }
 
 fn row_to_event(row: &rusqlite::Row) -> Event {
@@ -308,7 +589,7 @@ fn row_to_event(row: &rusqlite::Row) -> Event {
         event_type: row.get("type").unwrap_or_default(),
         agent_id: row.get("agent_id").ok(),
         session_id: row.get("session_id").ok(),
-        task_id: row.get("task_id").ok(),
+        quest_id: row.get("quest_id").ok(),
         content: row
             .get::<_, String>("content")
             .ok()

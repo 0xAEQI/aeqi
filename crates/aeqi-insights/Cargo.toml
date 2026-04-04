@@ -1,8 +1,8 @@
 [package]
-name = "aeqi-memory"
+name = "aeqi-insights"
 version.workspace = true
 edition.workspace = true
-description = "Hybrid memory system with SQLite FTS5 and vector search"
+description = "Hybrid insight store with SQLite FTS5 and vector search"
 
 [dev-dependencies]
 tempfile = { workspace = true }

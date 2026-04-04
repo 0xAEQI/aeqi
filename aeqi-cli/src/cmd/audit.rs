@@ -18,7 +18,7 @@ pub(crate) async fn cmd_audit(
 
     let filter = aeqi_orchestrator::event_store::EventFilter {
         event_type: Some("decision".to_string()),
-        task_id: task.map(String::from),
+        quest_id: task.map(String::from),
         ..Default::default()
     };
 
@@ -30,7 +30,7 @@ pub(crate) async fn cmd_audit(
     }
 
     for event in &events {
-        let task_str = event.task_id.as_deref().unwrap_or("-");
+        let task_str = event.quest_id.as_deref().unwrap_or("-");
         let agent_str = event
             .content
             .get("agent")

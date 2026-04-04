@@ -449,8 +449,15 @@ impl Tool for DelegateTool {
 mod tests {
     use super::*;
 
+    fn test_event_store() -> Arc<crate::event_store::EventStore> {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::event_store::EventStore::create_tables(&conn).unwrap();
+        let db = Arc::new(tokio::sync::Mutex::new(conn));
+        Arc::new(crate::event_store::EventStore::new(db))
+    }
+
     fn make_tool() -> DelegateTool {
-        let bus = Arc::new(DispatchBus::new());
+        let bus = Arc::new(DispatchBus::new(test_event_store()));
         DelegateTool::new(bus, "test-agent".to_string())
     }
 
@@ -497,7 +504,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_subagent_with_fallback_target() {
-        let bus = Arc::new(DispatchBus::new());
+        let bus = Arc::new(DispatchBus::new(test_event_store()));
         let mut tool = DelegateTool::new(bus.clone(), "caller".to_string());
         tool.fallback_target = Some("leader".to_string());
 
@@ -586,7 +593,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_dispatch_actually_sent() {
-        let bus = Arc::new(DispatchBus::new());
+        let bus = Arc::new(DispatchBus::new(test_event_store()));
         let tool = DelegateTool::new(bus.clone(), "sender".to_string());
 
         let args = serde_json::json!({
@@ -606,7 +613,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_department_dispatch_sent() {
-        let bus = Arc::new(DispatchBus::new());
+        let bus = Arc::new(DispatchBus::new(test_event_store()));
         let tool = DelegateTool::new(bus.clone(), "leader".to_string());
 
         let args = serde_json::json!({

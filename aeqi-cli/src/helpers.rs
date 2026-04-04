@@ -13,9 +13,9 @@ fn resolve_env_value(value: &str) -> String {
         trimmed.to_string()
     }
 }
-use aeqi_memory::SqliteMemory;
+use aeqi_insights::SqliteInsights;
 use aeqi_providers::{AnthropicProvider, OllamaProvider, OpenRouterEmbedder, OpenRouterProvider};
-use aeqi_tasks::TaskBoard;
+use aeqi_quests::QuestBoard;
 use aeqi_tools::{
     ExecutePlanTool, FileEditTool, FileReadTool, FileWriteTool, GitWorktreeTool, GlobTool,
     GrepTool, ListDirTool, PorkbunTool, SecretsTool, ShellTool, TaskCloseTool, TaskCreateTool,
@@ -318,13 +318,13 @@ pub(crate) fn project_name_for_prefix(config: &AEQIConfig, prefix: &str) -> Opti
         .map(|r| r.name.clone())
 }
 
-pub(crate) fn open_tasks_for_project(project_name: &str) -> Result<TaskBoard> {
+pub(crate) fn open_tasks_for_project(project_name: &str) -> Result<QuestBoard> {
     let owner_dir = find_project_dir(project_name).or_else(|_| find_agent_dir(project_name))?;
     let tasks_dir = owner_dir.join(".tasks");
-    TaskBoard::open(&tasks_dir)
+    QuestBoard::open(&tasks_dir)
 }
 
-pub(crate) fn open_memory(config: &AEQIConfig, project_name: Option<&str>) -> Result<SqliteMemory> {
+pub(crate) fn open_insights(config: &AEQIConfig, project_name: Option<&str>) -> Result<SqliteInsights> {
     let db_path = if let Some(name) = project_name {
         let project_dir = find_project_dir(name)?;
         project_dir.join(".aeqi").join("memory.db")
@@ -335,7 +335,7 @@ pub(crate) fn open_memory(config: &AEQIConfig, project_name: Option<&str>) -> Re
         std::fs::create_dir_all(parent).ok();
     }
     let halflife = config.memory.temporal_decay_halflife_days;
-    let mem = SqliteMemory::open(&db_path, halflife)?;
+    let mem = SqliteInsights::open(&db_path, halflife)?;
 
     let api_key = get_api_key(config).ok();
     let embedding_model = config
@@ -430,7 +430,9 @@ pub(crate) async fn handle_fast_lane(
              /help — This message"
             .to_string(),
         "/cost" => {
-            let (spent, budget, remaining) = scheduler.cost_ledger.budget_status();
+            let spent = scheduler.event_store.daily_cost().await.unwrap_or(0.0);
+            let budget = scheduler.config.daily_budget_usd;
+            let remaining = (budget - spent).max(0.0);
             format!(
                 "*Cost — Today*\n\n  Spent: ${spent:.2}\n  Budget: ${budget:.2}\n  Remaining: ${remaining:.2}"
             )

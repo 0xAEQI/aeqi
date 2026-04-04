@@ -1,5 +1,5 @@
 use crate::graph::{MemoryEdge, MemoryRelation};
-use aeqi_core::traits::{Embedder, Memory, MemoryCategory, MemoryEntry, MemoryQuery};
+use aeqi_core::traits::{Embedder, Insight, InsightCategory, InsightEntry, InsightQuery};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -22,7 +22,7 @@ struct MemRow {
     session_id: Option<String>,
 }
 
-pub struct SqliteMemory {
+pub struct SqliteInsights {
     conn: Mutex<Connection>,
     decay_halflife_days: f64,
     embedder: Option<Arc<dyn Embedder>>,
@@ -32,7 +32,7 @@ pub struct SqliteMemory {
     mmr_lambda: f64,
 }
 
-impl SqliteMemory {
+impl SqliteInsights {
     pub fn open(path: &Path, decay_halflife_days: f64) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -60,8 +60,11 @@ impl SqliteMemory {
             true
         }))?;
 
+        // Migrate: rename memories → insights for existing databases.
+        Self::migrate_table_rename(&conn)?;
+
         conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS memories (
+            "CREATE TABLE IF NOT EXISTS insights (
                 id TEXT PRIMARY KEY,
                 key TEXT NOT NULL,
                 content TEXT NOT NULL,
@@ -73,44 +76,44 @@ impl SqliteMemory {
                 updated_at TEXT
             );
 
-            CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key);
-            CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
-            CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
+            CREATE INDEX IF NOT EXISTS idx_insights_key ON insights(key);
+            CREATE INDEX IF NOT EXISTS idx_insights_category ON insights(category);
+            CREATE INDEX IF NOT EXISTS idx_insights_created ON insights(created_at);
             ",
         )?;
 
         Self::migrate(&conn)?;
 
         conn.execute_batch(
-            "CREATE INDEX IF NOT EXISTS idx_memories_entity ON memories(entity_id);",
+            "CREATE INDEX IF NOT EXISTS idx_insights_entity ON insights(entity_id);",
         )?;
 
         let fts_exists: bool = conn.query_row(
-            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='memories_fts'",
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='insights_fts'",
             [],
             |row| row.get(0),
         )?;
 
         if !fts_exists {
             conn.execute_batch(
-                "CREATE VIRTUAL TABLE memories_fts USING fts5(
-                    key, content, content=memories, content_rowid=rowid
+                "CREATE VIRTUAL TABLE insights_fts USING fts5(
+                    key, content, content=insights, content_rowid=rowid
                 );
 
-                CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-                    INSERT INTO memories_fts(rowid, key, content) VALUES (new.rowid, new.key, new.content);
+                CREATE TRIGGER IF NOT EXISTS insights_ai AFTER INSERT ON insights BEGIN
+                    INSERT INTO insights_fts(rowid, key, content) VALUES (new.rowid, new.key, new.content);
                 END;
 
-                CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-                    INSERT INTO memories_fts(memories_fts, rowid, key, content) VALUES('delete', old.rowid, old.key, old.content);
+                CREATE TRIGGER IF NOT EXISTS insights_ad AFTER DELETE ON insights BEGIN
+                    INSERT INTO insights_fts(insights_fts, rowid, key, content) VALUES('delete', old.rowid, old.key, old.content);
                 END;
 
-                CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-                    INSERT INTO memories_fts(memories_fts, rowid, key, content) VALUES('delete', old.rowid, old.key, old.content);
-                    INSERT INTO memories_fts(rowid, key, content) VALUES (new.rowid, new.key, new.content);
+                CREATE TRIGGER IF NOT EXISTS insights_au AFTER UPDATE ON insights BEGIN
+                    INSERT INTO insights_fts(insights_fts, rowid, key, content) VALUES('delete', old.rowid, old.key, old.content);
+                    INSERT INTO insights_fts(rowid, key, content) VALUES (new.rowid, new.key, new.content);
                 END;
 
-                INSERT INTO memories_fts(memories_fts) VALUES('rebuild');",
+                INSERT INTO insights_fts(insights_fts) VALUES('rebuild');",
             )?;
         }
 
@@ -168,36 +171,72 @@ impl SqliteMemory {
         Ok(self)
     }
 
+    /// Migrate: rename `memories` table to `insights` for existing databases.
+    fn migrate_table_rename(conn: &Connection) -> Result<()> {
+        let has_memories: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='memories'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_memories {
+            return Ok(());
+        }
+
+        // Drop old FTS triggers and virtual table (they reference 'memories').
+        conn.execute_batch(
+            "DROP TRIGGER IF EXISTS memories_ai;
+             DROP TRIGGER IF EXISTS memories_ad;
+             DROP TRIGGER IF EXISTS memories_au;
+             DROP TABLE IF EXISTS insights_fts;",
+        )?;
+
+        // Rename the main table.
+        conn.execute_batch("ALTER TABLE memories RENAME TO insights;")?;
+
+        // Rename indexes (SQLite doesn't support ALTER INDEX, so drop + recreate).
+        conn.execute_batch(
+            "DROP INDEX IF EXISTS idx_memories_key;
+             DROP INDEX IF EXISTS idx_memories_category;
+             DROP INDEX IF EXISTS idx_memories_created;
+             DROP INDEX IF EXISTS idx_memories_entity;
+             DROP INDEX IF EXISTS idx_memories_scope;
+             DROP INDEX IF EXISTS idx_memories_companion;",
+        )?;
+
+        debug!("migrated: renamed memories table → insights");
+        Ok(())
+    }
+
     fn migrate(conn: &Connection) -> Result<()> {
         let has_scope: bool = conn
-            .prepare("SELECT COUNT(*) FROM pragma_table_info('memories') WHERE name='scope'")?
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('insights') WHERE name='scope'")?
             .query_row([], |row| row.get(0))?;
 
         if !has_scope {
             conn.execute_batch(
-                "ALTER TABLE memories ADD COLUMN scope TEXT NOT NULL DEFAULT 'domain';
-                 ALTER TABLE memories ADD COLUMN entity_id TEXT;
-                 CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope);
-                 CREATE INDEX IF NOT EXISTS idx_memories_entity ON memories(entity_id);",
+                "ALTER TABLE insights ADD COLUMN scope TEXT NOT NULL DEFAULT 'domain';
+                 ALTER TABLE insights ADD COLUMN entity_id TEXT;
+                 CREATE INDEX IF NOT EXISTS idx_insights_scope ON insights(scope);
+                 CREATE INDEX IF NOT EXISTS idx_insights_entity ON insights(entity_id);",
             )?;
-            debug!("migrated memories table: added scope + entity_id columns");
+            debug!("migrated insights table: added scope + entity_id columns");
         }
 
         // Rename companion_id → entity_id (for DBs created before the rename).
         let has_companion: bool = conn
             .prepare(
-                "SELECT COUNT(*) FROM pragma_table_info('memories') WHERE name='companion_id'",
+                "SELECT COUNT(*) FROM pragma_table_info('insights') WHERE name='companion_id'",
             )?
             .query_row([], |row| row.get(0))?;
         if has_companion {
             conn.execute_batch(
-                "ALTER TABLE memories RENAME COLUMN companion_id TO entity_id;
-                 UPDATE memories SET scope = 'entity' WHERE scope = 'companion';",
+                "ALTER TABLE insights RENAME COLUMN companion_id TO entity_id;
+                 UPDATE insights SET scope = 'entity' WHERE scope = 'companion';",
             )?;
             // Recreate index under new name.
             conn.execute_batch(
-                "DROP INDEX IF EXISTS idx_memories_companion;
-                 CREATE INDEX IF NOT EXISTS idx_memories_entity ON memories(entity_id);",
+                "DROP INDEX IF EXISTS idx_insights_companion;
+                 CREATE INDEX IF NOT EXISTS idx_insights_entity ON insights(entity_id);",
             )?;
             debug!("migrated: companion_id → entity_id");
         }
@@ -255,7 +294,7 @@ impl SqliteMemory {
 
     fn bm25_search(
         conn: &Connection,
-        query: &MemoryQuery,
+        query: &InsightQuery,
         limit: usize,
     ) -> Result<Vec<(MemRow, f64)>> {
         let fts_query = query
@@ -265,7 +304,7 @@ impl SqliteMemory {
             .collect::<Vec<_>>()
             .join(" OR ");
 
-        let mut conditions = vec!["memories_fts MATCH ?1".to_string()];
+        let mut conditions = vec!["insights_fts MATCH ?1".to_string()];
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(fts_query)];
         let mut idx = 2usize;
 
@@ -279,9 +318,9 @@ impl SqliteMemory {
 
         let sql = format!(
             "SELECT m.id, m.key, m.content, m.category, m.entity_id,
-                    m.created_at, m.session_id, bm25(memories_fts) as rank
-             FROM memories_fts f
-             JOIN memories m ON m.rowid = f.rowid
+                    m.created_at, m.session_id, bm25(insights_fts) as rank
+             FROM insights_fts f
+             JOIN insights m ON m.rowid = f.rowid
              WHERE {where_clause}
              ORDER BY rank
              LIMIT ?{idx}"
@@ -325,7 +364,7 @@ impl SqliteMemory {
         conn: &Connection,
         query_vec: &[f32],
         top_k: usize,
-        query: &MemoryQuery,
+        query: &InsightQuery,
     ) -> Vec<(String, f32)> {
         let mut conditions = vec!["1=1".to_string()];
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
@@ -342,7 +381,7 @@ impl SqliteMemory {
         let sql = format!(
             "SELECT me.memory_id, me.embedding
              FROM memory_embeddings me
-             JOIN memories m ON m.id = me.memory_id
+             JOIN insights m ON m.id = me.memory_id
              WHERE {where_clause}"
         );
 
@@ -386,7 +425,7 @@ impl SqliteMemory {
             .join(",");
         let sql = format!(
             "SELECT id, key, content, category, entity_id, created_at, session_id
-             FROM memories WHERE id IN ({placeholders})"
+             FROM insights WHERE id IN ({placeholders})"
         );
         let params: Vec<&dyn rusqlite::types::ToSql> = ids
             .iter()
@@ -443,14 +482,14 @@ impl SqliteMemory {
         .unwrap_or_default()
     }
 
-    fn parse_category(s: &str) -> MemoryCategory {
+    fn parse_category(s: &str) -> InsightCategory {
         match s {
-            "fact" => MemoryCategory::Fact,
-            "procedure" => MemoryCategory::Procedure,
-            "preference" => MemoryCategory::Preference,
-            "context" => MemoryCategory::Context,
-            "evergreen" => MemoryCategory::Evergreen,
-            _ => MemoryCategory::Fact,
+            "fact" => InsightCategory::Fact,
+            "procedure" => InsightCategory::Procedure,
+            "preference" => InsightCategory::Preference,
+            "context" => InsightCategory::Context,
+            "evergreen" => InsightCategory::Evergreen,
+            _ => InsightCategory::Fact,
         }
     }
 
@@ -463,7 +502,7 @@ impl SqliteMemory {
         };
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM memories WHERE key = ?1 AND created_at > ?2",
+                "SELECT COUNT(*) FROM insights WHERE key = ?1 AND created_at > ?2",
                 rusqlite::params![key, cutoff],
                 |row| row.get(0),
             )
@@ -486,7 +525,7 @@ impl SqliteMemory {
 
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM memories WHERE content = ?1 AND created_at > ?2",
+                "SELECT COUNT(*) FROM insights WHERE content = ?1 AND created_at > ?2",
                 rusqlite::params![content, cutoff],
                 |row| row.get(0),
             )
@@ -498,7 +537,7 @@ impl SqliteMemory {
         count > 0
     }
 
-    fn row_to_entry(&self, row: MemRow, score: f64, query: &MemoryQuery) -> Option<MemoryEntry> {
+    fn row_to_entry(&self, row: MemRow, score: f64, query: &InsightQuery) -> Option<InsightEntry> {
         let category = Self::parse_category(&row.cat_str);
 
         if let Some(ref q_cat) = query.category
@@ -517,13 +556,13 @@ impl SqliteMemory {
             .ok()?
             .with_timezone(&Utc);
 
-        let decay = if category == MemoryCategory::Evergreen {
+        let decay = if category == InsightCategory::Evergreen {
             1.0
         } else {
             self.decay_factor(&created_at)
         };
 
-        Some(MemoryEntry {
+        Some(InsightEntry {
             id: row.id,
             key: row.key,
             content: row.content,
@@ -671,12 +710,12 @@ impl SqliteMemory {
 }
 
 #[async_trait]
-impl Memory for SqliteMemory {
+impl Insight for SqliteInsights {
     async fn store(
         &self,
         key: &str,
         content: &str,
-        category: MemoryCategory,
+        category: InsightCategory,
         agent_id: Option<&str>,
     ) -> Result<String> {
         // Dedup by exact content within 24h
@@ -700,7 +739,7 @@ impl Memory for SqliteMemory {
         {
             let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock: {e}"))?;
             conn.execute(
-                "INSERT INTO memories (id, key, content, category, entity_id, created_at)
+                "INSERT INTO insights (id, key, content, category, entity_id, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 rusqlite::params![id, key, content, cat, agent_id, now],
             )?;
@@ -760,7 +799,7 @@ impl Memory for SqliteMemory {
         Ok(id)
     }
 
-    async fn search(&self, query: &MemoryQuery) -> Result<Vec<MemoryEntry>> {
+    async fn search(&self, query: &InsightQuery) -> Result<Vec<InsightEntry>> {
         // Phase 1: embed query text if embedder present (async, no lock).
         let query_embedding: Option<Vec<f32>> = if let Some(ref embedder) = self.embedder {
             match embedder.embed(&query.text).await {
@@ -796,7 +835,7 @@ impl Memory for SqliteMemory {
 
         // Phase 3: if no vector results, use BM25 path with graph boost.
         if vector_scores.is_empty() {
-            let mut entries: Vec<MemoryEntry> = bm25_rows
+            let mut entries: Vec<InsightEntry> = bm25_rows
                 .into_iter()
                 .filter_map(|(row, bm25_score)| {
                     let raw = -bm25_score; // BM25 from FTS5 is negative, negate to get positive score.
@@ -860,8 +899,8 @@ impl Memory for SqliteMemory {
             HashMap::new()
         };
 
-        // Phase 6: build MemoryEntry for each merged result, applying temporal decay.
-        let mut scored: Vec<(ScoredResult, MemoryEntry)> = Vec::new();
+        // Phase 6: build InsightEntry for each merged result, applying temporal decay.
+        let mut scored: Vec<(ScoredResult, InsightEntry)> = Vec::new();
         for sr in merged.into_iter().take(query.top_k * 2) {
             let row_ref = bm25_map
                 .get(&sr.memory_id)
@@ -919,12 +958,12 @@ impl Memory for SqliteMemory {
         );
 
         // Phase 8: apply graph boost from memory edges.
-        let entry_map: HashMap<String, MemoryEntry> =
+        let entry_map: HashMap<String, InsightEntry> =
             scored.into_iter().map(|(_, e)| (e.id.clone(), e)).collect();
 
         let result_ids: Vec<String> = reranked.iter().map(|r| r.memory_id.clone()).collect();
 
-        let mut result: Vec<MemoryEntry> = reranked
+        let mut result: Vec<InsightEntry> = reranked
             .into_iter()
             .filter_map(|r| {
                 let mut entry = entry_map.get(&r.memory_id)?.clone();
@@ -953,7 +992,7 @@ impl Memory for SqliteMemory {
 
     async fn delete(&self, id: &str) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock: {e}"))?;
-        conn.execute("DELETE FROM memories WHERE id = ?1", rusqlite::params![id])?;
+        conn.execute("DELETE FROM insights WHERE id = ?1", rusqlite::params![id])?;
         conn.execute(
             "DELETE FROM memory_embeddings WHERE memory_id = ?1",
             rusqlite::params![id],
@@ -965,7 +1004,7 @@ impl Memory for SqliteMemory {
         "sqlite"
     }
 
-    async fn store_memory_edge(
+    async fn store_insight_edge(
         &self,
         source_id: &str,
         target_id: &str,
@@ -988,12 +1027,12 @@ mod tests {
     async fn test_store_and_search() {
         let dir = tempfile::TempDir::new().unwrap();
         let db_path = dir.path().join("test_memory.db");
-        let mem = SqliteMemory::open(&db_path, 30.0).unwrap();
+        let mem = SqliteInsights::open(&db_path, 30.0).unwrap();
 
         mem.store(
             "login-flow",
             "The login uses JWT tokens with 24h expiry",
-            MemoryCategory::Fact,
+            InsightCategory::Fact,
             None,
         )
         .await
@@ -1001,7 +1040,7 @@ mod tests {
         mem.store(
             "deploy-process",
             "Deploy by merging to dev branch, auto-deploys",
-            MemoryCategory::Procedure,
+            InsightCategory::Procedure,
             None,
         )
         .await
@@ -1009,21 +1048,21 @@ mod tests {
         mem.store(
             "db-config",
             "PostgreSQL on port 5432 with TimescaleDB",
-            MemoryCategory::Fact,
+            InsightCategory::Fact,
             None,
         )
         .await
         .unwrap();
 
         let results = mem
-            .search(&MemoryQuery::new("login JWT", 10))
+            .search(&InsightQuery::new("login JWT", 10))
             .await
             .unwrap();
         assert!(!results.is_empty());
         assert!(results[0].content.contains("JWT"));
         assert!(results[0].agent_id.is_none());
 
-        let results = mem.search(&MemoryQuery::new("deploy", 10)).await.unwrap();
+        let results = mem.search(&InsightQuery::new("deploy", 10)).await.unwrap();
         assert!(!results.is_empty());
         assert!(results[0].content.contains("deploy"));
     }
@@ -1032,12 +1071,12 @@ mod tests {
     async fn test_agent_scoped_memory() {
         let dir = tempfile::TempDir::new().unwrap();
         let db_path = dir.path().join("test_agent.db");
-        let mem = SqliteMemory::open(&db_path, 30.0).unwrap();
+        let mem = SqliteInsights::open(&db_path, 30.0).unwrap();
 
         mem.store(
             "shared-fact",
             "The API runs on port 8080",
-            MemoryCategory::Fact,
+            InsightCategory::Fact,
             None,
         )
         .await
@@ -1045,7 +1084,7 @@ mod tests {
         mem.store(
             "guardian-note",
             "Risk tolerance is low for this user",
-            MemoryCategory::Preference,
+            InsightCategory::Preference,
             Some("guardian-001"),
         )
         .await
@@ -1053,23 +1092,23 @@ mod tests {
         mem.store(
             "librarian-note",
             "User prefers detailed explanations",
-            MemoryCategory::Preference,
+            InsightCategory::Preference,
             Some("librarian-001"),
         )
         .await
         .unwrap();
 
-        let guardian_query = MemoryQuery::new("risk tolerance", 10).with_agent("guardian-001");
+        let guardian_query = InsightQuery::new("risk tolerance", 10).with_agent("guardian-001");
         let results = mem.search(&guardian_query).await.unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].agent_id.as_deref(), Some("guardian-001"));
 
-        let librarian_query = MemoryQuery::new("risk tolerance", 10).with_agent("librarian-001");
+        let librarian_query = InsightQuery::new("risk tolerance", 10).with_agent("librarian-001");
         let results = mem.search(&librarian_query).await.unwrap();
         assert!(results.is_empty());
 
         // Unscoped query should find the global memory.
-        let global_query = MemoryQuery::new("API port", 10);
+        let global_query = InsightQuery::new("API port", 10);
         let results = mem.search(&global_query).await.unwrap();
         assert!(!results.is_empty());
         assert!(results[0].agent_id.is_none());
@@ -1079,12 +1118,12 @@ mod tests {
     async fn test_agent_filtered_memory() {
         let dir = tempfile::TempDir::new().unwrap();
         let db_path = dir.path().join("test_agent_filter.db");
-        let mem = SqliteMemory::open(&db_path, 30.0).unwrap();
+        let mem = SqliteInsights::open(&db_path, 30.0).unwrap();
 
         mem.store(
             "strategic-pref",
             "Always prefer Rust over Python for new services",
-            MemoryCategory::Preference,
+            InsightCategory::Preference,
             Some("root-agent"),
         )
         .await
@@ -1092,18 +1131,18 @@ mod tests {
         mem.store(
             "domain-fact",
             "The trading engine uses 50us tick",
-            MemoryCategory::Fact,
+            InsightCategory::Fact,
             None,
         )
         .await
         .unwrap();
 
-        let agent_query = MemoryQuery::new("Rust Python", 10).with_agent("root-agent");
+        let agent_query = InsightQuery::new("Rust Python", 10).with_agent("root-agent");
         let results = mem.search(&agent_query).await.unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].agent_id.as_deref(), Some("root-agent"));
 
-        let all_query = MemoryQuery::new("Rust Python services", 10);
+        let all_query = InsightQuery::new("Rust Python services", 10);
         let results = mem.search(&all_query).await.unwrap();
         assert!(!results.is_empty());
     }
@@ -1133,23 +1172,23 @@ mod tests {
             ).unwrap();
         }
 
-        let mem = SqliteMemory::open(&db_path, 30.0).unwrap();
+        let mem = SqliteInsights::open(&db_path, 30.0).unwrap();
 
-        let results = mem.search(&MemoryQuery::new("old data", 10)).await.unwrap();
+        let results = mem.search(&InsightQuery::new("old data", 10)).await.unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].agent_id.is_none());
 
         mem.store(
             "new-fact",
             "New data with agent",
-            MemoryCategory::Fact,
+            InsightCategory::Fact,
             Some("agent-1"),
         )
         .await
         .unwrap();
 
         let results = mem
-            .search(&MemoryQuery::new("New data agent", 10).with_agent("agent-1"))
+            .search(&InsightQuery::new("New data agent", 10).with_agent("agent-1"))
             .await
             .unwrap();
         assert_eq!(results.len(), 1);
@@ -1160,16 +1199,16 @@ mod tests {
     async fn test_delete_removes_embedding() {
         let dir = tempfile::TempDir::new().unwrap();
         let db_path = dir.path().join("test_delete.db");
-        let mem = SqliteMemory::open(&db_path, 30.0).unwrap();
+        let mem = SqliteInsights::open(&db_path, 30.0).unwrap();
 
         let id = mem
-            .store("key", "content", MemoryCategory::Fact, None)
+            .store("key", "content", InsightCategory::Fact, None)
             .await
             .unwrap();
 
         mem.delete(&id).await.unwrap();
 
-        let results = mem.search(&MemoryQuery::new("content", 10)).await.unwrap();
+        let results = mem.search(&InsightQuery::new("content", 10)).await.unwrap();
         assert!(results.is_empty());
     }
 
@@ -1214,7 +1253,7 @@ mod tests {
         let db_path = dir.path().join("test_embed_cache.db");
         let embedder = Arc::new(MockEmbedder::new(4));
 
-        let mem = SqliteMemory::open(&db_path, 30.0)
+        let mem = SqliteInsights::open(&db_path, 30.0)
             .unwrap()
             .with_embedder(embedder.clone(), 4, 0.6, 0.4, 0.7)
             .unwrap();
@@ -1224,7 +1263,7 @@ mod tests {
             .store(
                 "key-1",
                 "identical content for embedding",
-                MemoryCategory::Fact,
+                InsightCategory::Fact,
                 None,
             )
             .await
@@ -1243,7 +1282,7 @@ mod tests {
         // Instead, let's directly test the hash lookup mechanism.
         {
             let conn = mem.conn.lock().unwrap();
-            let hash = SqliteMemory::content_hash("identical content for embedding");
+            let hash = SqliteInsights::content_hash("identical content for embedding");
 
             // Verify the hash was stored.
             let stored_hash: Option<String> = conn
@@ -1260,7 +1299,7 @@ mod tests {
             );
 
             // Verify lookup_embedding_by_hash finds it.
-            let cached = SqliteMemory::lookup_embedding_by_hash(&conn, &hash);
+            let cached = SqliteInsights::lookup_embedding_by_hash(&conn, &hash);
             assert!(cached.is_some(), "should find cached embedding by hash");
         }
     }
@@ -1271,18 +1310,18 @@ mod tests {
         let db_path = dir.path().join("test_embed_diff.db");
         let embedder = Arc::new(MockEmbedder::new(4));
 
-        let mem = SqliteMemory::open(&db_path, 30.0)
+        let mem = SqliteInsights::open(&db_path, 30.0)
             .unwrap()
             .with_embedder(embedder.clone(), 4, 0.6, 0.4, 0.7)
             .unwrap();
 
         // Store two memories with different content — both should call embedder.
         let _id1 = mem
-            .store("key-1", "first unique content", MemoryCategory::Fact, None)
+            .store("key-1", "first unique content", InsightCategory::Fact, None)
             .await
             .unwrap();
         let _id2 = mem
-            .store("key-2", "second unique content", MemoryCategory::Fact, None)
+            .store("key-2", "second unique content", InsightCategory::Fact, None)
             .await
             .unwrap();
 
@@ -1295,15 +1334,15 @@ mod tests {
         // Verify both have different hashes stored.
         {
             let conn = mem.conn.lock().unwrap();
-            let hash1 = SqliteMemory::content_hash("first unique content");
-            let hash2 = SqliteMemory::content_hash("second unique content");
+            let hash1 = SqliteInsights::content_hash("first unique content");
+            let hash2 = SqliteInsights::content_hash("second unique content");
             assert_ne!(
                 hash1, hash2,
                 "different content should have different hashes"
             );
 
-            let cached1 = SqliteMemory::lookup_embedding_by_hash(&conn, &hash1);
-            let cached2 = SqliteMemory::lookup_embedding_by_hash(&conn, &hash2);
+            let cached1 = SqliteInsights::lookup_embedding_by_hash(&conn, &hash1);
+            let cached2 = SqliteInsights::lookup_embedding_by_hash(&conn, &hash2);
             assert!(cached1.is_some(), "first hash should be cached");
             assert!(cached2.is_some(), "second hash should be cached");
         }
@@ -1311,9 +1350,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_content_hash_deterministic() {
-        let h1 = SqliteMemory::content_hash("hello world");
-        let h2 = SqliteMemory::content_hash("hello world");
-        let h3 = SqliteMemory::content_hash("different content");
+        let h1 = SqliteInsights::content_hash("hello world");
+        let h2 = SqliteInsights::content_hash("hello world");
+        let h3 = SqliteInsights::content_hash("different content");
 
         assert_eq!(h1, h2, "same content should produce same hash");
         assert_ne!(h1, h3, "different content should produce different hash");
@@ -1350,7 +1389,7 @@ mod tests {
         }
 
         // Opening should auto-migrate and add content_hash column.
-        let _mem = SqliteMemory::open(&db_path, 30.0).unwrap();
+        let _mem = SqliteInsights::open(&db_path, 30.0).unwrap();
 
         // Verify the column exists.
         let conn = Connection::open(&db_path).unwrap();

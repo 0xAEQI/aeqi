@@ -17,7 +17,7 @@ use tracing::{debug, info, warn};
 
 use aeqi_core::AgentResult;
 use aeqi_core::chat_stream::{ChatStreamEvent, ChatStreamSender};
-use aeqi_core::traits::{Memory, Provider};
+use aeqi_core::traits::{Insight, Provider};
 
 use crate::agent_registry::AgentRegistry;
 use crate::execution_events::EventBroadcaster;
@@ -210,8 +210,8 @@ pub struct SessionManager {
     notes: Option<Arc<Notes>>,
     shared_primer: Option<String>,
     project_primer: Option<String>,
-    memory_stores: HashMap<String, Arc<dyn Memory>>,
-    memory_stores_by_id: HashMap<String, Arc<dyn Memory>>,
+    insight_stores: HashMap<String, Arc<dyn Insight>>,
+    insight_stores_by_id: HashMap<String, Arc<dyn Insight>>,
     default_project: String,
 }
 
@@ -227,8 +227,8 @@ impl SessionManager {
             notes: None,
             shared_primer: None,
             project_primer: None,
-            memory_stores: HashMap::new(),
-            memory_stores_by_id: HashMap::new(),
+            insight_stores: HashMap::new(),
+            insight_stores_by_id: HashMap::new(),
             default_project: String::new(),
         }
     }
@@ -243,8 +243,8 @@ impl SessionManager {
         event_broadcaster: Option<Arc<EventBroadcaster>>,
         dispatch_bus: Arc<DispatchBus>,
         notes: Option<Arc<Notes>>,
-        memory_stores: HashMap<String, Arc<dyn Memory>>,
-        memory_stores_by_id: HashMap<String, Arc<dyn Memory>>,
+        insight_stores: HashMap<String, Arc<dyn Insight>>,
+        insight_stores_by_id: HashMap<String, Arc<dyn Insight>>,
         default_project: String,
         shared_primer: Option<String>,
         project_primer: Option<String>,
@@ -257,8 +257,8 @@ impl SessionManager {
         self.event_broadcaster = event_broadcaster;
         self.dispatch_bus = Some(dispatch_bus);
         self.notes = notes;
-        self.memory_stores = memory_stores;
-        self.memory_stores_by_id = memory_stores_by_id;
+        self.insight_stores = insight_stores;
+        self.insight_stores_by_id = insight_stores_by_id;
         self.default_project = default_project;
     }
 
@@ -365,15 +365,15 @@ impl SessionManager {
         ];
 
         // 5. Resolve memory ��� try agent UUID, then default project.
-        let memory_for_agent: Option<Arc<dyn Memory>> = agent_uuid
+        let memory_for_agent: Option<Arc<dyn Insight>> = agent_uuid
             .as_deref()
-            .and_then(|id| self.memory_stores_by_id.get(id))
-            .or_else(|| self.memory_stores.get(agent_id_or_hint))
+            .and_then(|id| self.insight_stores_by_id.get(id))
+            .or_else(|| self.insight_stores.get(agent_id_or_hint))
             .or_else(|| {
                 if !self.default_project.is_empty() {
-                    self.memory_stores.get(&self.default_project)
+                    self.insight_stores.get(&self.default_project)
                 } else {
-                    self.memory_stores.values().next()
+                    self.insight_stores.values().next()
                 }
             })
             .cloned();

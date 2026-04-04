@@ -1,6 +1,6 @@
 use aeqi_core::SecretStore;
 use aeqi_core::config::TelegramChatRouteConfig;
-use aeqi_core::traits::{Channel, Memory};
+use aeqi_core::traits::{Channel, Insight};
 use aeqi_gates::TelegramChannel;
 use aeqi_orchestrator::tools::build_orchestration_tools;
 use aeqi_orchestrator::{
@@ -18,7 +18,7 @@ use crate::cli::DaemonAction;
 use crate::helpers::{
     build_project_tools, build_provider_for_project, build_tools, daemon_ipc_request,
     find_agent_dir, find_project_dir, get_api_key, handle_fast_lane, load_config,
-    load_config_with_agents, open_memory, pid_file_path,
+    load_config_with_agents, open_insights, pid_file_path,
 };
 use crate::service::{install_user_service, render_user_service, uninstall_user_service};
 
@@ -38,13 +38,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
 
             let data_dir = config.data_dir();
             let event_broadcaster = Arc::new(aeqi_orchestrator::EventBroadcaster::new());
-            let mut dispatch_bus = DispatchBus::with_persistence(data_dir.join("dispatches"));
-            dispatch_bus.set_event_broadcaster(event_broadcaster.clone());
-            let dispatch_bus = Arc::new(dispatch_bus);
-            let cost_ledger = Arc::new(aeqi_orchestrator::CostLedger::with_persistence(
-                config.security.max_cost_per_day_usd,
-                data_dir.join("cost_ledger.jsonl"),
-            ));
+            let daily_budget_usd = config.security.max_cost_per_day_usd;
             let leader_name = config
                 .leader_agent()
                 .map(|a| a.name.clone())
@@ -85,10 +79,11 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             let mut skipped_projects = Vec::new();
             let mut skipped_advisors = Vec::new();
 
-            // Set per-project budget ceilings from config.
+            // Collect per-project budget ceilings from config.
+            let mut project_budgets = std::collections::HashMap::new();
             for project_cfg in &config.companies {
                 if let Some(budget) = project_cfg.max_cost_per_day_usd {
-                    cost_ledger.set_project_budget(&project_cfg.name, budget);
+                    project_budgets.insert(project_cfg.name.clone(), budget);
                 }
             }
 
@@ -107,32 +102,32 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             let fa_task_notify: Arc<tokio::sync::Notify> = Arc::new(tokio::sync::Notify::new());
 
             // Build per-project memory stores for knowledge-aware chat.
-            let mut chat_memory_stores: HashMap<String, Arc<dyn aeqi_core::traits::Memory>> =
+            let mut chat_insight_stores: HashMap<String, Arc<dyn aeqi_core::traits::Insight>> =
                 HashMap::new();
             for project_cfg in &config.companies {
-                if let Ok(mem) = open_memory(&config, Some(&project_cfg.name)) {
-                    chat_memory_stores.insert(project_cfg.name.clone(), Arc::new(mem));
+                if let Ok(mem) = open_insights(&config, Some(&project_cfg.name)) {
+                    chat_insight_stores.insert(project_cfg.name.clone(), Arc::new(mem));
                 }
             }
             info!(
                 "chat memory stores initialized for {} projects",
-                chat_memory_stores.len()
+                chat_insight_stores.len()
             );
 
             // Build UUID-keyed memory stores from the same project memory stores.
-            let mut memory_stores_by_id: HashMap<String, Arc<dyn aeqi_core::traits::Memory>> =
+            let mut insight_stores_by_id: HashMap<String, Arc<dyn aeqi_core::traits::Insight>> =
                 HashMap::new();
             for project_cfg in &config.companies {
                 if let (Some(id), Some(mem)) =
-                    (&project_cfg.id, chat_memory_stores.get(&project_cfg.name))
+                    (&project_cfg.id, chat_insight_stores.get(&project_cfg.name))
                 {
-                    memory_stores_by_id.insert(id.clone(), mem.clone());
+                    insight_stores_by_id.insert(id.clone(), mem.clone());
                 }
             }
 
             // Clone memory stores for SessionManager (MessageRouter consumes the originals).
-            let sm_memory_stores = chat_memory_stores.clone();
-            let sm_memory_stores_by_id = memory_stores_by_id.clone();
+            let sm_insight_stores = chat_insight_stores.clone();
+            let sm_insight_stores_by_id = insight_stores_by_id.clone();
             let sm_default_project = config
                 .companies
                 .first()
@@ -147,6 +142,15 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                         anyhow::bail!("failed to open agent registry: {e}");
                     }
                 };
+
+            // Create the unified EventStore sharing the AgentRegistry DB.
+            let event_store = Arc::new(EventStore::new(agent_reg.db()));
+            info!("event store initialized (unified)");
+
+            // Create the DispatchBus backed by EventStore.
+            let mut dispatch_bus = DispatchBus::new(event_store.clone());
+            dispatch_bus.set_event_broadcaster(event_broadcaster.clone());
+            let dispatch_bus = Arc::new(dispatch_bus);
 
             // Pre-create the scheduler wake signal so both MessageRouter and
             // Scheduler share the same Notify instance.
@@ -176,8 +180,8 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     default_project: sm_default_project.clone(),
                     pending_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                     task_notify: fa_task_notify.clone(),
-                    memory_stores: chat_memory_stores,
-                    memory_stores_by_id,
+                    insight_stores: chat_insight_stores,
+                    insight_stores_by_id,
                     intent_classifier,
                 })
             });
@@ -307,8 +311,8 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
 
                 let mut fa_tools: Vec<Arc<dyn aeqi_core::traits::Tool>> =
                     build_project_tools(&fa_workdir, &fa_tasks_dir, &fa_prefix, None);
-                let fa_memory: Option<Arc<dyn aeqi_core::traits::Memory>> =
-                    match open_memory(&config, None) {
+                let fa_memory: Option<Arc<dyn aeqi_core::traits::Insight>> =
+                    match open_insights(&config, None) {
                         Ok(m) => {
                             info!("leader agent memory initialized");
                             Some(Arc::new(m))
@@ -543,6 +547,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 failure_analysis_model: config.orchestrator.failure_analysis_model.clone(),
                 verification_enabled: true,
                 max_task_retries: config.orchestrator.max_task_retries,
+                daily_budget_usd,
             };
 
             // Build a default provider for the scheduler (uses first project's provider).
@@ -592,17 +597,12 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
 
             let metrics = Arc::new(AEQIMetrics::new());
 
-            // Create the unified EventStore sharing the AgentRegistry DB.
-            let event_store = Arc::new(EventStore::new(agent_reg.db()));
-            info!("event store initialized (unified)");
-
             let scheduler = Scheduler::new(
                 scheduler_config,
                 agent_reg.clone(),
                 dispatch_bus.clone(),
                 scheduler_provider,
                 scheduler_tools,
-                cost_ledger.clone(),
                 metrics.clone(),
                 event_broadcaster.clone(),
                 event_store.clone(),
@@ -618,15 +618,14 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                 let trigger_store = Arc::new(agent_reg.trigger_store());
                 s.trigger_store = Some(trigger_store.clone());
                 // Wire memory for the scheduler (uses leader or first project memory).
-                if let Ok(mem) = open_memory(&config, None) {
-                    s.memory_store = Some(Arc::new(mem) as Arc<dyn Memory>);
+                if let Ok(mem) = open_insights(&config, None) {
+                    s.insight_store = Some(Arc::new(mem) as Arc<dyn Insight>);
                 }
                 Arc::new(s)
             };
 
             // Construct the daemon.
             let mut daemon = Daemon::new(
-                cost_ledger.clone(),
                 metrics,
                 dispatch_bus.clone(),
                 scheduler.clone(),
@@ -643,6 +642,8 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
             daemon.message_router = message_router;
             daemon.default_provider = default_provider;
             daemon.default_model = default_model;
+            daemon.daily_budget_usd = daily_budget_usd;
+            daemon.project_budgets = project_budgets;
 
             // Set up trigger store.
             let trigger_store = Arc::new(agent_reg.trigger_store());
@@ -679,8 +680,8 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     Some(daemon.event_broadcaster.clone()),
                     daemon.dispatch_bus.clone(),
                     daemon.notes.clone(),
-                    sm_memory_stores,
-                    sm_memory_stores_by_id,
+                    sm_insight_stores,
+                    sm_insight_stores_by_id,
                     sm_default_project,
                     config.shared_primer.clone(),
                     config.companies.first().and_then(|c| c.primer.clone()),

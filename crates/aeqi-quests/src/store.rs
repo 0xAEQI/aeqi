@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 
-use crate::task::{Task, TaskId, TaskOutcomeKind, TaskOutcomeRecord, TaskStatus};
+use crate::quest::{Quest, QuestId, QuestOutcomeKind, QuestOutcomeRecord, QuestStatus};
 
 /// Valid transitions for the task state machine.
-fn valid_transition(from: &TaskStatus, to: &TaskStatus) -> bool {
-    use TaskStatus::*;
+fn valid_transition(from: &QuestStatus, to: &QuestStatus) -> bool {
+    use QuestStatus::*;
     matches!(
         (from, to),
         // Normal forward flow
@@ -28,15 +28,15 @@ fn valid_transition(from: &TaskStatus, to: &TaskStatus) -> bool {
 }
 
 /// JSONL-based task store. One file per prefix, git-native.
-pub struct TaskBoard {
+pub struct QuestBoard {
     dir: PathBuf,
     /// In-memory index: all tasks keyed by ID.
-    tasks: HashMap<String, Task>,
+    tasks: HashMap<String, Quest>,
     /// Next sequence number per prefix.
     sequences: HashMap<String, u32>,
 }
 
-impl TaskBoard {
+impl QuestBoard {
     /// Open or create a task store in the given directory.
     pub fn open(dir: &Path) -> Result<Self> {
         std::fs::create_dir_all(dir)
@@ -75,12 +75,12 @@ impl TaskBoard {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            match serde_json::from_str::<Task>(line) {
-                Ok(task) => {
+            match serde_json::from_str::<Quest>(line) {
+                Ok(quest) => {
                     // Track max sequence for this prefix.
-                    let prefix = task.id.prefix().to_string();
-                    if task.id.depth() == 0
-                        && let Some(seq_str) = task.id.0.split('-').nth(1)
+                    let prefix = quest.id.prefix().to_string();
+                    if quest.id.depth() == 0
+                        && let Some(seq_str) = quest.id.0.split('-').nth(1)
                     {
                         // Handle dotted children: take only the root part.
                         let root_seq = seq_str.split('.').next().unwrap_or(seq_str);
@@ -89,7 +89,7 @@ impl TaskBoard {
                             *entry = (*entry).max(seq);
                         }
                     }
-                    self.tasks.insert(task.id.0.clone(), task);
+                    self.tasks.insert(quest.id.0.clone(), quest);
                 }
                 Err(e) => {
                     debug!(path = %path.display(), error = %e, "skipping malformed task line");
@@ -101,11 +101,11 @@ impl TaskBoard {
     }
 
     /// Persist a task to its prefix JSONL file (append).
-    fn persist(&self, task: &Task) -> Result<()> {
-        let prefix = task.id.prefix();
+    fn persist(&self, quest: &Quest) -> Result<()> {
+        let prefix = quest.id.prefix();
         let path = self.dir.join(format!("{prefix}.jsonl"));
 
-        let line = serde_json::to_string(task)? + "\n";
+        let line = serde_json::to_string(quest)? + "\n";
 
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new()
@@ -122,16 +122,16 @@ impl TaskBoard {
     fn rewrite_prefix(&self, prefix: &str) -> Result<()> {
         let path = self.dir.join(format!("{prefix}.jsonl"));
 
-        let mut tasks: Vec<&Task> = self
+        let mut quests: Vec<&Quest> = self
             .tasks
             .values()
             .filter(|b| b.id.prefix() == prefix)
             .collect();
-        tasks.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        quests.sort_by(|a, b| a.created_at.cmp(&b.created_at));
 
         let mut content = String::new();
-        for task in tasks {
-            content.push_str(&serde_json::to_string(task)?);
+        for quest in quests {
+            content.push_str(&serde_json::to_string(quest)?);
             content.push('\n');
         }
 
@@ -145,22 +145,22 @@ impl TaskBoard {
     pub fn create_with_agent(
         &mut self,
         prefix: &str,
-        subject: &str,
+        name: &str,
         agent_id: Option<&str>,
-    ) -> Result<Task> {
+    ) -> Result<Quest> {
         let seq = self.sequences.entry(prefix.to_string()).or_insert(0);
         *seq += 1;
-        let id = TaskId::root(prefix, *seq);
+        let id = QuestId::root(prefix, *seq);
 
-        let task = Task::with_agent(id, subject, agent_id);
-        self.persist(&task)?;
-        self.tasks.insert(task.id.0.clone(), task.clone());
+        let quest = Quest::with_agent(id, name, agent_id);
+        self.persist(&quest)?;
+        self.tasks.insert(quest.id.0.clone(), quest.clone());
 
-        Ok(task)
+        Ok(quest)
     }
 
     /// Create a child task under a parent. Inherits the parent's `agent_id`.
-    pub fn create_child(&mut self, parent_id: &TaskId, subject: &str) -> Result<Task> {
+    pub fn create_child(&mut self, parent_id: &QuestId, name: &str) -> Result<Quest> {
         let parent_agent_id = self
             .tasks
             .get(&parent_id.0)
@@ -174,19 +174,19 @@ impl TaskBoard {
             .count() as u32;
 
         let id = parent_id.child(child_count + 1);
-        let mut task = Task::new(id, subject);
+        let mut quest = Quest::new(id, name);
         // Inherit agent_id from parent.
-        task.agent_id = parent_agent_id;
-        task.depends_on = Vec::new();
+        quest.agent_id = parent_agent_id;
+        quest.depends_on = Vec::new();
 
-        self.persist(&task)?;
-        self.tasks.insert(task.id.0.clone(), task.clone());
+        self.persist(&quest)?;
+        self.tasks.insert(quest.id.0.clone(), quest.clone());
 
-        Ok(task)
+        Ok(quest)
     }
 
     /// Get a task by ID.
-    pub fn get(&self, id: &str) -> Option<&Task> {
+    pub fn get(&self, id: &str) -> Option<&Quest> {
         self.tasks.get(id)
     }
 
@@ -195,19 +195,19 @@ impl TaskBoard {
     /// Uses append-only persistence: the updated task is appended to the JSONL
     /// file rather than rewriting all tasks for the prefix. On reload, later
     /// entries overwrite earlier ones (last-write-wins dedup in load_file).
-    pub fn update(&mut self, id: &str, f: impl FnOnce(&mut Task)) -> Result<Task> {
-        let task = self
+    pub fn update(&mut self, id: &str, f: impl FnOnce(&mut Quest)) -> Result<Quest> {
+        let quest = self
             .tasks
             .get_mut(id)
-            .ok_or_else(|| anyhow::anyhow!("task not found: {id}"))?;
+            .ok_or_else(|| anyhow::anyhow!("quest not found: {id}"))?;
 
-        f(task);
-        task.updated_at = Some(chrono::Utc::now());
+        f(quest);
+        quest.updated_at = Some(chrono::Utc::now());
 
-        let task = task.clone();
-        self.persist(&task)?;
+        let quest = quest.clone();
+        self.persist(&quest)?;
 
-        Ok(task)
+        Ok(quest)
     }
 
     /// Update a task with state transition validation.
@@ -215,51 +215,51 @@ impl TaskBoard {
     /// Like `update()`, but logs a warning if the status change is not a valid
     /// transition in the task state machine. Does NOT block the update — callers
     /// can migrate from `update()` over time.
-    pub fn validated_update(&mut self, id: &str, f: impl FnOnce(&mut Task)) -> Result<Task> {
+    pub fn validated_update(&mut self, id: &str, f: impl FnOnce(&mut Quest)) -> Result<Quest> {
         let old_status = self
             .tasks
             .get(id)
-            .ok_or_else(|| anyhow::anyhow!("task not found: {id}"))?
+            .ok_or_else(|| anyhow::anyhow!("quest not found: {id}"))?
             .status;
 
-        let task = self.update(id, f)?;
+        let quest = self.update(id, f)?;
 
-        if !valid_transition(&old_status, &task.status) {
+        if !valid_transition(&old_status, &quest.status) {
             tracing::warn!(
-                task = %id,
+                quest = %id,
                 from = ?old_status,
-                to = ?task.status,
-                "invalid task state transition (allowed for backwards compat)"
+                to = ?quest.status,
+                "invalid quest state transition (allowed for backwards compat)"
             );
         }
 
-        Ok(task)
+        Ok(quest)
     }
 
     /// Atomically claim a task for execution. Returns Err if already locked.
-    pub fn checkout(&mut self, id: &str, worker_id: &str) -> Result<Task> {
-        let task = self
+    pub fn checkout(&mut self, id: &str, worker_id: &str) -> Result<Quest> {
+        let quest = self
             .tasks
             .get(id)
-            .ok_or_else(|| anyhow::anyhow!("task not found: {id}"))?;
+            .ok_or_else(|| anyhow::anyhow!("quest not found: {id}"))?;
 
-        if task.status != TaskStatus::Pending {
-            anyhow::bail!("task {} is not Pending (status: {:?})", id, task.status);
+        if quest.status != QuestStatus::Pending {
+            anyhow::bail!("quest {} is not Pending (status: {:?})", id, quest.status);
         }
 
-        if let Some(ref locked_by) = task.locked_by {
-            anyhow::bail!("task {} already locked by {}", id, locked_by);
+        if let Some(ref locked_by) = quest.locked_by {
+            anyhow::bail!("quest {} already locked by {}", id, locked_by);
         }
 
         self.update(id, |t| {
             t.locked_by = Some(worker_id.to_string());
             t.locked_at = Some(chrono::Utc::now());
-            t.status = TaskStatus::InProgress;
+            t.status = QuestStatus::InProgress;
         })
     }
 
     /// Release the execution lock (on completion or failure).
-    pub fn release(&mut self, id: &str) -> Result<Task> {
+    pub fn release(&mut self, id: &str) -> Result<Quest> {
         self.update(id, |t| {
             t.locked_by = None;
             t.locked_at = None;
@@ -269,20 +269,20 @@ impl TaskBoard {
     /// Close a task (mark as done with reason).
     /// Automatically cascades: if all sibling children of a parent are now closed,
     /// the parent is auto-closed too (pipeline auto-progression).
-    pub fn close(&mut self, id: &str, reason: &str) -> Result<Task> {
-        let task = self.update(id, |b| {
-            b.status = TaskStatus::Done;
+    pub fn close(&mut self, id: &str, reason: &str) -> Result<Quest> {
+        let quest = self.update(id, |b| {
+            b.status = QuestStatus::Done;
             b.closed_at = Some(chrono::Utc::now());
             b.closed_reason = Some(reason.to_string());
-            b.set_task_outcome(&TaskOutcomeRecord::new(TaskOutcomeKind::Done, reason));
+            b.set_task_outcome(&QuestOutcomeRecord::new(QuestOutcomeKind::Done, reason));
         })?;
 
-        self.cascade_parent_close(&task.id);
+        self.cascade_parent_close(&quest.id);
 
-        Ok(task)
+        Ok(quest)
     }
 
-    fn cascade_parent_close(&mut self, child_id: &TaskId) {
+    fn cascade_parent_close(&mut self, child_id: &QuestId) {
         let Some(parent_id) = child_id.parent() else {
             return;
         };
@@ -313,17 +313,17 @@ impl TaskBoard {
             let all_cancelled = children.iter().all(|cid| {
                 self.tasks
                     .get(cid)
-                    .is_some_and(|b| b.status == TaskStatus::Cancelled)
+                    .is_some_and(|b| b.status == QuestStatus::Cancelled)
             });
 
             let (outcome_status, outcome_kind, verb) = if all_cancelled {
                 (
-                    TaskStatus::Cancelled,
-                    TaskOutcomeKind::Cancelled,
+                    QuestStatus::Cancelled,
+                    QuestOutcomeKind::Cancelled,
                     "cancelled",
                 )
             } else {
-                (TaskStatus::Done, TaskOutcomeKind::Done, "completed")
+                (QuestStatus::Done, QuestOutcomeKind::Done, "completed")
             };
 
             let child_summaries: Vec<String> = children
@@ -331,7 +331,7 @@ impl TaskBoard {
                 .filter_map(|cid| {
                     self.tasks.get(cid).map(|b| {
                         let reason = b.closed_reason.as_deref().unwrap_or(verb);
-                        format!("  {} — {}", b.subject, reason)
+                        format!("  {} — {}", b.name, reason)
                     })
                 })
                 .collect();
@@ -347,7 +347,7 @@ impl TaskBoard {
                 b.status = outcome_status;
                 b.closed_at = Some(chrono::Utc::now());
                 b.closed_reason = Some(reason.clone());
-                b.set_task_outcome(&TaskOutcomeRecord::new(outcome_kind, reason.clone()));
+                b.set_task_outcome(&QuestOutcomeRecord::new(outcome_kind, reason.clone()));
             }) {
                 debug!(parent = %parent_id, error = %e, "failed to auto-close parent task");
                 return;
@@ -360,12 +360,12 @@ impl TaskBoard {
     }
 
     /// Cancel a task.
-    pub fn cancel(&mut self, id: &str, reason: &str) -> Result<Task> {
+    pub fn cancel(&mut self, id: &str, reason: &str) -> Result<Quest> {
         self.update(id, |b| {
-            b.status = TaskStatus::Cancelled;
+            b.status = QuestStatus::Cancelled;
             b.closed_at = Some(chrono::Utc::now());
             b.closed_reason = Some(reason.to_string());
-            b.set_task_outcome(&TaskOutcomeRecord::new(TaskOutcomeKind::Cancelled, reason));
+            b.set_task_outcome(&QuestOutcomeRecord::new(QuestOutcomeKind::Cancelled, reason));
         })
     }
 
@@ -380,9 +380,9 @@ impl TaskBoard {
                 return true;
             }
             if visited.insert(node.clone())
-                && let Some(task_entry) = self.tasks.get(&node)
+                && let Some(quest_entry) = self.tasks.get(&node)
             {
-                for dep in &task_entry.depends_on {
+                for dep in &quest_entry.depends_on {
                     stack.push(dep.0.clone());
                 }
             }
@@ -393,22 +393,22 @@ impl TaskBoard {
     /// Add a dependency: `id` depends on `dep_id`.
     pub fn add_dependency(&mut self, id: &str, dep_id: &str) -> Result<()> {
         if id == dep_id {
-            anyhow::bail!("task cannot depend on itself: {id}");
+            anyhow::bail!("quest cannot depend on itself: {id}");
         }
         if self.would_cycle(id, dep_id) {
             anyhow::bail!("circular dependency detected: {id} → {dep_id} would create a cycle");
         }
 
-        let dep_task_id = TaskId::from(dep_id);
+        let dep_quest_id = QuestId::from(dep_id);
 
         self.update(id, |b| {
-            if !b.depends_on.contains(&dep_task_id) {
-                b.depends_on.push(dep_task_id.clone());
+            if !b.depends_on.contains(&dep_quest_id) {
+                b.depends_on.push(dep_quest_id.clone());
             }
         })?;
 
         // Add to blocks on the dependency.
-        let blocker_id = TaskId::from(id);
+        let blocker_id = QuestId::from(id);
         if self.tasks.contains_key(dep_id) {
             self.update(dep_id, |b| {
                 if !b.blocks.contains(&blocker_id) {
@@ -421,11 +421,11 @@ impl TaskBoard {
     }
 
     /// Get all tasks that are ready (pending + all deps resolved).
-    pub fn ready(&self) -> Vec<&Task> {
+    pub fn ready(&self) -> Vec<&Quest> {
         let resolved =
-            |id: &TaskId| -> bool { self.tasks.get(&id.0).is_some_and(|b| b.is_closed()) };
+            |id: &QuestId| -> bool { self.tasks.get(&id.0).is_some_and(|b| b.is_closed()) };
 
-        let mut ready: Vec<&Task> = self
+        let mut ready: Vec<&Quest> = self
             .tasks
             .values()
             .filter(|b| b.is_ready(&resolved) && !b.is_scheduler_held())
@@ -442,25 +442,25 @@ impl TaskBoard {
     }
 
     /// Get all tasks matching a prefix.
-    pub fn by_prefix(&self, prefix: &str) -> Vec<&Task> {
-        let mut tasks: Vec<&Task> = self
+    pub fn by_prefix(&self, prefix: &str) -> Vec<&Quest> {
+        let mut quests: Vec<&Quest> = self
             .tasks
             .values()
             .filter(|b| b.id.prefix() == prefix)
             .collect();
-        tasks.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-        tasks
+        quests.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        quests
     }
 
     /// Get all tasks.
-    pub fn all(&self) -> Vec<&Task> {
-        let mut tasks: Vec<&Task> = self.tasks.values().collect();
-        tasks.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-        tasks
+    pub fn all(&self) -> Vec<&Quest> {
+        let mut quests: Vec<&Quest> = self.tasks.values().collect();
+        quests.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        quests
     }
 
     /// Get all tasks assigned to a specific agent.
-    pub fn assigned_to(&self, assignee: &str) -> Vec<&Task> {
+    pub fn assigned_to(&self, assignee: &str) -> Vec<&Quest> {
         self.tasks
             .values()
             .filter(|b| b.assignee.as_deref() == Some(assignee) && !b.is_closed())
@@ -468,7 +468,7 @@ impl TaskBoard {
     }
 
     /// Get children of a task.
-    pub fn children(&self, parent_id: &TaskId) -> Vec<&Task> {
+    pub fn children(&self, parent_id: &QuestId) -> Vec<&Quest> {
         self.tasks
             .values()
             .filter(|b| b.id.parent().as_ref() == Some(parent_id))
@@ -478,9 +478,9 @@ impl TaskBoard {
     /// Count open tasks by prefix.
     pub fn open_count_by_prefix(&self) -> HashMap<String, usize> {
         let mut counts = HashMap::new();
-        for task in self.tasks.values() {
-            if !task.is_closed() {
-                *counts.entry(task.id.prefix().to_string()).or_insert(0) += 1;
+        for quest in self.tasks.values() {
+            if !quest.is_closed() {
+                *counts.entry(quest.id.prefix().to_string()).or_insert(0) += 1;
             }
         }
         counts
@@ -499,8 +499,8 @@ impl TaskBoard {
     /// This deduplicates append-only entries accumulated during updates.
     fn compact_all(&self) -> Result<()> {
         let mut prefixes: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for task in self.tasks.values() {
-            prefixes.insert(task.id.prefix().to_string());
+        for quest in self.tasks.values() {
+            prefixes.insert(quest.id.prefix().to_string());
         }
         for prefix in prefixes {
             self.rewrite_prefix(&prefix)?;
@@ -515,8 +515,8 @@ impl TaskBoard {
         &self,
         threshold: f64,
     ) -> Vec<crate::dependency_inference::InferredDependency> {
-        let open_tasks: Vec<&Task> = self.tasks.values().filter(|t| !t.is_closed()).collect();
-        crate::dependency_inference::infer_dependencies(&open_tasks, threshold)
+        let open_quests: Vec<&Quest> = self.tasks.values().filter(|t| !t.is_closed()).collect();
+        crate::dependency_inference::infer_dependencies(&open_quests, threshold)
     }
 
     /// Apply inferred dependencies above the given confidence threshold.
@@ -556,9 +556,9 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn temp_store() -> (TaskBoard, TempDir) {
+    fn temp_store() -> (QuestBoard, TempDir) {
         let dir = TempDir::new().unwrap();
-        let store = TaskBoard::open(dir.path()).unwrap();
+        let store = QuestBoard::open(dir.path()).unwrap();
         (store, dir)
     }
 
@@ -569,7 +569,7 @@ mod tests {
             .create_with_agent("as", "Fix login bug", None)
             .unwrap();
         assert_eq!(task.id.0, "as-001");
-        assert_eq!(task.subject, "Fix login bug");
+        assert_eq!(task.name, "Fix login bug");
 
         let task2 = store
             .create_with_agent("as", "Add logout button", None)
@@ -641,7 +641,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         {
-            let mut store = TaskBoard::open(dir.path()).unwrap();
+            let mut store = QuestBoard::open(dir.path()).unwrap();
             store.create_with_agent("rd", "Price check", None).unwrap();
             store
                 .create_with_agent("rd", "Inventory update", None)
@@ -649,7 +649,7 @@ mod tests {
         }
 
         // Reopen and verify data persisted.
-        let store = TaskBoard::open(dir.path()).unwrap();
+        let store = QuestBoard::open(dir.path()).unwrap();
         assert_eq!(store.len(), 2);
         assert!(store.get("rd-001").is_some());
         assert!(store.get("rd-002").is_some());
@@ -680,21 +680,21 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         {
-            let mut store = TaskBoard::open(dir.path()).unwrap();
+            let mut store = QuestBoard::open(dir.path()).unwrap();
             store.create_with_agent("as", "Task 1", None).unwrap();
             store
                 .update("as-001", |b| {
-                    b.status = TaskStatus::InProgress;
+                    b.status = QuestStatus::InProgress;
                     b.assignee = Some("worker-1".to_string());
                 })
                 .unwrap();
         }
 
         // Reopen — load_file deduplicates by last-write-wins.
-        let store = TaskBoard::open(dir.path()).unwrap();
+        let store = QuestBoard::open(dir.path()).unwrap();
         assert_eq!(store.len(), 1);
         let task = store.get("as-001").unwrap();
-        assert_eq!(task.status, TaskStatus::InProgress);
+        assert_eq!(task.status, QuestStatus::InProgress);
         assert_eq!(task.assignee.as_deref(), Some("worker-1"));
     }
 
@@ -702,13 +702,13 @@ mod tests {
     fn test_reload_compacts() {
         let dir = TempDir::new().unwrap();
 
-        let mut store = TaskBoard::open(dir.path()).unwrap();
+        let mut store = QuestBoard::open(dir.path()).unwrap();
         store.create_with_agent("as", "Task 1", None).unwrap();
         // Multiple updates = multiple append lines.
         for i in 0..5 {
             store
                 .update("as-001", |b| {
-                    b.subject = format!("Task 1 v{}", i + 1);
+                    b.name = format!("Task 1 v{}", i + 1);
                 })
                 .unwrap();
         }
@@ -724,7 +724,7 @@ mod tests {
         assert_eq!(lines_after, 1);
 
         let task = store.get("as-001").unwrap();
-        assert_eq!(task.subject, "Task 1 v5");
+        assert_eq!(task.name, "Task 1 v5");
     }
 
     #[test]
@@ -738,13 +738,13 @@ mod tests {
         let c3 = store.create_child(&parent.id, "Step 3: Ship").unwrap();
 
         store.close(&c1.id.0, "built").unwrap();
-        assert_eq!(store.get(&parent.id.0).unwrap().status, TaskStatus::Pending);
+        assert_eq!(store.get(&parent.id.0).unwrap().status, QuestStatus::Pending);
 
         store.close(&c2.id.0, "tested").unwrap();
-        assert_eq!(store.get(&parent.id.0).unwrap().status, TaskStatus::Pending);
+        assert_eq!(store.get(&parent.id.0).unwrap().status, QuestStatus::Pending);
 
         store.close(&c3.id.0, "shipped").unwrap();
-        assert_eq!(store.get(&parent.id.0).unwrap().status, TaskStatus::Done);
+        assert_eq!(store.get(&parent.id.0).unwrap().status, QuestStatus::Done);
         assert!(
             store
                 .get(&parent.id.0)
@@ -764,10 +764,10 @@ mod tests {
         let child = store.create_child(&parent.id, "Task").unwrap();
 
         store.close(&child.id.0, "done").unwrap();
-        assert_eq!(store.get(&parent.id.0).unwrap().status, TaskStatus::Done);
+        assert_eq!(store.get(&parent.id.0).unwrap().status, QuestStatus::Done);
         assert_eq!(
             store.get(&grandparent.id.0).unwrap().status,
-            TaskStatus::Done
+            QuestStatus::Done
         );
     }
 }

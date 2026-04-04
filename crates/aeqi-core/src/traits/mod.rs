@@ -1,13 +1,13 @@
 pub mod channel;
 pub mod embedder;
-pub mod memory;
+pub mod insight;
 pub mod observer;
 pub mod provider;
 pub mod tool;
 
 pub use channel::{Channel, IncomingMessage, OutgoingMessage};
 pub use embedder::Embedder;
-pub use memory::{Memory, MemoryCategory, MemoryEntry, MemoryQuery};
+pub use insight::{Insight, InsightCategory, InsightEntry, InsightQuery};
 pub use observer::{
     CompactInstructions, ContextAttachment, Event, LogObserver, LoopAction, Observer,
     PrometheusObserver,

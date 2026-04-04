@@ -282,7 +282,7 @@ ASYNC TASK (trigger / delegation / webhook)
 | `aeqi-orchestrator` | Worker pools, triggers, dispatch, departments, blackboard, middleware, approvals, budget |
 | `aeqi-core` | Agent loop, config, identity, compaction, traits |
 | `aeqi-web` | Axum REST API + WebSocket streaming + SPA |
-| `aeqi-memory` | SQLite+FTS5, vector search, hybrid ranking, query planning, knowledge graph |
+| `aeqi-insights` | SQLite+FTS5, vector search, hybrid ranking, query planning, knowledge graph |
 | `aeqi-tasks` | Task DAG, missions, dependency inference, atomic checkout |
 | `aeqi-providers` | OpenRouter, Anthropic, Ollama + cost estimation |
 | `aeqi-gates` | Telegram, Discord, Slack channels |

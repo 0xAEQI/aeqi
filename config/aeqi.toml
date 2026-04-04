@@ -105,7 +105,7 @@ worker_timeout_secs = 3600
 primer = """
 AEQI — Agent runtime, orchestration engine, and web control plane in Rust. 10 crates, 634+ tests.
 
-Crates: aeqi-cli (CLI/MCP), aeqi-core (agent loop, config, identity), aeqi-orchestrator (daemon, worker pools, middleware, departments, notes, dispatch), aeqi-web (Axum REST+WS), aeqi-tasks (task DAG, missions), aeqi-memory (SQLite+FTS5, vector search), aeqi-providers (OpenRouter, Anthropic, Ollama), aeqi-tools (shell, file, git, delegate, skills), aeqi-gates (Telegram, Discord, Slack), aeqi-graph (code intelligence).
+Crates: aeqi-cli (CLI/MCP), aeqi-core (agent loop, config, identity), aeqi-orchestrator (daemon, worker pools, middleware, departments, notes, dispatch), aeqi-web (Axum REST+WS), aeqi-tasks (task DAG, missions), aeqi-insights (SQLite+FTS5, vector search), aeqi-providers (OpenRouter, Anthropic, Ollama), aeqi-tools (shell, file, git, delegate, skills), aeqi-gates (Telegram, Discord, Slack), aeqi-graph (code intelligence).
 
 4 primitives: Agent (persistent identity with UUID, entity memory, department), Department (org hierarchy, escalation chains), Task (agent-bound, atomic checkout), Delegation (unified delegate tool, 5 response modes).
 

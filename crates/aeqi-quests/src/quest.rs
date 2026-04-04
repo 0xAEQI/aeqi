@@ -2,17 +2,17 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// A hierarchical task ID: "as-001", "as-001.1", "as-001.1.3"
+/// A hierarchical quest ID: "as-001", "as-001.1", "as-001.1.3"
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TaskId(pub String);
+pub struct QuestId(pub String);
 
-impl TaskId {
-    /// Create a new root-level task ID with the given prefix and sequence number.
+impl QuestId {
+    /// Create a new root-level quest ID with the given prefix and sequence number.
     pub fn root(prefix: &str, seq: u32) -> Self {
         Self(format!("{prefix}-{seq:03}"))
     }
 
-    /// Create a child task ID: "as-001" + 2 → "as-001.2"
+    /// Create a child quest ID: "as-001" + 2 → "as-001.2"
     pub fn child(&self, child_seq: u32) -> Self {
         Self(format!("{}.{child_seq}", self.0))
     }
@@ -22,7 +22,7 @@ impl TaskId {
         self.0.split('-').next().unwrap_or("")
     }
 
-    /// Get the parent ID, if this is a child task.
+    /// Get the parent ID, if this is a child quest.
     pub fn parent(&self) -> Option<Self> {
         let last_dot = self.0.rfind('.')?;
         Some(Self(self.0[..last_dot].to_string()))
@@ -33,25 +33,25 @@ impl TaskId {
         self.0.matches('.').count()
     }
 
-    /// Check if this task is an ancestor of another.
-    pub fn is_ancestor_of(&self, other: &TaskId) -> bool {
+    /// Check if this quest is an ancestor of another.
+    pub fn is_ancestor_of(&self, other: &QuestId) -> bool {
         other.0.starts_with(&self.0) && other.0.len() > self.0.len()
     }
 }
 
-impl fmt::Display for TaskId {
+impl fmt::Display for QuestId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl From<&str> for TaskId {
+impl From<&str> for QuestId {
     fn from(s: &str) -> Self {
         Self(s.to_string())
     }
 }
 
-impl From<String> for TaskId {
+impl From<String> for QuestId {
     fn from(s: String) -> Self {
         Self(s)
     }
@@ -59,7 +59,7 @@ impl From<String> for TaskId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskStatus {
+pub enum QuestStatus {
     Pending,
     InProgress,
     Done,
@@ -67,7 +67,7 @@ pub enum TaskStatus {
     Cancelled,
 }
 
-impl fmt::Display for TaskStatus {
+impl fmt::Display for QuestStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Pending => write!(f, "pending"),
@@ -81,7 +81,7 @@ impl fmt::Display for TaskStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskOutcomeKind {
+pub enum QuestOutcomeKind {
     Done,
     Blocked,
     Handoff,
@@ -89,7 +89,7 @@ pub enum TaskOutcomeKind {
     Cancelled,
 }
 
-impl fmt::Display for TaskOutcomeKind {
+impl fmt::Display for QuestOutcomeKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Done => write!(f, "done"),
@@ -122,7 +122,7 @@ impl fmt::Display for Priority {
     }
 }
 
-/// A checkpoint recording incremental progress on a task.
+/// A checkpoint recording incremental progress on a quest.
 /// Saved when a worker completes, blocks, or fails — so the next worker
 /// can skip work that's already done.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,8 +135,8 @@ pub struct Checkpoint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskOutcomeRecord {
-    pub kind: TaskOutcomeKind,
+pub struct QuestOutcomeRecord {
+    pub kind: QuestOutcomeKind,
     pub summary: String,
     #[serde(default)]
     pub reason: Option<String>,
@@ -144,8 +144,8 @@ pub struct TaskOutcomeRecord {
     pub next_action: Option<String>,
 }
 
-impl TaskOutcomeRecord {
-    pub fn new(kind: TaskOutcomeKind, summary: impl Into<String>) -> Self {
+impl QuestOutcomeRecord {
+    pub fn new(kind: QuestOutcomeKind, summary: impl Into<String>) -> Self {
         Self {
             kind,
             summary: summary.into(),
@@ -155,35 +155,36 @@ impl TaskOutcomeRecord {
     }
 }
 
-/// A single task in the DAG.
+/// A single quest in the DAG.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Task {
-    pub id: TaskId,
-    pub subject: String,
+pub struct Quest {
+    pub id: QuestId,
+    #[serde(alias = "subject")]
+    pub name: String,
     #[serde(default)]
     pub description: String,
-    pub status: TaskStatus,
+    pub status: QuestStatus,
     #[serde(default)]
     pub priority: Priority,
-    /// Who is working on this task.
+    /// Who is working on this quest.
     #[serde(default)]
     pub assignee: Option<String>,
-    /// Persistent agent UUID that owns this task. None = legacy/unbound.
+    /// Persistent agent UUID that owns this quest. None = legacy/unbound.
     #[serde(default)]
     pub agent_id: Option<String>,
-    /// Task IDs that must be completed before this one can start.
+    /// Quest IDs that must be completed before this one can start.
     #[serde(default)]
-    pub depends_on: Vec<TaskId>,
-    /// Task IDs that this task blocks.
+    pub depends_on: Vec<QuestId>,
+    /// Quest IDs that this quest blocks.
     #[serde(default)]
-    pub blocks: Vec<TaskId>,
-    /// Skill to apply when executing this task (loaded from project skills dir).
+    pub blocks: Vec<QuestId>,
+    /// Skill to apply when executing this quest (loaded from project skills dir).
     #[serde(default)]
     pub skill: Option<String>,
     /// Labels for categorization.
     #[serde(default)]
     pub labels: Vec<String>,
-    /// Number of times this task has been retried after failure/handoff.
+    /// Number of times this quest has been retried after failure/handoff.
     #[serde(default)]
     pub retry_count: u32,
     /// Incremental progress checkpoints from previous worker attempts.
@@ -210,19 +211,19 @@ pub struct Task {
     pub locked_at: Option<DateTime<Utc>>,
 }
 
-impl Task {
-    /// Create a new task with minimal fields.
-    pub fn new(id: TaskId, subject: impl Into<String>) -> Self {
-        Self::with_agent(id, subject, None)
+impl Quest {
+    /// Create a new quest with minimal fields.
+    pub fn new(id: QuestId, name: impl Into<String>) -> Self {
+        Self::with_agent(id, name, None)
     }
 
-    /// Create a new task bound to a specific agent.
-    pub fn with_agent(id: TaskId, subject: impl Into<String>, agent_id: Option<&str>) -> Self {
+    /// Create a new quest bound to a specific agent.
+    pub fn with_agent(id: QuestId, name: impl Into<String>, agent_id: Option<&str>) -> Self {
         Self {
             id,
-            subject: subject.into(),
+            name: name.into(),
             description: String::new(),
-            status: TaskStatus::Pending,
+            status: QuestStatus::Pending,
             priority: Priority::Normal,
             assignee: None,
             agent_id: agent_id.map(|s| s.to_string()),
@@ -243,22 +244,22 @@ impl Task {
         }
     }
 
-    /// Whether this task is bound to a persistent agent.
+    /// Whether this quest is bound to a persistent agent.
     pub fn is_agent_bound(&self) -> bool {
         self.agent_id.is_some()
     }
 
-    /// Is this task in a terminal state?
+    /// Is this quest in a terminal state?
     pub fn is_closed(&self) -> bool {
-        matches!(self.status, TaskStatus::Done | TaskStatus::Cancelled)
+        matches!(self.status, QuestStatus::Done | QuestStatus::Cancelled)
     }
 
-    /// Is this task ready to work on? (pending + no unresolved dependencies)
-    pub fn is_ready(&self, resolved: &dyn Fn(&TaskId) -> bool) -> bool {
-        self.status == TaskStatus::Pending && self.depends_on.iter().all(resolved)
+    /// Is this quest ready to work on? (pending + no unresolved dependencies)
+    pub fn is_ready(&self, resolved: &dyn Fn(&QuestId) -> bool) -> bool {
+        self.status == QuestStatus::Pending && self.depends_on.iter().all(resolved)
     }
 
-    /// Whether the scheduler should temporarily hold this task from execution.
+    /// Whether the scheduler should temporarily hold this quest from execution.
     pub fn is_scheduler_held(&self) -> bool {
         self.metadata
             .pointer("/aeqi/hold")
@@ -304,13 +305,13 @@ impl Task {
         };
     }
 
-    pub fn task_outcome(&self) -> Option<TaskOutcomeRecord> {
+    pub fn task_outcome(&self) -> Option<QuestOutcomeRecord> {
         self.aeqi_metadata("task_outcome")
             .cloned()
             .and_then(|value| serde_json::from_value(value).ok())
     }
 
-    pub fn set_task_outcome(&mut self, outcome: &TaskOutcomeRecord) {
+    pub fn set_task_outcome(&mut self, outcome: &QuestOutcomeRecord) {
         if let Ok(value) = serde_json::to_value(outcome) {
             self.set_aeqi_metadata("task_outcome", value);
         }
@@ -341,38 +342,38 @@ impl Task {
 
 #[cfg(test)]
 mod tests {
-    use super::{Task, TaskId, TaskOutcomeKind, TaskOutcomeRecord};
+    use super::{Quest, QuestId, QuestOutcomeKind, QuestOutcomeRecord};
 
     #[test]
-    fn task_outcome_round_trips_through_aeqi_metadata() {
-        let mut task = Task::new(TaskId::from("sg-001"), "Outcome");
-        let outcome = TaskOutcomeRecord {
-            kind: TaskOutcomeKind::Blocked,
+    fn quest_outcome_round_trips_through_aeqi_metadata() {
+        let mut quest = Quest::new(QuestId::from("sg-001"), "Outcome");
+        let outcome = QuestOutcomeRecord {
+            kind: QuestOutcomeKind::Blocked,
             summary: "Waiting on staging credentials".to_string(),
             reason: Some("Which staging account should be used?".to_string()),
             next_action: Some("await_operator_input".to_string()),
         };
 
-        task.set_task_outcome(&outcome);
+        quest.set_task_outcome(&outcome);
 
-        assert_eq!(task.task_outcome(), Some(outcome));
+        assert_eq!(quest.task_outcome(), Some(outcome));
     }
 
     #[test]
     fn set_aeqi_metadata_preserves_legacy_metadata() {
-        let mut task = Task::new(TaskId::from("sg-002"), "Legacy");
-        task.metadata = serde_json::json!("legacy");
+        let mut quest = Quest::new(QuestId::from("sg-002"), "Legacy");
+        quest.metadata = serde_json::json!("legacy");
 
-        task.set_aeqi_metadata("runtime", serde_json::json!({"phase": "act"}));
+        quest.set_aeqi_metadata("runtime", serde_json::json!({"phase": "act"}));
 
         assert_eq!(
-            task.metadata
+            quest.metadata
                 .pointer("/_legacy")
                 .and_then(|value| value.as_str()),
             Some("legacy")
         );
         assert_eq!(
-            task.metadata
+            quest.metadata
                 .pointer("/aeqi/runtime/phase")
                 .and_then(|value| value.as_str()),
             Some("act")

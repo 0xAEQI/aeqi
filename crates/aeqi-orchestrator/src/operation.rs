@@ -1,4 +1,4 @@
-use aeqi_tasks::TaskId;
+use aeqi_quests::QuestId;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -19,13 +19,13 @@ pub struct Operation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperationTask {
-    pub task_id: TaskId,
+    pub task_id: QuestId,
     pub project: String,
     pub closed: bool,
 }
 
 impl Operation {
-    pub fn new(name: &str, tasks: Vec<(TaskId, String)>) -> Self {
+    pub fn new(name: &str, tasks: Vec<(QuestId, String)>) -> Self {
         let id = format!("op-{}", uuid::Uuid::new_v4().as_simple());
         Self {
             id,
@@ -44,7 +44,7 @@ impl Operation {
     }
 
     /// Mark a task as closed in this operation.
-    pub fn mark_closed(&mut self, task_id: &TaskId) {
+    pub fn mark_closed(&mut self, task_id: &QuestId) {
         for b in &mut self.tasks {
             if b.task_id == *task_id {
                 b.closed = true;
@@ -96,7 +96,7 @@ impl OperationStore {
     }
 
     /// Create a new operation.
-    pub fn create(&mut self, name: &str, tasks: Vec<(TaskId, String)>) -> Result<&Operation> {
+    pub fn create(&mut self, name: &str, tasks: Vec<(QuestId, String)>) -> Result<&Operation> {
         let op = Operation::new(name, tasks);
         info!(id = %op.id, name = %name, tasks = op.tasks.len(), "operation created");
         self.operations.push(op);
@@ -105,7 +105,7 @@ impl OperationStore {
     }
 
     /// Mark a task as closed across all active operations.
-    pub fn mark_task_closed(&mut self, task_id: &TaskId) -> Result<Vec<String>> {
+    pub fn mark_task_closed(&mut self, task_id: &QuestId) -> Result<Vec<String>> {
         let mut completed_ops = Vec::new();
 
         for op in &mut self.operations {

@@ -25,10 +25,10 @@ dependencies = [
  "aeqi-core",
  "aeqi-gates",
  "aeqi-graph",
- "aeqi-memory",
+ "aeqi-insights",
  "aeqi-orchestrator",
  "aeqi-providers",
- "aeqi-tasks",
+ "aeqi-quests",
  "aeqi-tools",
  "aeqi-web",
  "anyhow",
@@ -108,7 +108,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "aeqi-memory"
+name = "aeqi-insights"
 version = "0.1.0"
 dependencies = [
  "aeqi-core",
@@ -132,9 +132,9 @@ version = "0.1.0"
 dependencies = [
  "aeqi-core",
  "aeqi-graph",
- "aeqi-memory",
+ "aeqi-insights",
  "aeqi-providers",
- "aeqi-tasks",
+ "aeqi-quests",
  "aeqi-tools",
  "anyhow",
  "async-trait",
@@ -179,7 +179,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "aeqi-tasks"
+name = "aeqi-quests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -197,7 +197,7 @@ name = "aeqi-tools"
 version = "0.1.0"
 dependencies = [
  "aeqi-core",
- "aeqi-tasks",
+ "aeqi-quests",
  "anyhow",
  "async-trait",
  "reqwest",

@@ -30,16 +30,16 @@ pub(crate) async fn cmd_assign(
             }
             if let Some(p) = priority {
                 b.priority = match p {
-                    "low" => aeqi_tasks::Priority::Low,
-                    "high" => aeqi_tasks::Priority::High,
-                    "critical" => aeqi_tasks::Priority::Critical,
-                    _ => aeqi_tasks::Priority::Normal,
+                    "low" => aeqi_quests::Priority::Low,
+                    "high" => aeqi_quests::Priority::High,
+                    "critical" => aeqi_quests::Priority::Critical,
+                    _ => aeqi_quests::Priority::Normal,
                 };
             }
         })?;
     }
 
-    println!("Created {} [{}] {}", task.id, task.priority, task.subject);
+    println!("Created {} [{}] {}", task.id, task.priority, task.name);
     Ok(())
 }
 
@@ -65,7 +65,7 @@ pub(crate) async fn cmd_ready(
                     "{} [{}] {} — {}",
                     task.id,
                     task.priority,
-                    task.subject,
+                    task.name,
                     if task.description.is_empty() {
                         "(no description)"
                     } else {
@@ -130,7 +130,7 @@ pub(crate) async fn cmd_tasks(
                 };
                 println!(
                     "  {} [{}] {} — {} assignee={}{}{}",
-                    task.id, task.status, task.priority, task.subject, assignee, deps, checkpoints
+                    task.id, task.status, task.priority, task.name, assignee, deps, checkpoints
                 );
             }
         }
@@ -147,7 +147,7 @@ pub(crate) async fn cmd_close(config_path: &Option<PathBuf>, id: &str, reason: &
 
     let mut store = open_tasks_for_project(&project_name)?;
     let task = store.close(id, reason)?;
-    println!("Closed {} — {}", task.id, task.subject);
+    println!("Closed {} — {}", task.id, task.name);
     Ok(())
 }
 
@@ -164,11 +164,11 @@ pub(crate) async fn cmd_hook(
 
     let mut store = open_tasks_for_project(&project_name)?;
     let task = store.update(task_id, |b| {
-        b.status = aeqi_tasks::TaskStatus::InProgress;
+        b.status = aeqi_quests::QuestStatus::InProgress;
         b.assignee = Some(worker.to_string());
     })?;
 
-    println!("Hooked {} to {} — {}", worker, task.id, task.subject);
+    println!("Hooked {} to {} — {}", worker, task.id, task.name);
     Ok(())
 }
 
@@ -185,7 +185,7 @@ pub(crate) async fn cmd_done(
 
     let mut store = open_tasks_for_project(&project_name)?;
     let task = store.close(task_id, reason)?;
-    println!("Done {} — {}", task.id, task.subject);
+    println!("Done {} — {}", task.id, task.name);
 
     // Also update any operations tracking this task.
     let ops_path = config.data_dir().join("operations.json");

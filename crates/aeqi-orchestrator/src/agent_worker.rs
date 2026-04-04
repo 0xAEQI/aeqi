@@ -1,9 +1,9 @@
 use aeqi_core::traits::{
-    ChatRequest, Event, LogObserver, LoopAction, Memory, MemoryCategory, Message, MessageContent,
+    ChatRequest, Event, Insight, InsightCategory, LogObserver, LoopAction, Message, MessageContent,
     Observer, Provider, Role, Tool,
 };
 use aeqi_core::{Agent, AgentConfig, AssembledPrompt};
-use aeqi_tasks::{Task, TaskOutcomeKind, TaskOutcomeRecord, TaskStatus};
+use aeqi_quests::{Quest, QuestOutcomeKind, QuestOutcomeRecord, QuestStatus};
 use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -59,10 +59,10 @@ pub struct AgentWorker {
     pub assembled_prompt: Option<AssembledPrompt>,
     pub dispatch_bus: Arc<DispatchBus>,
     /// Snapshot of the assigned task, populated at assign() time.
-    pub task_snapshot: Option<aeqi_tasks::Task>,
+    pub task_snapshot: Option<aeqi_quests::Quest>,
     /// Called once at the end of execute() with the final status and optional outcome record.
-    pub on_complete: Option<Box<dyn FnOnce(TaskStatus, Option<TaskOutcomeRecord>) + Send + Sync>>,
-    pub memory: Option<Arc<dyn Memory>>,
+    pub on_complete: Option<Box<dyn FnOnce(QuestStatus, Option<QuestOutcomeRecord>) + Send + Sync>>,
+    pub insight_store: Option<Arc<dyn Insight>>,
     pub reflect_provider: Option<Arc<dyn Provider>>,
     pub reflect_model: String,
     /// Project directory path for checkpoint storage.
@@ -82,7 +82,7 @@ pub struct AgentWorker {
     /// Event broadcaster for real-time execution event streaming.
     pub event_broadcaster: Option<Arc<EventBroadcaster>>,
     /// Optional debounced write queue for batching reflection memory writes.
-    pub write_queue: Option<Arc<tokio::sync::Mutex<aeqi_memory::debounce::WriteQueue>>>,
+    pub write_queue: Option<Arc<tokio::sync::Mutex<aeqi_insights::debounce::WriteQueue>>>,
     /// Persistent agent UUID for entity-scoped memory. When set, memory queries
     /// include this agent's entity memories alongside domain/system memories.
     pub persistent_agent_id: Option<String>,
@@ -119,7 +119,7 @@ impl AgentWorker {
             dispatch_bus,
             task_snapshot: None,
             on_complete: None,
-            memory: None,
+            insight_store: None,
             reflect_provider: None,
             reflect_model,
             project_dir: None,
@@ -160,7 +160,7 @@ impl AgentWorker {
             dispatch_bus,
             task_snapshot: None,
             on_complete: None,
-            memory: None,
+            insight_store: None,
             reflect_provider: None,
             reflect_model: String::new(),
             project_dir: None,
@@ -177,8 +177,8 @@ impl AgentWorker {
         }
     }
 
-    pub fn with_memory(mut self, memory: Arc<dyn Memory>) -> Self {
-        self.memory = Some(memory);
+    pub fn with_insight_store(mut self, insight_store: Arc<dyn Insight>) -> Self {
+        self.insight_store = Some(insight_store);
         self
     }
 
@@ -223,7 +223,7 @@ impl AgentWorker {
     /// Set the debounced write queue for batching reflection memory writes.
     pub fn set_write_queue(
         &mut self,
-        queue: Arc<tokio::sync::Mutex<aeqi_memory::debounce::WriteQueue>>,
+        queue: Arc<tokio::sync::Mutex<aeqi_insights::debounce::WriteQueue>>,
     ) {
         self.write_queue = Some(queue);
     }
@@ -283,10 +283,10 @@ impl AgentWorker {
         }
     }
 
-    /// Assign a task to this worker (set hook and snapshot the full task).
-    pub fn assign(&mut self, task: &Task) {
-        self.hook = Some(Hook::new(task.id.clone(), task.subject.clone()));
-        self.task_snapshot = Some(task.clone());
+    /// Assign a quest to this worker (set hook and snapshot the full quest).
+    pub fn assign(&mut self, quest: &Quest) {
+        self.hook = Some(Hook::new(quest.id.clone(), quest.name.clone()));
+        self.task_snapshot = Some(quest.clone());
         self.state = WorkerState::Hooked;
     }
 
@@ -302,13 +302,13 @@ impl AgentWorker {
         );
     }
 
-    async fn build_resume_brief(&self, task: &Task) -> String {
+    async fn build_resume_brief(&self, quest: &Quest) -> String {
         let mut sections = Vec::new();
 
         if let Some(ref es) = self.event_store {
             let filter = crate::event_store::EventFilter {
                 event_type: Some("decision".to_string()),
-                task_id: Some(task.id.0.clone()),
+                quest_id: Some(quest.id.0.clone()),
                 ..Default::default()
             };
             if let Ok(events) = es.query(&filter, 6, 0).await {
@@ -342,7 +342,7 @@ impl AgentWorker {
 
         if let Some(ref blackboard) = self.notes {
             let entries = blackboard
-                .query(&self.project_name, &task.labels, 5)
+                .query(&self.project_name, &quest.labels, 5)
                 .unwrap_or_default();
             if !entries.is_empty() {
                 let lines = entries
@@ -366,7 +366,7 @@ impl AgentWorker {
             .all()
             .await
             .into_iter()
-            .filter(|dispatch| is_relevant_dispatch(dispatch, &self.project_name, &task.id.0))
+            .filter(|dispatch| is_relevant_dispatch(dispatch, &self.project_name, &quest.id.0))
             .collect::<Vec<_>>();
         if !dispatches.is_empty() {
             if dispatches.len() > 6 {
@@ -410,7 +410,7 @@ impl AgentWorker {
                 // Fire on_complete for this early exit path.
                 if let Some(cb) = self.on_complete.take() {
                     let outcome_record = Self::build_task_outcome_record(&runtime_outcome);
-                    cb(TaskStatus::Done, Some(outcome_record));
+                    cb(QuestStatus::Done, Some(outcome_record));
                 }
                 return Ok((
                     outcome,
@@ -508,7 +508,7 @@ impl AgentWorker {
                     if let Some(cb) = self.on_complete.take() {
                         let outcome_record =
                             Self::build_task_outcome_record(&runtime_execution.outcome);
-                        cb(TaskStatus::Pending, Some(outcome_record));
+                        cb(QuestStatus::Pending, Some(outcome_record));
                     }
                     return Ok((outcome, runtime_execution, 0.0, 0));
                 }
@@ -545,7 +545,7 @@ impl AgentWorker {
 
         let mut task_context = match task_snapshot.as_ref() {
             Some(b) => {
-                let mut ctx = format!("## Task: {}\n\n", b.subject);
+                let mut ctx = format!("## Task: {}\n\n", b.name);
                 if !b.description.is_empty() {
                     ctx.push_str(&format!("{}\n\n", b.description));
                 }
@@ -594,10 +594,10 @@ impl AgentWorker {
         // Enrich system prompt with dynamic memory recall via query planner.
         // Primers are already assembled into self.system_prompt by assemble_prompts().
         // When a persistent agent UUID is set, also recall entity-scoped memories.
-        let enriched_system_prompt = if let Some(ref mem) = self.memory {
+        let enriched_system_prompt = if let Some(ref mem) = self.insight_store {
             // Try query planner first — generates typed, prioritized queries.
             let entries = match std::panic::catch_unwind(|| {
-                aeqi_memory::query_planner::QueryPlanner::plan(
+                aeqi_insights::query_planner::QueryPlanner::plan(
                     &task_context,
                     Some(&self.project_name),
                 )
@@ -605,7 +605,7 @@ impl AgentWorker {
                 Ok(plan) => {
                     let mut all_entries = Vec::new();
                     for typed_query in &plan.queries {
-                        let query = aeqi_core::traits::MemoryQuery::new(
+                        let query = aeqi_core::traits::InsightQuery::new(
                             &typed_query.query_text,
                             plan.max_results_per_query,
                         );
@@ -632,7 +632,7 @@ impl AgentWorker {
                 Err(_) => {
                     // Fallback: single flat search if query planner fails.
                     warn!(worker = %self.name, "query planner failed, falling back to flat search");
-                    let query = aeqi_core::traits::MemoryQuery::new(&task_context, 30);
+                    let query = aeqi_core::traits::InsightQuery::new(&task_context, 30);
                     mem.search(&query).await.unwrap_or_default()
                 }
             };
@@ -640,7 +640,7 @@ impl AgentWorker {
             // Also recall entity-scoped memories for persistent agents.
             let mut all = entries;
             if let Some(ref agent_id) = self.persistent_agent_id {
-                let eq = aeqi_core::traits::MemoryQuery::new(&task_context, 10)
+                let eq = aeqi_core::traits::InsightQuery::new(&task_context, 10)
                     .with_agent(agent_id.clone());
                 if let Ok(entity_entries) = mem.search(&eq).await {
                     debug!(
@@ -765,7 +765,7 @@ impl AgentWorker {
         // Fire-and-forget reflection so the worker slot does not wait on memory extraction.
         if let Ok((ref result_text, _, _)) = raw_result
             && let (Some(mem), Some(provider)) =
-                (self.memory.clone(), self.reflect_provider.clone())
+                (self.insight_store.clone(), self.reflect_provider.clone())
         {
             let task_ctx = task_context.clone();
             let text = result_text.clone();
@@ -853,7 +853,7 @@ impl AgentWorker {
 
         // Process outcome: save checkpoint, determine final task status.
         // `final_task_status` is used by the on_complete callback below.
-        let mut final_task_status = TaskStatus::Pending;
+        let mut final_task_status = QuestStatus::Pending;
         match &outcome {
             TaskOutcome::Done(result_text) => {
                 info!(worker = %self.name, task = %hook.task_id, "work completed");
@@ -869,7 +869,7 @@ impl AgentWorker {
                     turns,
                 )
                 .await;
-                final_task_status = TaskStatus::Done;
+                final_task_status = QuestStatus::Done;
                 self.state = WorkerState::Done;
             }
 
@@ -901,7 +901,7 @@ impl AgentWorker {
                     turns,
                 )
                 .await;
-                final_task_status = TaskStatus::Blocked;
+                final_task_status = QuestStatus::Blocked;
                 self.state = WorkerState::Done; // Worker is done; task is blocked.
             }
 
@@ -926,7 +926,7 @@ impl AgentWorker {
                     .map(|t| t.retry_count)
                     .unwrap_or(0);
                 if current_retry + 1 >= self.max_task_retries {
-                    final_task_status = TaskStatus::Cancelled;
+                    final_task_status = QuestStatus::Cancelled;
                     warn!(
                         worker = %self.name,
                         task = %hook.task_id,
@@ -934,7 +934,7 @@ impl AgentWorker {
                         "task auto-cancelled after max retries (handoff)"
                     );
                 } else {
-                    final_task_status = TaskStatus::Pending;
+                    final_task_status = QuestStatus::Pending;
                 }
                 self.state = WorkerState::Done;
             }
@@ -1061,7 +1061,7 @@ impl AgentWorker {
                 );
 
                 if auto_cancelled {
-                    final_task_status = TaskStatus::Cancelled;
+                    final_task_status = QuestStatus::Cancelled;
                     warn!(
                         worker = %self.name,
                         task = %hook.task_id,
@@ -1082,7 +1082,7 @@ impl AgentWorker {
                         ).await;
                     }
                 } else if is_blocker {
-                    final_task_status = TaskStatus::Blocked;
+                    final_task_status = QuestStatus::Blocked;
                     warn!(
                         worker = %self.name,
                         task = %hook.task_id,
@@ -1090,7 +1090,7 @@ impl AgentWorker {
                         "task blocked by failure analysis"
                     );
                 } else {
-                    final_task_status = TaskStatus::Pending;
+                    final_task_status = QuestStatus::Pending;
                 }
                 self.state = WorkerState::Failed(error_text.to_string());
             }
@@ -1165,7 +1165,7 @@ impl AgentWorker {
 
         // Fire the on_complete callback with the final status and outcome record.
         if let Some(cb) = self.on_complete.take() {
-            let final_record = if final_task_status == TaskStatus::Done {
+            let final_record = if final_task_status == QuestStatus::Done {
                 Some(Self::build_task_outcome_record(&runtime_execution.outcome))
             } else {
                 None
@@ -1220,9 +1220,9 @@ impl AgentWorker {
         );
     }
 
-    /// Build a TaskOutcomeRecord from a RuntimeOutcome (used by on_complete callback).
-    fn build_task_outcome_record(outcome: &RuntimeOutcome) -> TaskOutcomeRecord {
-        TaskOutcomeRecord {
+    /// Build a QuestOutcomeRecord from a RuntimeOutcome (used by on_complete callback).
+    fn build_task_outcome_record(outcome: &RuntimeOutcome) -> QuestOutcomeRecord {
+        QuestOutcomeRecord {
             kind: Self::task_outcome_kind(outcome),
             summary: outcome.summary.clone(),
             reason: outcome.reason.clone(),
@@ -1240,12 +1240,12 @@ impl AgentWorker {
         );
     }
 
-    fn task_outcome_kind(outcome: &RuntimeOutcome) -> TaskOutcomeKind {
+    fn task_outcome_kind(outcome: &RuntimeOutcome) -> QuestOutcomeKind {
         match outcome.status {
-            crate::runtime::RuntimeOutcomeStatus::Done => TaskOutcomeKind::Done,
-            crate::runtime::RuntimeOutcomeStatus::Blocked => TaskOutcomeKind::Blocked,
-            crate::runtime::RuntimeOutcomeStatus::Handoff => TaskOutcomeKind::Handoff,
-            crate::runtime::RuntimeOutcomeStatus::Failed => TaskOutcomeKind::Failed,
+            crate::runtime::RuntimeOutcomeStatus::Done => QuestOutcomeKind::Done,
+            crate::runtime::RuntimeOutcomeStatus::Blocked => QuestOutcomeKind::Blocked,
+            crate::runtime::RuntimeOutcomeStatus::Handoff => QuestOutcomeKind::Handoff,
+            crate::runtime::RuntimeOutcomeStatus::Failed => QuestOutcomeKind::Failed,
         }
     }
 
@@ -1365,7 +1365,7 @@ impl AgentWorker {
             system_prompt.to_string(),
         );
 
-        if let Some(ref mem) = self.memory {
+        if let Some(ref mem) = self.insight_store {
             agent = agent.with_memory(mem.clone());
         }
 
@@ -1401,7 +1401,7 @@ impl AgentWorker {
         task_context: String,
         result_text: String,
         model: String,
-        mem: Arc<dyn Memory>,
+        mem: Arc<dyn Insight>,
         provider: Arc<dyn Provider>,
     ) {
         let transcript = format!("User: {}\n\nAssistant: {}", task_context, result_text);
@@ -1462,8 +1462,8 @@ impl AgentWorker {
         }
     }
 
-    async fn store_routed_insights_static(worker_name: &str, text: &str, mem: &Arc<dyn Memory>) {
-        use aeqi_memory::dedup::{DedupAction, DedupCandidate, DedupPipeline, SimilarMemory};
+    async fn store_routed_insights_static(worker_name: &str, text: &str, mem: &Arc<dyn Insight>) {
+        use aeqi_insights::dedup::{DedupAction, DedupCandidate, DedupPipeline, SimilarMemory};
 
         let dedup = DedupPipeline::default();
 
@@ -1499,10 +1499,10 @@ impl AgentWorker {
             };
 
             let category = match cat_str.trim().to_uppercase().as_str() {
-                "FACT" => MemoryCategory::Fact,
-                "PROCEDURE" => MemoryCategory::Procedure,
-                "PREFERENCE" => MemoryCategory::Preference,
-                "CONTEXT" => MemoryCategory::Context,
+                "FACT" => InsightCategory::Fact,
+                "PROCEDURE" => InsightCategory::Procedure,
+                "PREFERENCE" => InsightCategory::Preference,
+                "CONTEXT" => InsightCategory::Context,
                 _ => continue,
             };
 
@@ -1514,7 +1514,7 @@ impl AgentWorker {
 
             // ── Dedup check: search for similar existing memories ──
             let should_store_action = async {
-                let query = aeqi_core::traits::MemoryQuery::new(key, 5);
+                let query = aeqi_core::traits::InsightQuery::new(key, 5);
                 let existing = mem.search(&query).await.unwrap_or_default();
                 let similar: Vec<SimilarMemory> = existing
                     .iter()
@@ -1573,7 +1573,7 @@ impl AgentWorker {
 
                     // Create memory graph edge if dedup detected a relationship.
                     if let Some((relation, target_id)) = supersede_target {
-                        if let Err(e) = mem.store_memory_edge(&id, &target_id, relation, 0.8).await
+                        if let Err(e) = mem.store_insight_edge(&id, &target_id, relation, 0.8).await
                         {
                             debug!(worker = %worker_name, "failed to store edge: {e}");
                         } else {
@@ -1588,7 +1588,7 @@ impl AgentWorker {
                     }
 
                     // Infer additional edges: search scoped to same agent
-                    let mut edge_query = aeqi_core::traits::MemoryQuery::new(content, 3);
+                    let mut edge_query = aeqi_core::traits::InsightQuery::new(content, 3);
                     if let Some(aid) = agent_id_for_store {
                         edge_query = edge_query.with_agent(aid.to_string());
                     }
@@ -1597,9 +1597,9 @@ impl AgentWorker {
                             if entry.id == id {
                                 continue;
                             }
-                            if aeqi_memory::dedup::is_support(content, &entry.content) {
+                            if aeqi_insights::dedup::is_support(content, &entry.content) {
                                 let _ =
-                                    mem.store_memory_edge(&id, &entry.id, "supports", 0.7).await;
+                                    mem.store_insight_edge(&id, &entry.id, "supports", 0.7).await;
                                 debug!(
                                     worker = %worker_name,
                                     source = %id, target = %entry.id,
@@ -1607,7 +1607,7 @@ impl AgentWorker {
                                 );
                             } else if entry.score > 0.7 && entry.key != key {
                                 let _ = mem
-                                    .store_memory_edge(&id, &entry.id, "related_to", 0.5)
+                                    .store_insight_edge(&id, &entry.id, "related_to", 0.5)
                                     .await;
                                 debug!(
                                     worker = %worker_name,

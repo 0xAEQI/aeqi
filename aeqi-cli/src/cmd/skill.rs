@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::cli::SkillAction;
 use crate::helpers::{
     augment_identity_with_org_context, build_project_tools, build_provider_for_project,
-    find_agent_dir, find_project_dir, load_config, one_shot_agent_name, open_memory,
+    find_agent_dir, find_project_dir, load_config, one_shot_agent_name, open_insights,
 };
 
 fn discover_project_skills(project_dir: &Path) -> Result<Vec<Skill>> {
@@ -140,7 +140,7 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
                 observer,
                 skill_identity.system_prompt(),
             );
-            if let Ok(mem) = open_memory(&config, Some(&company)) {
+            if let Ok(mem) = open_insights(&config, Some(&company)) {
                 agent = agent.with_memory(Arc::new(mem));
             }
             let result = agent.run(&user_prompt).await?;

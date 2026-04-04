@@ -3,11 +3,11 @@ resolver = "2"
 members = [
     "aeqi-cli",
     "crates/aeqi-core",
-    "crates/aeqi-tasks",
+    "crates/aeqi-quests",
     "crates/aeqi-providers",
     "crates/aeqi-tools",
     "crates/aeqi-orchestrator",
-    "crates/aeqi-memory",
+    "crates/aeqi-insights",
     "crates/aeqi-gates",
     "crates/aeqi-web",
     "crates/aeqi-graph",
@@ -91,12 +91,12 @@ similar = "2"
 tempfile = "3"
 
 # Internal crates
-aeqi-tasks = { path = "crates/aeqi-tasks" }
+aeqi-quests = { path = "crates/aeqi-quests" }
 aeqi-core = { path = "crates/aeqi-core" }
 aeqi-providers = { path = "crates/aeqi-providers" }
 aeqi-tools = { path = "crates/aeqi-tools" }
 aeqi-orchestrator = { path = "crates/aeqi-orchestrator" }
-aeqi-memory = { path = "crates/aeqi-memory" }
+aeqi-insights = { path = "crates/aeqi-insights" }
 aeqi-gates = { path = "crates/aeqi-gates" }
 aeqi-web = { path = "crates/aeqi-web" }
 aeqi-graph = { path = "crates/aeqi-graph" }

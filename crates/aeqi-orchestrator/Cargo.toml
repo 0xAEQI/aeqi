@@ -6,8 +6,8 @@ description = "Agent orchestration engine — worker pool, workers, chat, dispat
 
 [dependencies]
 aeqi-core = { workspace = true }
-aeqi-memory = { workspace = true }
-aeqi-tasks = { workspace = true }
+aeqi-insights = { workspace = true }
+aeqi-quests = { workspace = true }
 aeqi-providers = { workspace = true }
 aeqi-tools = { workspace = true }
 aeqi-graph = { workspace = true }

@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 
 use crate::agent_registry::AgentRegistry;
 use crate::message::DispatchBus;
-use aeqi_core::traits::{Memory, MemoryCategory, MemoryQuery};
+use aeqi_core::traits::{Insight, InsightCategory, InsightQuery};
 
 /// Tool that surfaces OpenRouter key usage and per-project worker execution
 /// costs aggregated from `~/.aeqi/usage.jsonl`.
@@ -158,18 +158,18 @@ pub fn usage_log_path() -> PathBuf {
         .join("usage.jsonl")
 }
 
-pub struct MemoryStoreTool {
-    memory: Arc<dyn Memory>,
+pub struct InsightStoreTool {
+    memory: Arc<dyn Insight>,
 }
 
-impl MemoryStoreTool {
-    pub fn new(memory: Arc<dyn Memory>) -> Self {
+impl InsightStoreTool {
+    pub fn new(memory: Arc<dyn Insight>) -> Self {
         Self { memory }
     }
 }
 
 #[async_trait]
-impl Tool for MemoryStoreTool {
+impl Tool for InsightStoreTool {
     async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
         let key = args
             .get("key")
@@ -180,11 +180,11 @@ impl Tool for MemoryStoreTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing content"))?;
         let category = match args.get("category").and_then(|v| v.as_str()) {
-            Some("procedure") => MemoryCategory::Procedure,
-            Some("preference") => MemoryCategory::Preference,
-            Some("context") => MemoryCategory::Context,
-            Some("evergreen") => MemoryCategory::Evergreen,
-            _ => MemoryCategory::Fact,
+            Some("procedure") => InsightCategory::Procedure,
+            Some("preference") => InsightCategory::Preference,
+            Some("context") => InsightCategory::Context,
+            Some("evergreen") => InsightCategory::Evergreen,
+            _ => InsightCategory::Fact,
         };
         let agent_id = args.get("agent_id").and_then(|v| v.as_str());
 
@@ -216,18 +216,18 @@ impl Tool for MemoryStoreTool {
     }
 }
 
-pub struct MemoryRecallTool {
-    memory: Arc<dyn Memory>,
+pub struct InsightRecallTool {
+    memory: Arc<dyn Insight>,
 }
 
-impl MemoryRecallTool {
-    pub fn new(memory: Arc<dyn Memory>) -> Self {
+impl InsightRecallTool {
+    pub fn new(memory: Arc<dyn Insight>) -> Self {
         Self { memory }
     }
 }
 
 #[async_trait]
-impl Tool for MemoryRecallTool {
+impl Tool for InsightRecallTool {
     async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
         let query_text = args
             .get("query")
@@ -235,7 +235,7 @@ impl Tool for MemoryRecallTool {
             .ok_or_else(|| anyhow::anyhow!("missing query"))?;
         let top_k = args.get("top_k").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
 
-        let mut query = MemoryQuery::new(query_text, top_k);
+        let mut query = InsightQuery::new(query_text, top_k);
 
         if let Some(agent_id) = args.get("agent_id").and_then(|v| v.as_str()) {
             query = query.with_agent(agent_id);
@@ -292,11 +292,11 @@ impl Tool for MemoryRecallTool {
     }
 }
 
-/// Format an `aeqi_tasks::Task` into a human-readable detail string.
-fn format_task_detail(task: &aeqi_tasks::Task) -> String {
+/// Format an `aeqi_quests::Quest` into a human-readable detail string.
+fn format_task_detail(task: &aeqi_quests::Quest) -> String {
     let mut out = format!(
         "Task: {} \nStatus: {:?}\nPriority: {}\nSubject: {}\n",
-        task.id, task.status, task.priority, task.subject,
+        task.id, task.status, task.priority, task.name,
     );
     if !task.description.is_empty() {
         out.push_str(&format!("Description: {}\n", task.description));
@@ -395,11 +395,11 @@ impl Tool for QuestCancelTool {
         match self
             .agent_registry
             .update_task(task_id, |q| {
-                q.status = aeqi_tasks::TaskStatus::Cancelled;
+                q.status = aeqi_quests::QuestStatus::Cancelled;
                 q.assignee = None;
                 q.closed_reason = Some(reason_owned.clone());
-                q.set_task_outcome(&aeqi_tasks::TaskOutcomeRecord::new(
-                    aeqi_tasks::TaskOutcomeKind::Cancelled,
+                q.set_task_outcome(&aeqi_quests::QuestOutcomeRecord::new(
+                    aeqi_quests::QuestOutcomeKind::Cancelled,
                     &reason_owned,
                 ));
             })
@@ -456,10 +456,10 @@ impl Tool for QuestReprioritizeTool {
             .ok_or_else(|| anyhow::anyhow!("missing priority"))?;
 
         let priority = match priority_str.to_lowercase().as_str() {
-            "low" => aeqi_tasks::Priority::Low,
-            "normal" => aeqi_tasks::Priority::Normal,
-            "high" => aeqi_tasks::Priority::High,
-            "critical" => aeqi_tasks::Priority::Critical,
+            "low" => aeqi_quests::Priority::Low,
+            "normal" => aeqi_quests::Priority::Normal,
+            "high" => aeqi_quests::Priority::High,
+            "critical" => aeqi_quests::Priority::Critical,
             _ => {
                 return Ok(ToolResult::error(format!(
                     "Invalid priority: {priority_str}. Use: low, normal, high, critical"
@@ -723,7 +723,7 @@ pub fn build_orchestration_tools(
     dispatch_bus: Arc<DispatchBus>,
     _channels: Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
     api_key: Option<String>,
-    memory: Option<Arc<dyn Memory>>,
+    memory: Option<Arc<dyn Insight>>,
     notes: Option<Arc<crate::notes::Notes>>,
     event_broadcaster: Option<Arc<crate::EventBroadcaster>>,
     graph_db_path: Option<PathBuf>,
@@ -767,8 +767,8 @@ pub fn build_orchestration_tools(
     ];
 
     if let Some(mem) = memory {
-        tools.push(Arc::new(MemoryStoreTool::new(mem.clone())));
-        tools.push(Arc::new(MemoryRecallTool::new(mem)));
+        tools.push(Arc::new(InsightStoreTool::new(mem.clone())));
+        tools.push(Arc::new(InsightRecallTool::new(mem)));
     }
 
     if let Some(bb) = notes {

@@ -1,4 +1,4 @@
-use aeqi_tasks::{TaskBoard, TaskId};
+use aeqi_quests::{QuestBoard, QuestId};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -49,10 +49,10 @@ impl Pipeline {
     /// Instantiate a pipeline: create a parent task with child step tasks.
     pub fn pour(
         &self,
-        store: &mut TaskBoard,
+        store: &mut QuestBoard,
         prefix: &str,
         vars: &HashMap<String, String>,
-    ) -> Result<TaskId> {
+    ) -> Result<QuestId> {
         // Validate required vars.
         for (name, def) in &self.vars {
             if def.required && !vars.contains_key(name) && def.default.is_none() {
@@ -65,7 +65,7 @@ impl Pipeline {
         let parent = store.create_with_agent(prefix, &parent_subject, None)?;
 
         // Create step tasks as children.
-        let mut step_task_ids: HashMap<String, TaskId> = HashMap::new();
+        let mut step_task_ids: HashMap<String, QuestId> = HashMap::new();
 
         for step in &self.steps {
             let subject = self.interpolate(&step.title, vars);

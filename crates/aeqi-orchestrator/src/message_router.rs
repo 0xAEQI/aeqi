@@ -11,7 +11,7 @@ use tracing::{info, warn};
 
 use anyhow::Result;
 
-use aeqi_core::traits::{Memory, MemoryQuery};
+use aeqi_core::traits::{Insight, InsightQuery};
 
 use crate::agent_registry::AgentRegistry;
 use crate::agent_router::AgentRouter;
@@ -202,9 +202,9 @@ pub struct MessageRouter {
     pub pending_tasks: Arc<Mutex<HashMap<String, PendingTask>>>,
     pub task_notify: Arc<tokio::sync::Notify>,
     /// Per-project memory stores for knowledge-aware chat (keyed by project name).
-    pub memory_stores: HashMap<String, Arc<dyn Memory>>,
+    pub insight_stores: HashMap<String, Arc<dyn Insight>>,
     /// Per-project memory stores keyed by project UUID for id-based lookups.
-    pub memory_stores_by_id: HashMap<String, Arc<dyn Memory>>,
+    pub insight_stores_by_id: HashMap<String, Arc<dyn Insight>>,
     /// LLM-backed intent classifier for ambiguous messages.
     pub intent_classifier: Option<Arc<crate::intent::IntentClassifier>>,
     /// Wake signal for the global Scheduler.
@@ -212,7 +212,7 @@ pub struct MessageRouter {
 }
 
 impl MessageRouter {
-    fn set_scheduler_hold(task: &mut aeqi_tasks::Task, hold: bool, reason: Option<&str>) {
+    fn set_scheduler_hold(task: &mut aeqi_quests::Quest, hold: bool, reason: Option<&str>) {
         let mut metadata = match std::mem::take(&mut task.metadata) {
             serde_json::Value::Object(map) => map,
             serde_json::Value::Null => serde_json::Map::new(),
@@ -248,9 +248,9 @@ impl MessageRouter {
         };
     }
 
-    fn task_completion_reason(task: &aeqi_tasks::Task) -> Option<String> {
+    fn task_completion_reason(task: &aeqi_quests::Quest) -> Option<String> {
         match task.status {
-            aeqi_tasks::TaskStatus::Blocked => task.blocker_context(),
+            aeqi_quests::QuestStatus::Blocked => task.blocker_context(),
             _ => task.outcome_summary(),
         }
     }
@@ -353,7 +353,7 @@ impl MessageRouter {
         subject: &str,
         description: &str,
         hold_for_council: bool,
-    ) -> Result<aeqi_tasks::Task> {
+    ) -> Result<aeqi_quests::Quest> {
         let agent = self
             .agent_registry
             .resolve_by_hint(project_name)
@@ -750,7 +750,7 @@ impl MessageRouter {
             };
 
             match status {
-                Some((aeqi_tasks::TaskStatus::Done, reason)) => {
+                Some((aeqi_quests::QuestStatus::Done, reason)) => {
                     if let Some(completion) = self
                         .consume_pending_completion(&qid, CompletionStatus::Done, reason)
                         .await
@@ -758,7 +758,7 @@ impl MessageRouter {
                         completions.push(completion);
                     }
                 }
-                Some((aeqi_tasks::TaskStatus::Blocked, reason)) => {
+                Some((aeqi_quests::QuestStatus::Blocked, reason)) => {
                     if let Some(completion) = self
                         .consume_pending_completion(&qid, CompletionStatus::Blocked, reason)
                         .await
@@ -766,7 +766,7 @@ impl MessageRouter {
                         completions.push(completion);
                     }
                 }
-                Some((aeqi_tasks::TaskStatus::Cancelled, reason)) => {
+                Some((aeqi_quests::QuestStatus::Cancelled, reason)) => {
                     if let Some(completion) = self
                         .consume_pending_completion(&qid, CompletionStatus::Cancelled, reason)
                         .await
@@ -835,15 +835,15 @@ impl MessageRouter {
         };
 
         match status {
-            Some((aeqi_tasks::TaskStatus::Done, reason)) => {
+            Some((aeqi_quests::QuestStatus::Done, reason)) => {
                 self.consume_pending_completion(task_id, CompletionStatus::Done, reason)
                     .await
             }
-            Some((aeqi_tasks::TaskStatus::Blocked, reason)) => {
+            Some((aeqi_quests::QuestStatus::Blocked, reason)) => {
                 self.consume_pending_completion(task_id, CompletionStatus::Blocked, reason)
                     .await
             }
-            Some((aeqi_tasks::TaskStatus::Cancelled, reason)) => {
+            Some((aeqi_quests::QuestStatus::Cancelled, reason)) => {
                 self.consume_pending_completion(task_id, CompletionStatus::Cancelled, reason)
                     .await
             }
@@ -892,8 +892,8 @@ impl MessageRouter {
         } else if let Some(q) = query {
             // Global query — search all projects.
             let mut all_ctx = Vec::new();
-            for (name, mem) in &self.memory_stores {
-                let mq = MemoryQuery::new(q, 3);
+            for (name, mem) in &self.insight_stores {
+                let mq = InsightQuery::new(q, 3);
                 if let Ok(results) = mem.search(&mq).await {
                     for entry in results {
                         all_ctx.push(format!("  • [{}] {}: {}", name, entry.key, entry.content));
@@ -931,7 +931,7 @@ impl MessageRouter {
                         .filter(|t| {
                             !matches!(
                                 t.status,
-                                aeqi_tasks::TaskStatus::Done | aeqi_tasks::TaskStatus::Cancelled
+                                aeqi_quests::QuestStatus::Done | aeqi_quests::QuestStatus::Cancelled
                             )
                         })
                         .count();
@@ -956,7 +956,7 @@ impl MessageRouter {
                         .filter(|t| {
                             !matches!(
                                 t.status,
-                                aeqi_tasks::TaskStatus::Done | aeqi_tasks::TaskStatus::Cancelled
+                                aeqi_quests::QuestStatus::Done | aeqi_quests::QuestStatus::Cancelled
                             )
                         })
                         .count();
@@ -975,7 +975,7 @@ impl MessageRouter {
             .filter(|t| {
                 !matches!(
                     t.status,
-                    aeqi_tasks::TaskStatus::Done | aeqi_tasks::TaskStatus::Cancelled
+                    aeqi_quests::QuestStatus::Done | aeqi_quests::QuestStatus::Cancelled
                 )
             })
             .count();
@@ -1024,8 +1024,8 @@ impl MessageRouter {
 
     /// Search memory for context relevant to a query in a specific project.
     pub async fn build_memory_context(&self, project: &str, query: &str) -> Option<String> {
-        let mem = self.memory_stores.get(project)?;
-        let mq = MemoryQuery::new(query, 5);
+        let mem = self.insight_stores.get(project)?;
+        let mq = InsightQuery::new(query, 5);
         let results = mem.search(&mq).await.ok()?;
         if results.is_empty() {
             return None;
@@ -1040,11 +1040,11 @@ impl MessageRouter {
     /// Store a note to the project's memory.
     pub async fn store_note(&self, project: &str, key: &str, content: &str) -> Result<String> {
         let mem = self
-            .memory_stores
+            .insight_stores
             .get(project)
             .ok_or_else(|| anyhow::anyhow!("no memory store for project: {project}"))?;
         let id = mem
-            .store(key, content, aeqi_core::traits::MemoryCategory::Fact, None)
+            .store(key, content, aeqi_core::traits::InsightCategory::Fact, None)
             .await?;
         Ok(id)
     }
@@ -1121,7 +1121,7 @@ impl MessageRouter {
                 action: Some("task_created".to_string()),
                 task: Some(serde_json::json!({
                     "id": task.id.0,
-                    "subject": task.subject,
+                    "subject": task.name,
                     "project": project,
                 })),
                 projects: None,
@@ -1150,7 +1150,7 @@ impl MessageRouter {
                 match self
                     .agent_registry
                     .update_task(&task_id, |task| {
-                        task.status = aeqi_tasks::TaskStatus::Done;
+                        task.status = aeqi_quests::QuestStatus::Done;
                         task.closed_at = Some(chrono::Utc::now());
                         task.closed_reason = Some("closed via chat".to_string());
                     })
@@ -1339,7 +1339,7 @@ impl MessageRouter {
                     }
                     let done = match ar.get_task(&task_id).await {
                         Ok(Some(task)) => {
-                            if task.status == aeqi_tasks::TaskStatus::Done {
+                            if task.status == aeqi_quests::QuestStatus::Done {
                                 Some(task.outcome_summary())
                             } else {
                                 None

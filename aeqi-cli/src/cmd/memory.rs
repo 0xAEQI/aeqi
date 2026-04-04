@@ -1,8 +1,8 @@
-use aeqi_core::traits::Memory;
+use aeqi_core::traits::Insight;
 use anyhow::Result;
 use std::path::PathBuf;
 
-use crate::helpers::{load_config, open_memory};
+use crate::helpers::{load_config, open_insights};
 
 pub(crate) async fn cmd_recall(
     config_path: &Option<PathBuf>,
@@ -11,10 +11,10 @@ pub(crate) async fn cmd_recall(
     top_k: usize,
 ) -> Result<()> {
     let (config, _) = load_config(config_path)?;
-    let memory = open_memory(&config, project_name)?;
+    let memory = open_insights(&config, project_name)?;
 
     let results = memory
-        .search(&aeqi_core::traits::MemoryQuery::new(query, top_k))
+        .search(&aeqi_core::traits::InsightQuery::new(query, top_k))
         .await?;
 
     if results.is_empty() {
@@ -49,10 +49,10 @@ pub(crate) async fn cmd_remember(
     project_name: Option<&str>,
 ) -> Result<()> {
     let (config, _) = load_config(config_path)?;
-    let memory = open_memory(&config, project_name)?;
+    let memory = open_insights(&config, project_name)?;
 
     let id = memory
-        .store(key, content, aeqi_core::traits::MemoryCategory::Fact, None)
+        .store(key, content, aeqi_core::traits::InsightCategory::Fact, None)
         .await?;
     let scope = project_name.unwrap_or("global");
     println!("Stored memory {id} [{scope}] {key}");

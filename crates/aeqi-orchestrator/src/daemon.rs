@@ -7,7 +7,6 @@ use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
 use crate::agent_registry::AgentRegistry;
-use crate::cost_ledger::CostLedger;
 use crate::event_store::EventStore;
 use crate::execution_events::{EventBroadcaster, ExecutionEvent};
 use crate::message::{Dispatch, DispatchBus, DispatchHealth, DispatchKind};
@@ -133,10 +132,10 @@ fn resolve_web_chat_id(
     agency_chat_id()
 }
 
-fn task_snapshot(task: &aeqi_tasks::Task) -> serde_json::Value {
+fn task_snapshot(task: &aeqi_quests::Quest) -> serde_json::Value {
     serde_json::json!({
         "id": task.id.0,
-        "subject": task.subject,
+        "subject": task.name,
         "status": task.status.to_string(),
         "closed_reason": task.closed_reason,
         "runtime": task.runtime(),
@@ -186,19 +185,19 @@ fn attach_chat_id(mut payload: serde_json::Value, chat_id: i64) -> serde_json::V
 /// Context struct bundling shared service references for IPC handlers.
 /// Avoids passing many individual parameters to socket_accept_loop / handle_socket_connection.
 struct IpcContext {
-    cost_ledger: Arc<CostLedger>,
     metrics: Arc<AEQIMetrics>,
     notes: Option<Arc<Notes>>,
     event_store: Arc<EventStore>,
     session_store: Option<Arc<SessionStore>>,
     leader_agent_name: String,
     config_project_names: Vec<String>,
+    daily_budget_usd: f64,
+    project_budgets: std::collections::HashMap<String, f64>,
 }
 
 /// The Daemon: background process that runs the scheduler patrol loop
 /// and trigger system.
 pub struct Daemon {
-    pub cost_ledger: Arc<CostLedger>,
     pub metrics: Arc<AEQIMetrics>,
     pub notes: Option<Arc<Notes>>,
     pub event_store: Arc<EventStore>,
@@ -213,7 +212,7 @@ pub struct Daemon {
     pub trigger_store: Option<Arc<TriggerStore>>,
     pub agent_registry: Arc<AgentRegistry>,
     pub message_router: Option<Arc<MessageRouter>>,
-    pub write_queue: Arc<std::sync::Mutex<aeqi_memory::debounce::WriteQueue>>,
+    pub write_queue: Arc<std::sync::Mutex<aeqi_insights::debounce::WriteQueue>>,
     pub event_broadcaster: Arc<EventBroadcaster>,
     pub default_provider: Option<Arc<dyn aeqi_core::traits::Provider>>,
     pub default_model: String,
@@ -226,13 +225,16 @@ pub struct Daemon {
     config_reloaded: Arc<std::sync::atomic::AtomicBool>,
     shutdown_notify: Arc<tokio::sync::Notify>,
     readiness: ReadinessContext,
+    /// Global daily budget cap.
+    pub daily_budget_usd: f64,
+    /// Per-project budget caps.
+    pub project_budgets: std::collections::HashMap<String, f64>,
     /// Global scheduler for the unified schedule() loop.
     pub scheduler: Arc<Scheduler>,
 }
 
 impl Daemon {
     pub fn new(
-        cost_ledger: Arc<CostLedger>,
         metrics: Arc<AEQIMetrics>,
         dispatch_bus: Arc<DispatchBus>,
         scheduler: Arc<Scheduler>,
@@ -240,7 +242,6 @@ impl Daemon {
         event_store: Arc<EventStore>,
     ) -> Self {
         Self {
-            cost_ledger,
             metrics,
             notes: None,
             event_store,
@@ -256,7 +257,7 @@ impl Daemon {
             agent_registry,
             message_router: None,
             write_queue: Arc::new(std::sync::Mutex::new(
-                aeqi_memory::debounce::WriteQueue::default(),
+                aeqi_insights::debounce::WriteQueue::default(),
             )),
             event_broadcaster: Arc::new(EventBroadcaster::new()),
             default_provider: None,
@@ -270,6 +271,8 @@ impl Daemon {
             config_reloaded: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_notify: Arc::new(tokio::sync::Notify::new()),
             readiness: ReadinessContext::default(),
+            daily_budget_usd: 50.0,
+            project_budgets: std::collections::HashMap::new(),
             scheduler,
         }
     }
@@ -841,13 +844,14 @@ impl Daemon {
         match tokio::net::UnixListener::bind(sock_path) {
             Ok(listener) => {
                 let ipc_ctx = Arc::new(IpcContext {
-                    cost_ledger: self.cost_ledger.clone(),
                     metrics: self.metrics.clone(),
                     notes: self.notes.clone(),
                     event_store: self.event_store.clone(),
                     session_store: self.session_store.clone(),
                     leader_agent_name: self.leader_agent_name.clone(),
                     config_project_names: self.config_project_names.clone(),
+                    daily_budget_usd: self.daily_budget_usd,
+                    project_budgets: self.project_budgets.clone(),
                 });
                 let dispatch_bus = self.dispatch_bus.clone();
                 let trigger_store = self.trigger_store.clone();
@@ -900,11 +904,7 @@ impl Daemon {
             Ok(_) => {}
             Err(e) => warn!(error = %e, "failed to load dispatch bus"),
         }
-        match self.cost_ledger.load() {
-            Ok(n) if n > 0 => info!(count = n, "loaded persisted cost entries"),
-            Ok(_) => {}
-            Err(e) => warn!(error = %e, "failed to load cost ledger"),
-        }
+        // Cost entries are now stored in EventStore (SQLite) — no JSONL load needed.
     }
 
     /// Run one patrol iteration: triggers, config reload, persistence, metrics, pruning.
@@ -946,12 +946,10 @@ impl Daemon {
             self.apply_config_reload().await;
         }
 
-        // 4. Periodic persistence: save dispatch bus + cost ledger every patrol.
+        // 4. Periodic persistence: save dispatch bus every patrol.
+        //    Cost entries are persisted automatically via EventStore (SQLite).
         if let Err(e) = self.dispatch_bus.save().await {
             warn!(error = %e, "failed to save dispatch bus");
-        }
-        if let Err(e) = self.cost_ledger.save() {
-            warn!(error = %e, "failed to save cost ledger");
         }
 
         // 5. Surface dispatch retries / dead letters for critical dispatches.
@@ -976,7 +974,7 @@ impl Daemon {
         }
 
         // 6. Update daily cost gauge and dispatch health metrics.
-        let (spent, _, _) = self.cost_ledger.budget_status();
+        let spent = self.event_store.daily_cost().await.unwrap_or(0.0);
         self.metrics.daily_cost_usd.set(spent);
         let dispatch_health = self.dispatch_bus.health(ACK_RETRY_AGE_SECS).await;
         self.metrics
@@ -992,8 +990,11 @@ impl Daemon {
             .dispatch_dead_letters
             .set(dispatch_health.dead_letters as f64);
 
-        // 7. Prune old cost entries (older than 7 days).
-        self.cost_ledger.prune_old();
+        // 7. Prune old cost events (older than 7 days).
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(7);
+        if let Err(e) = self.event_store.prune("cost", &cutoff).await {
+            warn!(error = %e, "failed to prune old cost events");
+        }
 
         // 8. Prune expired blackboard entries.
         if let Some(ref bb) = self.notes
@@ -1014,12 +1015,11 @@ impl Daemon {
         info!("config reload requested (SIGHUP received)");
         match aeqi_core::config::AEQIConfig::discover() {
             Ok((new_config, path)) => {
-                self.cost_ledger
-                    .set_daily_budget(new_config.security.max_cost_per_day_usd);
+                self.daily_budget_usd = new_config.security.max_cost_per_day_usd;
 
                 for pcfg in &new_config.companies {
                     if let Some(budget) = pcfg.max_cost_per_day_usd {
-                        self.cost_ledger.set_project_budget(&pcfg.name, budget);
+                        self.project_budgets.insert(pcfg.name.clone(), budget);
                     }
                 }
 
@@ -1050,13 +1050,13 @@ impl Daemon {
             return;
         };
         for w in &ready {
-            if let Some(mem) = engine.memory_stores.get(&w.project) {
+            if let Some(mem) = engine.insight_stores.get(&w.project) {
                 let category = match w.category.as_str() {
-                    "fact" => aeqi_core::traits::MemoryCategory::Fact,
-                    "procedure" => aeqi_core::traits::MemoryCategory::Procedure,
-                    "preference" => aeqi_core::traits::MemoryCategory::Preference,
-                    "context" => aeqi_core::traits::MemoryCategory::Context,
-                    _ => aeqi_core::traits::MemoryCategory::Fact,
+                    "fact" => aeqi_core::traits::InsightCategory::Fact,
+                    "procedure" => aeqi_core::traits::InsightCategory::Procedure,
+                    "preference" => aeqi_core::traits::InsightCategory::Preference,
+                    "context" => aeqi_core::traits::InsightCategory::Context,
+                    _ => aeqi_core::traits::InsightCategory::Fact,
                 };
                 match mem.store(&w.key, &w.content, category, None).await {
                     Ok(id) => debug!(
@@ -1233,22 +1233,24 @@ impl Daemon {
                         0
                     };
 
-                    let (spent, budget, remaining) = ipc_ctx.cost_ledger.budget_status();
-                    let project_budgets = ipc_ctx.cost_ledger.all_project_budget_statuses();
-                    let project_budget_info: serde_json::Map<String, serde_json::Value> =
-                        project_budgets
-                            .into_iter()
-                            .map(|(name, (spent, budget, remaining))| {
-                                (
-                                    name,
-                                    serde_json::json!({
-                                        "spent_usd": spent,
-                                        "budget_usd": budget,
-                                        "remaining_usd": remaining,
-                                    }),
-                                )
-                            })
-                            .collect();
+                    let spent = ipc_ctx.event_store.daily_cost().await.unwrap_or(0.0);
+                    let budget = ipc_ctx.daily_budget_usd;
+                    let remaining = (budget - spent).max(0.0);
+                    let project_costs = ipc_ctx.event_store.daily_costs_by_project().await.unwrap_or_default();
+                    let project_budget_info: serde_json::Map<String, serde_json::Value> = {
+                        let mut all_projects: std::collections::HashSet<String> = ipc_ctx.project_budgets.keys().cloned().collect();
+                        all_projects.extend(project_costs.keys().cloned());
+                        all_projects.into_iter().map(|name| {
+                            let p_spent = project_costs.get(&name).copied().unwrap_or(0.0);
+                            let p_budget = ipc_ctx.project_budgets.get(&name).copied().unwrap_or(budget);
+                            let p_remaining = (p_budget - p_spent).max(0.0);
+                            (name, serde_json::json!({
+                                "spent_usd": p_spent,
+                                "budget_usd": p_budget,
+                                "remaining_usd": p_remaining,
+                            }))
+                        }).collect()
+                    };
 
                     let active = scheduler.active_count().await;
                     let agent_counts = scheduler.agent_counts().await;
@@ -1292,7 +1294,9 @@ impl Daemon {
                         })
                         .unwrap_or_default();
                     let dispatch_health = dispatch_bus.health(ACK_RETRY_AGE_SECS).await;
-                    let (spent, budget, remaining) = ipc_ctx.cost_ledger.budget_status();
+                    let spent = ipc_ctx.event_store.daily_cost().await.unwrap_or(0.0);
+                    let budget = ipc_ctx.daily_budget_usd;
+                    let remaining = (budget - spent).max(0.0);
                     readiness_response(
                         &ipc_ctx.leader_agent_name,
                         worker_limits,
@@ -1335,19 +1339,19 @@ impl Daemon {
                                 let open = tasks.iter().filter(|t| !t.is_closed()).count();
                                 let pending = tasks
                                     .iter()
-                                    .filter(|t| t.status == aeqi_tasks::TaskStatus::Pending)
+                                    .filter(|t| t.status == aeqi_quests::QuestStatus::Pending)
                                     .count();
                                 let in_progress = tasks
                                     .iter()
-                                    .filter(|t| t.status == aeqi_tasks::TaskStatus::InProgress)
+                                    .filter(|t| t.status == aeqi_quests::QuestStatus::InProgress)
                                     .count();
                                 let done = tasks
                                     .iter()
-                                    .filter(|t| t.status == aeqi_tasks::TaskStatus::Done)
+                                    .filter(|t| t.status == aeqi_quests::QuestStatus::Done)
                                     .count();
                                 let cancelled = tasks
                                     .iter()
-                                    .filter(|t| t.status == aeqi_tasks::TaskStatus::Cancelled)
+                                    .filter(|t| t.status == aeqi_quests::QuestStatus::Cancelled)
                                     .count();
                                 (total, open, pending, in_progress, done, cancelled)
                             })
@@ -1424,23 +1428,24 @@ impl Daemon {
                 }
 
                 "cost" => {
-                    let (spent, budget, remaining) = ipc_ctx.cost_ledger.budget_status();
-                    let report = ipc_ctx.cost_ledger.daily_report();
-                    let project_budgets = ipc_ctx.cost_ledger.all_project_budget_statuses();
-                    let project_budget_info: serde_json::Map<String, serde_json::Value> =
-                        project_budgets
-                            .into_iter()
-                            .map(|(name, (spent, budget, remaining))| {
-                                (
-                                    name,
-                                    serde_json::json!({
-                                        "spent_usd": spent,
-                                        "budget_usd": budget,
-                                        "remaining_usd": remaining,
-                                    }),
-                                )
-                            })
-                            .collect();
+                    let spent = ipc_ctx.event_store.daily_cost().await.unwrap_or(0.0);
+                    let budget = ipc_ctx.daily_budget_usd;
+                    let remaining = (budget - spent).max(0.0);
+                    let report = ipc_ctx.event_store.daily_costs_by_project().await.unwrap_or_default();
+                    let project_budget_info: serde_json::Map<String, serde_json::Value> = {
+                        let mut all_projects: std::collections::HashSet<String> = ipc_ctx.project_budgets.keys().cloned().collect();
+                        all_projects.extend(report.keys().cloned());
+                        all_projects.into_iter().map(|name| {
+                            let p_spent = report.get(&name).copied().unwrap_or(0.0);
+                            let p_budget = ipc_ctx.project_budgets.get(&name).copied().unwrap_or(budget);
+                            let p_remaining = (p_budget - p_spent).max(0.0);
+                            (name, serde_json::json!({
+                                "spent_usd": p_spent,
+                                "budget_usd": p_budget,
+                                "remaining_usd": p_remaining,
+                            }))
+                        }).collect()
+                    };
                     serde_json::json!({
                         "ok": true,
                         "spent_today_usd": spent,
@@ -1459,7 +1464,7 @@ impl Daemon {
                     let last = request.get("last").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
                     let filter = crate::event_store::EventFilter {
                         event_type: Some("decision".to_string()),
-                        task_id: task_filter,
+                        quest_id: task_filter,
                         ..Default::default()
                     };
                     match ipc_ctx.event_store.query(&filter, last, 0).await {
@@ -1470,7 +1475,7 @@ impl Daemon {
                                     serde_json::json!({
                                         "timestamp": e.created_at.to_rfc3339(),
                                         "decision_type": e.content.get("decision_type").and_then(|v| v.as_str()).unwrap_or(""),
-                                        "task_id": e.task_id,
+                                        "quest_id": e.quest_id,
                                         "agent": e.content.get("agent").and_then(|v| v.as_str()).unwrap_or(""),
                                         "reasoning": e.content.get("reasoning").and_then(|v| v.as_str()).unwrap_or(""),
                                     })
@@ -1750,7 +1755,7 @@ impl Daemon {
                                 .map(|task| {
                                     serde_json::json!({
                                         "id": task.id.0,
-                                        "subject": task.subject,
+                                        "subject": task.name,
                                         "description": task.description,
                                         "status": task.status.to_string(),
                                         "priority": task.priority.to_string(),
@@ -1825,7 +1830,7 @@ impl Daemon {
                                             "ok": true,
                                             "task": {
                                                 "id": task.id.0,
-                                                "subject": task.subject,
+                                                "subject": task.name,
                                                 "status": task.status.to_string(),
                                                 "agent_id": task.agent_id,
                                                 "project": project,
@@ -1860,7 +1865,7 @@ impl Daemon {
                         // AgentRegistry path: update status to Done via unified store.
                         match agent_registry
                             .update_task(task_id, |task| {
-                                task.status = aeqi_tasks::TaskStatus::Done;
+                                task.status = aeqi_quests::QuestStatus::Done;
                                 task.closed_at = Some(chrono::Utc::now());
                                 task.closed_reason = Some(reason.to_string());
                             })
@@ -2541,10 +2546,10 @@ impl Daemon {
                         }
                         serde_json::json!({"ok": true, "projects": project_memories})
                     } else if let Some(ref engine) = message_router {
-                        if let Some(mem) = engine.memory_stores.get(project) {
+                        if let Some(mem) = engine.insight_stores.get(project) {
                             let agent_id_param = request.get("agent_id").and_then(|v| v.as_str());
 
-                            let mut mq = aeqi_core::traits::MemoryQuery::new(query, limit);
+                            let mut mq = aeqi_core::traits::InsightQuery::new(query, limit);
                             if let Some(aid) = agent_id_param {
                                 mq = mq.with_agent(aid);
                             }
@@ -2894,10 +2899,10 @@ impl Daemon {
 
                         // 1. Search project memories.
                         if let Some(ref engine) = message_router
-                            && let Some(mem) = engine.memory_stores.get(project)
+                            && let Some(mem) = engine.insight_stores.get(project)
                         {
                             let q = if query.is_empty() { project } else { query };
-                            let mq = aeqi_core::traits::MemoryQuery::new(q, limit);
+                            let mq = aeqi_core::traits::InsightQuery::new(q, limit);
                             if let Ok(results) = mem.search(&mq).await {
                                 for entry in results {
                                     items.push(serde_json::json!({
@@ -2955,13 +2960,13 @@ impl Daemon {
                     if project.is_empty() || key.is_empty() || content.is_empty() {
                         serde_json::json!({"ok": false, "error": "project, key, and content required"})
                     } else if let Some(ref engine) = message_router {
-                        if let Some(mem) = engine.memory_stores.get(project) {
+                        if let Some(mem) = engine.insight_stores.get(project) {
                             let cat = match category {
-                                "procedure" => aeqi_core::traits::MemoryCategory::Procedure,
-                                "preference" => aeqi_core::traits::MemoryCategory::Preference,
-                                "context" => aeqi_core::traits::MemoryCategory::Context,
-                                "evergreen" => aeqi_core::traits::MemoryCategory::Evergreen,
-                                _ => aeqi_core::traits::MemoryCategory::Fact,
+                                "procedure" => aeqi_core::traits::InsightCategory::Procedure,
+                                "preference" => aeqi_core::traits::InsightCategory::Preference,
+                                "context" => aeqi_core::traits::InsightCategory::Context,
+                                "evergreen" => aeqi_core::traits::InsightCategory::Evergreen,
+                                _ => aeqi_core::traits::InsightCategory::Fact,
                             };
                             let agent_id = request.get("agent_id").and_then(|v| v.as_str());
                             match mem.store(key, content, cat, agent_id).await {
@@ -2986,7 +2991,7 @@ impl Daemon {
                     if project.is_empty() || id.is_empty() {
                         serde_json::json!({"ok": false, "error": "project and id required"})
                     } else if let Some(ref engine) = message_router {
-                        if let Some(mem) = engine.memory_stores.get(project) {
+                        if let Some(mem) = engine.insight_stores.get(project) {
                             match mem.delete(id).await {
                                 Ok(_) => serde_json::json!({"ok": true}),
                                 Err(e) => serde_json::json!({"ok": false, "error": e.to_string()}),
@@ -3633,25 +3638,13 @@ impl Daemon {
                                             resp.prompt_tokens,
                                             resp.completion_tokens,
                                         );
-                                        let _ = ipc_ctx.cost_ledger.record(
-                                            crate::cost_ledger::CostEntry {
-                                                project: "session".to_string(),
-                                                task_id: resolved_session_id.clone(),
-                                                worker: agent_hint.clone(),
-                                                cost_usd,
-                                                turns: resp.iterations,
-                                                timestamp: Utc::now(),
-                                                source: "session".to_string(),
-                                                tokens: (resp.prompt_tokens
-                                                    + resp.completion_tokens)
-                                                    as u64,
-                                                input_tokens: resp.prompt_tokens as u64,
-                                                output_tokens: resp.completion_tokens as u64,
-                                                cached_tokens: 0,
-                                                model: default_model.clone(),
-                                                provider: String::new(),
-                                            },
-                                        );
+                                        let _ = ipc_ctx.event_store.record_cost(
+                                            &agent_hint,
+                                            &resolved_session_id,
+                                            &agent_hint,
+                                            cost_usd,
+                                            resp.iterations,
+                                        ).await;
                                         serde_json::json!({
                                             "ok": true,
                                             "text": resp.text,
@@ -3790,28 +3783,19 @@ impl Daemon {
                                         }
                                     }
 
-                                    // Track cost in ledger.
+                                    // Track cost in EventStore.
                                     let cost_usd = aeqi_providers::estimate_cost(
                                         &default_model,
                                         prompt_tokens,
                                         completion_tokens,
                                     );
-                                    let _ =
-                                        ipc_ctx.cost_ledger.record(crate::cost_ledger::CostEntry {
-                                            project: "session".to_string(),
-                                            task_id: session_id.clone(),
-                                            worker: agent_hint.clone(),
-                                            cost_usd,
-                                            turns: iterations,
-                                            timestamp: Utc::now(),
-                                            source: "session".to_string(),
-                                            tokens: (prompt_tokens + completion_tokens) as u64,
-                                            input_tokens: prompt_tokens as u64,
-                                            output_tokens: completion_tokens as u64,
-                                            cached_tokens: 0,
-                                            model: default_model.clone(),
-                                            provider: String::new(),
-                                        });
+                                    let _ = ipc_ctx.event_store.record_cost(
+                                        &agent_hint,
+                                        &session_id,
+                                        &agent_hint,
+                                        cost_usd,
+                                        iterations,
+                                    ).await;
 
                                     if stream_mode {
                                         let done = serde_json::json!({
@@ -3861,7 +3845,6 @@ impl Daemon {
                         agent_registry.clone(),
                         ipc_ctx.session_store.clone(),
                         ipc_ctx.notes.clone(),
-                        ipc_ctx.cost_ledger.clone(),
                     );
                     match vfs.list(path).await {
                         Ok(resp) => serde_json::to_value(resp)
@@ -3879,7 +3862,6 @@ impl Daemon {
                             agent_registry.clone(),
                             ipc_ctx.session_store.clone(),
                             ipc_ctx.notes.clone(),
-                            ipc_ctx.cost_ledger.clone(),
                         );
                         match vfs.read(path).await {
                             Ok(resp) => serde_json::to_value(resp)
@@ -3898,7 +3880,6 @@ impl Daemon {
                             agent_registry.clone(),
                             ipc_ctx.session_store.clone(),
                             ipc_ctx.notes.clone(),
-                            ipc_ctx.cost_ledger.clone(),
                         );
                         match vfs.search(query).await {
                             Ok(resp) => serde_json::to_value(resp)
