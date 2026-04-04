@@ -56,7 +56,7 @@ function Nav() {
             href="mailto:enterprise@aeqi.ai"
             className="text-[12px] text-white/35 hover:text-white/60 transition-colors"
           >
-            Enterprise
+            enterprise
           </a>
           <a
             href="https://app.aeqi.ai"
