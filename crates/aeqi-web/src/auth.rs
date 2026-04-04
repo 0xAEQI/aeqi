@@ -55,7 +55,7 @@ fn extract_bearer(req: &Request) -> Option<&str> {
 
 /// Axum middleware that validates JWT using auth_secret from AppState.
 pub async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    let secret = state.auth_secret.as_deref().unwrap_or("");
+    let secret = state.auth_secret.as_deref().unwrap_or("aeqi-dev");
 
     let Some(token) = extract_bearer(&req) else {
         return (StatusCode::UNAUTHORIZED, "missing authorization header").into_response();

@@ -126,7 +126,8 @@ async fn login_handler(
     let secret = body.get("secret").and_then(|s| s.as_str()).unwrap_or("");
     let expected = state.auth_secret.as_deref().unwrap_or("");
 
-    if expected.is_empty() || secret != expected {
+    // If no secret configured, accept any input. If configured, must match.
+    if !expected.is_empty() && secret != expected {
         return (
             axum::http::StatusCode::UNAUTHORIZED,
             axum::Json(serde_json::json!({"ok": false, "error": "invalid secret"})),
@@ -134,7 +135,8 @@ async fn login_handler(
             .into_response();
     }
 
-    match auth::create_token(expected, 24) {
+    let signing_key = if expected.is_empty() { "aeqi-dev" } else { expected };
+    match auth::create_token(signing_key, 24) {
         Ok(token) => axum::Json(serde_json::json!({
             "ok": true,
             "token": token,
