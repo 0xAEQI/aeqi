@@ -39,9 +39,9 @@ function getNode(id: string): TreeNode {
 }
 
 const nodeColors: Record<number, string> = {
-  0: "#818cf8",
-  1: "#818cf8",
-  2: "rgba(129,140,248,0.55)",
+  0: "#c0392b",
+  1: "#c0392b",
+  2: "rgba(192,57,43,0.55)",
 };
 
 const nodeRadii: Record<number, number> = {
@@ -91,7 +91,7 @@ export function AgentTree() {
             className="absolute inset-0 -inset-x-12 pointer-events-none"
             style={{
               background:
-                "radial-gradient(ellipse 60% 50% at 50% 40%, rgba(99,102,241,0.06) 0%, transparent 70%)",
+                "radial-gradient(ellipse 60% 50% at 50% 40%, rgba(192,57,43,0.06) 0%, transparent 70%)",
             }}
           />
 
@@ -125,7 +125,7 @@ export function AgentTree() {
                 <motion.path
                   key={`edge-${i}`}
                   d={`M ${from.x} ${from.y} L ${to.x} ${to.y}`}
-                  stroke="rgba(129,140,248,0.12)"
+                  stroke="rgba(192,57,43,0.12)"
                   strokeWidth="0.4"
                   fill="none"
                   initial={{ pathLength: 0, opacity: 0 }}
@@ -161,7 +161,7 @@ export function AgentTree() {
                     cy={node.y}
                     r={5}
                     fill="none"
-                    stroke="rgba(129,140,248,0.08)"
+                    stroke="rgba(192,57,43,0.08)"
                     strokeWidth="0.3"
                     className="animate-pulse-slow"
                   />

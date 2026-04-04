@@ -15,7 +15,7 @@ export function CallToAction() {
         <div
           className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[200px] pointer-events-none"
           style={{
-            background: "radial-gradient(ellipse, rgba(99,102,241,0.05) 0%, transparent 70%)",
+            background: "radial-gradient(ellipse, rgba(192,57,43,0.05) 0%, transparent 70%)",
           }}
         />
 
@@ -44,14 +44,14 @@ export function CallToAction() {
             <div
               className="absolute -inset-1 rounded-full opacity-0 group-hover:opacity-100 blur-md transition-opacity duration-500"
               style={{
-                background: "linear-gradient(135deg, #818cf8, #67e8f9)",
+                background: "linear-gradient(135deg, #c0392b, #e74c3c)",
               }}
             />
             <div
               className="relative bg-white text-[#08080C] rounded-full px-8 py-3.5 text-[14px] font-medium hover:bg-white/95 transition-colors"
               style={{ fontFamily: "'Space Grotesk', sans-serif" }}
             >
-              Start talking
+              Use
             </div>
           </a>
           <a

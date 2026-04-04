@@ -1,10 +1,10 @@
 import { motion } from "framer-motion";
 
 const primitives = [
-  { text: "Agent", color: "#818cf8", direction: 1 },
-  { text: "Event", color: "#67e8f9", direction: -1 },
-  { text: "Quest", color: "#c084fc", direction: 1 },
-  { text: "Insight", color: "#34d399", direction: -1 },
+  { text: "Agent", color: "#c0392b", direction: 1 },
+  { text: "Event", color: "#c0392b", direction: -1 },
+  { text: "Quest", color: "#c0392b", direction: 1 },
+  { text: "Insight", color: "#c0392b", direction: -1 },
 ];
 
 export function Hero() {
@@ -25,7 +25,7 @@ export function Hero() {
       <div
         className="absolute w-[600px] h-[600px] rounded-full pointer-events-none"
         style={{
-          background: "radial-gradient(circle, rgba(99,102,241,0.06) 0%, rgba(103,232,249,0.03) 40%, transparent 70%)",
+          background: "radial-gradient(circle, rgba(192,57,43,0.06) 0%, rgba(192,57,43,0.02) 40%, transparent 70%)",
           animation: "pulse-ambient 6s ease-in-out infinite",
         }}
       />
