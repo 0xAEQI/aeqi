@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import Markdown from "react-markdown";
 import { api } from "@/lib/api";
-import { useChatStore } from "@/store/chat";
 import { useAuthStore } from "@/store/auth";
 import { useDaemonStore } from "@/store/daemon";
 
@@ -131,18 +131,36 @@ interface SessionInfo {
   first_message?: string;
 }
 
-export default function AgentSessionView() {
-  const selectedAgent = useChatStore((s) => s.selectedAgent);
+interface AgentSessionProps {
+  agentId: string;
+  sessionId: string | null;
+}
+
+export default function AgentSessionView({ agentId, sessionId: urlSessionId }: AgentSessionProps) {
+  const navigate = useNavigate();
   const token = useAuthStore((s) => s.token);
   const wsConnected = useDaemonStore((s) => s.wsConnected);
+  const agents = useDaemonStore((s) => s.agents);
 
-  const agentId = selectedAgent?.id;
-  const agentName = selectedAgent?.name;
-  const displayName = selectedAgent?.display_name || agentName || "Agent";
+  // Resolve agent info from the store
+  const agentInfo = agents.find((a: any) => a.id === agentId || a.name === agentId);
+  const agentName = agentInfo?.name || agentId;
+  const displayName = agentInfo?.display_name || agentName;
 
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [showSessionList, setShowSessionList] = useState(false);
+
+  // The active session comes from the URL
+  const activeSessionId = urlSessionId;
+
+  // Navigate helpers
+  const setSession = useCallback((sid: string | null) => {
+    if (sid) {
+      navigate(`/?agent=${encodeURIComponent(agentId)}&session=${encodeURIComponent(sid)}`, { replace: true });
+    } else {
+      navigate(`/?agent=${encodeURIComponent(agentId)}`, { replace: true });
+    }
+  }, [agentId, navigate]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -155,38 +173,26 @@ export default function AgentSessionView() {
 
   // Load sessions for this agent
   useEffect(() => {
-    if (!agentId && !agentName) return;
-    const id = agentId || agentName || "";
-    api.getSessions(id)
+    if (!agentId) return;
+    api.getSessions(agentId)
       .then((d: any) => {
         const list: SessionInfo[] = d.sessions || [];
         setSessions(list);
-        // Auto-select the most recent session
-        if (list.length > 0 && !activeSessionId) {
-          setActiveSessionId(list[0].id);
-        }
       })
       .catch(() => setSessions([]));
-  }, [agentId, agentName]);
+  }, [agentId]);
 
-  // Start a new conversation: deselect current session, show empty composer.
-  // The session is only created when the first message is sent.
+  // Start a new conversation: drop session param, show empty composer.
   const handleNewConversation = useCallback(() => {
-    setActiveSessionId(null);
-    setMessages([]);
-    setStreamText("");
-    setLiveToolEvents([]);
+    setSession(null);
     setShowSessionList(false);
-  }, []);
+  }, [setSession]);
 
   // Switch to an existing session
-  const handleSelectSession = useCallback((sessionId: string) => {
-    setActiveSessionId(sessionId);
-    setMessages([]);
-    setStreamText("");
-    setLiveToolEvents([]);
+  const handleSelectSession = useCallback((sid: string) => {
+    setSession(sid);
     setShowSessionList(false);
-  }, []);
+  }, [setSession]);
 
   // Process raw messages from API into our format
   const processRawMessages = useCallback((rawMessages: any[]): Message[] => {
@@ -231,26 +237,18 @@ export default function AgentSessionView() {
     return processed;
   }, []);
 
-  // Load messages when session changes
+  // Load messages when session changes (only if we have a session)
   useEffect(() => {
-    if (!activeSessionId && !agentId && !agentName) return;
     setMessages([]);
     setStreamText("");
     setLiveToolEvents([]);
 
-    const params: { session_id?: string; agent_id?: string; channel_name?: string; limit: number } = { limit: 50 };
-    if (activeSessionId) {
-      params.session_id = activeSessionId;
-    } else if (agentId) {
-      params.agent_id = agentId;
-    } else if (agentName) {
-      params.channel_name = agentName.toLowerCase();
-    }
+    if (!activeSessionId) return; // No session = new conversation, no messages to load
 
-    api.getSessionMessages(params)
+    api.getSessionMessages({ session_id: activeSessionId, limit: 50 })
       .then((d: any) => setMessages(processRawMessages(d.messages || [])))
       .catch(() => setMessages([]));
-  }, [activeSessionId, agentId, agentName, processRawMessages]);
+  }, [activeSessionId, processRawMessages]);
 
   // Auto-scroll
   useEffect(() => {
@@ -281,16 +279,16 @@ export default function AgentSessionView() {
     let sessionId = activeSessionId;
     if (!sessionId) {
       try {
-        const id = agentId || agentName || "";
-        const d = await api.createSession(id);
+        const d = await api.createSession(agentId);
         if (d.session_id) {
           sessionId = d.session_id;
-          setActiveSessionId(sessionId);
+          // Update URL to include the new session
+          setSession(sessionId);
           // Add to session list
           setSessions((prev) => [{
             id: d.session_id,
-            agent_id: agentId || undefined,
-            agent_name: agentName || undefined,
+            agent_id: agentId,
+            agent_name: agentName,
             status: "active",
             created_at: new Date().toISOString(),
             first_message: messageText.slice(0, 60),
@@ -489,7 +487,7 @@ export default function AgentSessionView() {
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   };
 
-  if (!selectedAgent) return null;
+  if (!agentId) return null;
 
   return (
     <div className="asv">
@@ -497,7 +495,7 @@ export default function AgentSessionView() {
       <div className="asv-header">
         <div className="asv-header-info">
           <span className="asv-header-name">{displayName}</span>
-          {selectedAgent.model && <span className="asv-header-model">{selectedAgent.model}</span>}
+          {agentInfo?.model && <span className="asv-header-model">{agentInfo.model}</span>}
           <span className={`asv-header-dot ${wsConnected ? "live" : ""}`} />
         </div>
         <div className="asv-header-actions">

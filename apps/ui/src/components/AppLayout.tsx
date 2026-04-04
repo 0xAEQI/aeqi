@@ -1,19 +1,21 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import AgentTree from "./Sidebar";
 import ContextPanel from "./ContextPanel";
 import UserAvatar from "./UserAvatar";
 import CommandPalette from "./CommandPalette";
 import AgentSessionView from "./AgentSessionView";
 import DashboardHome from "./DashboardHome";
-import { useChatStore } from "@/store/chat";
 import { useDaemonStore } from "@/store/daemon";
 import { useDaemonSocket } from "@/hooks/useDaemonSocket";
 
 export default function AppLayout() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const [searching, setSearching] = useState(false);
-  const selectedAgent = useChatStore((s) => s.selectedAgent);
+
+  const agentId = params.get("agent");
+  const sessionId = params.get("session");
 
   const fetchAll = useDaemonStore((s) => s.fetchAll);
   useEffect(() => { fetchAll(); const i = setInterval(fetchAll, 30000); return () => clearInterval(i); }, [fetchAll]);
@@ -70,8 +72,8 @@ export default function AppLayout() {
 
         {/* Main content: Session view or Dashboard */}
         <div className="content-area">
-          {selectedAgent ? (
-            <AgentSessionView />
+          {agentId ? (
+            <AgentSessionView agentId={agentId} sessionId={sessionId} />
           ) : (
             <div className="content-scroll">
               <DashboardHome />
@@ -80,7 +82,7 @@ export default function AppLayout() {
         </div>
 
         {/* Right context panel: visible when agent selected */}
-        {selectedAgent && <ContextPanel />}
+        {agentId && <ContextPanel />}
       </div>
       <CommandPalette open={searching} onClose={closeSearch} />
     </>

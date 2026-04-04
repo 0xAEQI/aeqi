@@ -162,7 +162,7 @@ export default function AgentTree() {
 
   const handleSelectAgent = (agent: AgentRef) => {
     setSelectedAgent(agent);
-    navigate(`/agents/${encodeURIComponent(agent.name)}`);
+    navigate(`/?agent=${encodeURIComponent(agent.id)}`);
   };
 
   const handleClearSelection = () => {
