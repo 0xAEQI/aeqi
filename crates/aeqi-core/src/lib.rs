@@ -20,7 +20,7 @@ pub mod traits;
 
 pub use agent::{
     Agent, AgentConfig, AgentResult, AgentStopReason, ContentReplacementState, LoopNotification,
-    NotificationReceiver, NotificationSender, SessionState, SessionType, TurnPromptSpec,
+    NotificationReceiver, NotificationSender, SessionState, SessionType, TurnPromptSpec, UserInput,
 };
 pub use chat_stream::{ChatStreamEvent, ChatStreamSender};
 pub use config::{

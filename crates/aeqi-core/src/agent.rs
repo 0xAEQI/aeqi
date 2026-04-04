@@ -564,6 +564,29 @@ const SYNTHETIC_TOOL_RESULT: &str = "[Tool result unavailable — context was co
 /// - **after_turn hook**: Enables AEQI's verification pipeline to validate the
 ///   agent's work before accepting a "done" signal.
 ///
+/// A message sent into a session — content plus optional prompt/task attachments.
+///
+/// The same struct handles the first message (which can bootstrap the session with
+/// prompts and tasks) and subsequent messages (which can amend them). One codepath.
+#[derive(Debug, Clone, Default)]
+pub struct UserInput {
+    /// The user's message text.
+    pub content: String,
+    /// Session prompts to add (loaded once from files, appended to system prompt).
+    pub session_prompts: Vec<String>,
+    /// Turn prompts to add (re-read from disk each turn).
+    pub turn_prompts: Vec<TurnPromptSpec>,
+}
+
+impl UserInput {
+    pub fn text(content: impl Into<String>) -> Self {
+        Self {
+            content: content.into(),
+            ..Default::default()
+        }
+    }
+}
+
 /// A turn-level prompt that is re-read from disk before each API call.
 #[derive(Debug, Clone)]
 pub struct TurnPromptSpec {
@@ -581,15 +604,16 @@ pub struct Agent {
     tools: Vec<Arc<dyn Tool>>,
     observer: Arc<dyn Observer>,
     system_prompt: String,
-    /// Turn-level prompts re-read from disk before each API call.
-    turn_prompts: Vec<TurnPromptSpec>,
+    /// Turn-level prompts re-read from disk before each API call. Mutable at
+    /// runtime — messages can amend turn prompts mid-session.
+    turn_prompts: Mutex<Vec<TurnPromptSpec>>,
     memory: Option<Arc<dyn Insight>>,
     chat_stream: Option<crate::chat_stream::ChatStreamSender>,
     /// Receiver for notifications from background agents. Drained between turns.
     notification_rx: Option<Arc<Mutex<NotificationReceiver>>>,
     /// Receiver for user input in perpetual session mode. The agent loop waits
     /// on this channel after each EndTurn instead of exiting.
-    input_rx: Option<Arc<Mutex<mpsc::UnboundedReceiver<String>>>>,
+    input_rx: Option<Arc<Mutex<mpsc::UnboundedReceiver<UserInput>>>>,
     /// Cancellation signal. When set to true, the agent loop exits at the next
     /// iteration boundary. Used for interrupt propagation from parent agents.
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
@@ -609,7 +633,7 @@ impl Agent {
             tools,
             observer,
             system_prompt,
-            turn_prompts: Vec::new(),
+            turn_prompts: Mutex::new(Vec::new()),
             memory: None,
             chat_stream: None,
             notification_rx: None,
@@ -645,14 +669,14 @@ impl Agent {
 
     /// Attach turn-level prompts that are re-read from disk before each API call.
     pub fn with_turn_prompts(mut self, specs: Vec<TurnPromptSpec>) -> Self {
-        self.turn_prompts = specs;
+        self.turn_prompts = Mutex::new(specs);
         self
     }
 
     /// Attach an input receiver for perpetual session mode.
     /// The agent loop waits on this channel after each EndTurn instead of exiting.
     /// Returns the sender half for the caller to push messages into.
-    pub fn with_perpetual_input(mut self) -> (Self, mpsc::UnboundedSender<String>) {
+    pub fn with_perpetual_input(mut self) -> (Self, mpsc::UnboundedSender<UserInput>) {
         let (tx, rx) = mpsc::unbounded_channel();
         self.input_rx = Some(Arc::new(Mutex::new(rx)));
         (self, tx)
@@ -841,8 +865,9 @@ impl Agent {
 
             // Build request — inject fresh turn context into the request copy.
             let mut request_messages = messages.clone();
-            if !self.turn_prompts.is_empty() {
-                let turn_ctx = self.build_turn_context();
+            let has_turn_prompts = !self.turn_prompts.lock().await.is_empty();
+            if has_turn_prompts {
+                let turn_ctx = self.build_turn_context().await;
                 if !turn_ctx.is_empty() {
                     request_messages.insert(
                         1,
@@ -1148,10 +1173,23 @@ impl Agent {
                             debug!(agent = %self.config.name, "perpetual: waiting for input");
                             let mut rx_guard = rx.lock().await;
                             match rx_guard.recv().await {
-                                Some(next_msg) => {
+                                Some(input) => {
+                                    // Apply prompt amendments from the message.
+                                    if !input.session_prompts.is_empty() {
+                                        // TODO: resolve prompt names to files and append to system prompt
+                                        debug!(
+                                            agent = %self.config.name,
+                                            count = input.session_prompts.len(),
+                                            "session prompt amendments received"
+                                        );
+                                    }
+                                    if !input.turn_prompts.is_empty() {
+                                        self.turn_prompts.lock().await.extend(input.turn_prompts.clone());
+                                    }
+
                                     messages.push(Message {
                                         role: Role::User,
-                                        content: MessageContent::text(&next_msg),
+                                        content: MessageContent::text(&input.content),
                                     });
                                     // Reset ALL per-turn state for clean slate.
                                     output_recovery_count = 0;
@@ -1751,9 +1789,10 @@ impl Agent {
     // -----------------------------------------------------------------------
 
     /// Build fresh turn context by re-reading prompt files from disk.
-    fn build_turn_context(&self) -> String {
+    async fn build_turn_context(&self) -> String {
+        let turn_prompts = self.turn_prompts.lock().await;
         let mut parts: Vec<String> = Vec::new();
-        for spec in &self.turn_prompts {
+        for spec in turn_prompts.iter() {
             match std::fs::read_to_string(&spec.path) {
                 Ok(content) => {
                     let body = match crate::frontmatter::parse_frontmatter(&content) {

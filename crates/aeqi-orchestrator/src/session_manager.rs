@@ -29,7 +29,7 @@ pub struct RunningSession {
     pub session_id: String,
     pub agent_id: String,
     pub agent_name: String,
-    pub input_tx: mpsc::UnboundedSender<String>,
+    pub input_tx: mpsc::UnboundedSender<aeqi_core::UserInput>,
     pub stream_sender: ChatStreamSender,
     pub cancel_token: Arc<std::sync::atomic::AtomicBool>,
     pub join_handle: tokio::task::JoinHandle<anyhow::Result<AgentResult>>,
@@ -48,7 +48,7 @@ impl RunningSession {
 
         // Push message into the agent loop.
         self.input_tx
-            .send(message.to_string())
+            .send(aeqi_core::UserInput::text(message))
             .map_err(|_| anyhow::anyhow!("session closed — agent loop exited"))?;
 
         // Collect response.
@@ -672,7 +672,7 @@ impl SessionManager {
 
         session
             .input_tx
-            .send(message.to_string())
+            .send(aeqi_core::UserInput::text(message))
             .map_err(|_| anyhow::anyhow!("session closed — agent loop exited"))?;
 
         Ok(rx)
