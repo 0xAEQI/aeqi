@@ -70,10 +70,10 @@ function Nav() {
           href="/"
           className="flex items-center gap-2 hover:opacity-80 transition-opacity"
         >
-          <ToriiGate />
           <span className="text-[14px] font-bold tracking-[0.06em] text-[#c0392b]">
-            &#xC6;QI
+            AEQI
           </span>
+          <ToriiGate />
         </a>
         <div className="w-px h-3.5 bg-white/[0.08]" />
         <GitHubStars />
@@ -88,7 +88,7 @@ function Nav() {
           className="bg-white text-[#06060E] rounded-full px-4 py-1.5 text-[12px] font-semibold hover:bg-white/90 transition-colors"
           style={{ fontFamily: "'Space Grotesk', sans-serif" }}
         >
-          Use
+          Enter
         </a>
       </div>
     </motion.nav>
