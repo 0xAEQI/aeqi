@@ -427,7 +427,7 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                         let phase_filter = args.get("phase").and_then(|v| v.as_str());
                         let name_filter = args.get("name").and_then(|v| v.as_str());
 
-                        // Discover all .toml skills via the canonical Skill parser.
+                        // Discover all .md skills via the canonical Skill parser.
                         let mut all_skills: Vec<(Skill, String)> = Vec::new();
                         all_skills.extend(discover_skills(
                             &base_dir.join("projects/shared/skills"),
@@ -447,15 +447,15 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
 
                         if action == "get" {
                             let name = name_filter.unwrap_or("");
-                            match all_skills.into_iter().find(|(s, _)| s.skill.name == name) {
+                            match all_skills.into_iter().find(|(s, _)| s.name == name) {
                                 Some((s, source)) => Ok(serde_json::json!({
-                                    "name": s.skill.name,
+                                    "name": s.name,
                                     "source": source,
-                                    "description": s.skill.description,
-                                    "phase": s.skill.phase,
-                                    "model": s.skill.model,
-                                    "prompt": s.prompt.system,
-                                    "tools": { "allow": s.tools.allow, "deny": s.tools.deny },
+                                    "description": s.description,
+                                    "phase": s.phase,
+                                    "model": s.model,
+                                    "prompt": s.body,
+                                    "tools": { "allow": s.tools, "deny": s.deny },
                                 })),
                                 None => Ok(
                                     serde_json::json!({"ok": false, "error": format!("skill '{name}' not found")}),
@@ -468,15 +468,15 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
                                     let project_ok = project_filter
                                         .is_none_or(|pf| source == pf || source == "shared");
                                     let phase_ok =
-                                        phase_filter.is_none_or(|pf| s.skill.phase == pf);
+                                        phase_filter.is_none_or(|pf| s.phase == pf);
                                     project_ok && phase_ok
                                 })
                                 .map(|(s, source)| {
                                     serde_json::json!({
-                                        "name": s.skill.name,
+                                        "name": s.name,
                                         "source": source,
-                                        "phase": s.skill.phase,
-                                        "description": s.skill.description,
+                                        "phase": s.phase,
+                                        "description": s.description,
                                     })
                                 })
                                 .collect();

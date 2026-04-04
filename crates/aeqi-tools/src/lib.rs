@@ -22,7 +22,7 @@ pub use grep::GrepTool;
 pub use porkbun::PorkbunTool;
 pub use secrets::SecretsTool;
 pub use shell::ShellTool;
-pub use skill::{MagicTools, Skill, SkillVerification};
+pub use skill::Skill;
 pub use tasks::{
     QuestCloseTool, QuestCreateTool, QuestDepTool, QuestReadyTool, QuestShowTool, QuestUpdateTool,
 };

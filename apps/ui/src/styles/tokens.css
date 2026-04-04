@@ -1,47 +1,47 @@
 :root {
-  /* Core palette — 4-step depth system */
-  --bg-base: #09090b;       /* deepest: app shell, sidebars */
-  --bg-surface: #18181b;    /* content area, cards */
-  --bg-elevated: #27272a;   /* hover states, nav bar, inputs */
-  --bg-overlay: #3f3f46;    /* tooltips, dropdowns */
+  /* Light palette */
+  --bg-base: #ffffff;
+  --bg-surface: #fafafa;
+  --bg-elevated: #f4f4f5;
+  --bg-overlay: #e4e4e7;
 
-  /* Legacy aliases — map old names to depth system */
+  /* Legacy aliases */
   --bg-hover: var(--bg-elevated);
   --bg-secondary: var(--bg-surface);
   --bg-primary: var(--bg-base);
 
-  /* Text — 3 levels only */
-  --text-primary: #fafafa;
-  --text-secondary: #a1a1aa;
-  --text-muted: #52525b;
+  /* Text */
+  --text-primary: #09090b;
+  --text-secondary: #71717a;
+  --text-muted: #a1a1aa;
 
-  /* Accent — clean white */
-  --accent: #e4e4e7;
+  /* Accent — subtle black */
+  --accent: #18181b;
   --accent-dim: #71717a;
-  --accent-bg: rgba(255, 255, 255, 0.05);
-  --accent-glow: rgba(255, 255, 255, 0.08);
-  --accent-glow-strong: rgba(255, 255, 255, 0.15);
+  --accent-bg: rgba(0, 0, 0, 0.04);
+  --accent-glow: transparent;
+  --accent-glow-strong: transparent;
 
   /* Status */
-  --success: #4ade80;
-  --success-glow: rgba(74, 222, 128, 0.1);
-  --error: #f87171;
-  --warning: #fbbf24;
-  --info: #60a5fa;
+  --success: #22c55e;
+  --success-glow: rgba(34, 197, 94, 0.08);
+  --error: #ef4444;
+  --warning: #f59e0b;
+  --info: #3b82f6;
 
-  /* Borders — one level */
-  --border: #27272a;
-  --border-hover: #3f3f46;
-  --border-accent: #52525b;
+  /* Borders — very subtle */
+  --border: #e4e4e7;
+  --border-hover: #d4d4d8;
+  --border-accent: #d4d4d8;
 
-  /* Glass */
-  --glass-bg: rgba(24, 24, 27, 0.8);
-  --glass-border: #27272a;
+  /* Glass — light */
+  --glass-bg: rgba(255, 255, 255, 0.9);
+  --glass-border: #e4e4e7;
 
   /* Typography */
   --font-mono: "JetBrains Mono", monospace;
-  --font-sans: "Inter", sans-serif;
-  --font-brand: "Inter", sans-serif;
+  --font-sans: "Inter", -apple-system, sans-serif;
+  --font-brand: "Inter", -apple-system, sans-serif;
   --font-size-3xs: 0.5625rem;  /* 9px */
   --font-size-2xs: 0.625rem;   /* 10px */
   --font-size-micro: 0.6875rem; /* 11px */
@@ -71,12 +71,12 @@
   --radius-2xl: 12px;
   --radius-full: 999px;
 
-  /* Shadows — minimal */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.15);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.15);
-  --shadow-glow: 0 0 20px var(--accent-glow);
-  --shadow-glow-strong: 0 0 30px var(--accent-glow-strong);
+  /* Shadows — minimal, light */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-glow: none;
+  --shadow-glow-strong: none;
 
   /* Transitions */
   --transition-fast: 150ms ease;
@@ -117,7 +117,7 @@ a:hover {
   color: var(--text-primary);
 }
 
-/* Scrollbar */
+/* Scrollbar — light */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -126,10 +126,9 @@ a:hover {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-hover);
+  background: #d4d4d8;
   border-radius: var(--radius-xs);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: #a1a1aa;
 }
-

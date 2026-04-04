@@ -443,13 +443,13 @@ impl SessionManager {
             }
 
             for skill_name in &opts.skills {
-                if let Some(skill) = all_skills.iter().find(|s| s.skill.name == *skill_name) {
+                if let Some(skill) = all_skills.iter().find(|s| s.name == *skill_name) {
                     // Append skill prompt to identity.
                     skill_prompt_parts.push(skill.system_prompt(""));
                     // Filter tools by skill policy.
                     tools.retain(|t| skill.is_tool_allowed(t.name()));
                     // Model override (last skill wins).
-                    if let Some(ref m) = skill.skill.model {
+                    if let Some(ref m) = skill.model {
                         model_override = Some(m.clone());
                     }
                     debug!(skill = %skill_name, "skill applied to session");

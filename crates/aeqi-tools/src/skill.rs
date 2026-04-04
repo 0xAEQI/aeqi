@@ -1,117 +1,100 @@
+use aeqi_core::frontmatter;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// A skill is a TOML-defined reusable capability — prompt template + tool allowlist.
+/// A prompt file — MD with YAML frontmatter. Unified format for skills, agents, and all prompts.
 ///
-/// Skills combine what CC calls "skills" (prompt + tool restrictions) with
-/// execution metadata (context, arguments, auto-invocation triggers).
+/// The frontmatter holds metadata, the body is the system prompt.
+/// Skills and agents are both just prompt files differentiated by `inject`:
+/// - `inject: session` — loaded into system prompt at session start
+/// - `inject: turn` — re-injected each message
+/// - (omitted) — invoked on-demand
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Skill {
-    pub skill: SkillMeta,
-    #[serde(default)]
-    pub tools: MagicTools,
-    pub prompt: SkillPrompt,
-    /// Optional verification commands and expected output patterns.
-    pub verification: Option<SkillVerification>,
-    /// Optional execution configuration (parallelism, worktree isolation).
-    pub execution: Option<SkillExecution>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillMeta {
     pub name: String,
     pub description: String,
+    /// Injection mode: `"session"` or `"turn"`. None = on-demand.
+    #[serde(default)]
+    pub inject: Option<String>,
     #[serde(default)]
     pub phase: String,
     #[serde(default)]
     pub triggers: Vec<String>,
-    /// When the model should auto-invoke this skill. Describes trigger conditions
-    /// in natural language. Example: "Use when the user wants to cherry-pick a PR."
+    /// Natural-language description of when to auto-invoke.
     #[serde(default)]
     pub when_to_use: Option<String>,
-    /// Execution context: "fork" runs as subagent with separate context,
-    /// "inline" (default) expands into the current conversation.
+    /// `"fork"` = subagent, `"inline"` = expand into current context.
     #[serde(default)]
     pub context: Option<String>,
-    /// Named arguments the skill accepts. Use `$arg_name` in prompt for substitution.
+    /// Named arguments for `$arg` substitution in the body.
     #[serde(default)]
     pub arguments: Vec<String>,
-    /// Hint showing argument placeholders (e.g., "<pr_number> <target_branch>").
     #[serde(default)]
     pub argument_hint: Option<String>,
-    /// Model override for this skill. If set, the worker uses this model
-    /// instead of its default. Useful for using cheaper models on reflective
-    /// tasks or stronger models on complex analysis.
+    /// Model override (e.g. `"anthropic/claude-haiku-4-5"`).
     #[serde(default)]
     pub model: Option<String>,
-    /// Allow shell command execution in prompt template (`!` backtick syntax).
-    /// Default: false. When true, `!`backtick`` blocks in the system prompt
-    /// are executed at load time and replaced with their stdout.
+    /// Enable `!`backtick`` shell expansion in the body at load time.
     #[serde(default)]
-    pub allow_shell_in_prompt: bool,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct MagicTools {
+    pub allow_shell: bool,
+    // ── Tools ──
+    /// Allowed tools (empty = all allowed).
     #[serde(default)]
-    pub allow: Vec<String>,
+    pub tools: Vec<String>,
+    /// Denied tools.
     #[serde(default)]
     pub deny: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillPrompt {
-    pub system: String,
+    // ── Prompt ──
+    /// The prompt body (system prompt). Populated from the MD body, not frontmatter.
+    #[serde(skip)]
+    pub body: String,
+    /// Prefix prepended to user messages when invoking this skill.
     #[serde(default)]
     pub user_prefix: String,
-}
-
-/// Verification commands and expected output patterns for a skill.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillVerification {
-    /// Commands to run for verification (e.g., `["cargo test"]`).
+    // ── Execution ──
+    /// Number of parallel agents for fan-out. None = sequential.
     #[serde(default)]
-    pub commands: Vec<String>,
-    /// Patterns expected in the command output (e.g., `["0 failed"]`).
-    #[serde(default)]
-    pub expected_patterns: Vec<String>,
-}
-
-/// Execution configuration for skills that orchestrate parallel work.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillExecution {
-    /// Execution mode: "parallel" (fan-out to multiple agents) or "sequential" (default).
-    #[serde(default = "default_execution_mode")]
-    pub mode: String,
-    /// Number of parallel agents for fan-out mode. Default: 1.
-    #[serde(default = "default_agent_count")]
-    pub agents: u32,
-    /// Whether each agent runs in an isolated git worktree. Default: false.
+    pub parallel: Option<u32>,
+    /// Run in an isolated git worktree.
     #[serde(default)]
     pub worktree: bool,
-    /// Maximum budget per agent execution (USD). Default: no limit.
+    /// Max budget per agent (USD).
+    #[serde(default)]
     pub max_budget_usd: Option<f64>,
-}
-
-fn default_execution_mode() -> String {
-    "sequential".to_string()
-}
-
-fn default_agent_count() -> u32 {
-    1
+    // ── Verification ──
+    /// Commands to run for verification.
+    #[serde(default)]
+    pub verify: Vec<String>,
+    /// Expected patterns in verification output.
+    #[serde(default)]
+    pub verify_patterns: Vec<String>,
 }
 
 impl Skill {
-    /// Load a skill from a TOML file.
+    /// Load a skill from an MD file with YAML frontmatter.
     pub fn load(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
-            .with_context(|| format!("failed to read skill: {}", path.display()))?;
-        toml::from_str(&content)
-            .with_context(|| format!("failed to parse skill: {}", path.display()))
+            .with_context(|| format!("failed to read prompt: {}", path.display()))?;
+        let mut skill = Self::parse(&content)
+            .with_context(|| format!("failed to parse prompt: {}", path.display()))?;
+        // Default name from filename if not in frontmatter.
+        if skill.name.is_empty() {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                skill.name = stem.to_string();
+            }
+        }
+        Ok(skill)
     }
 
-    /// Discover all skills in a directory.
+    /// Parse an MD string with YAML frontmatter into a Skill.
+    pub fn parse(content: &str) -> Result<Self> {
+        let (mut skill, body): (Self, String) = frontmatter::load_frontmatter(content)?;
+        skill.body = body;
+        Ok(skill)
+    }
+
+    /// Discover all skills (`.md` files) in a directory.
     pub fn discover(dir: &Path) -> Result<Vec<Self>> {
         let mut skills = Vec::new();
         if !dir.exists() {
@@ -120,27 +103,25 @@ impl Skill {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "toml") {
+            if path.extension().is_some_and(|e| e == "md") {
                 match Self::load(&path) {
                     Ok(skill) => skills.push(skill),
                     Err(e) => {
-                        tracing::warn!(path = %path.display(), error = %e, "skipping invalid skill");
+                        tracing::warn!(path = %path.display(), error = %e, "skipping invalid prompt");
                     }
                 }
             }
         }
-        skills.sort_by(|a, b| a.skill.name.cmp(&b.skill.name));
+        skills.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(skills)
     }
 
     /// Build the full system prompt for this skill.
-    /// If `allow_shell_in_prompt` is true, executes `!` backtick blocks and
-    /// replaces them with their stdout.
+    /// If `allow_shell` is true, executes `!`backtick`` blocks.
     pub fn system_prompt(&self, base_identity: &str) -> String {
-        let mut prompt = self.prompt.system.clone();
+        let mut prompt = self.body.clone();
 
-        // Expand shell commands in prompt if enabled.
-        if self.skill.allow_shell_in_prompt {
+        if self.allow_shell {
             prompt = Self::expand_shell_commands(&prompt);
         }
 
@@ -149,14 +130,12 @@ impl Skill {
         } else {
             format!(
                 "{}\n\n---\n\n# Skill: {}\n\n{}",
-                base_identity, self.skill.name, prompt
+                base_identity, self.name, prompt
             )
         }
     }
 
-    /// Execute `!` backtick blocks in a prompt string and replace with stdout.
-    /// Format: !`command here` — the backtick content is passed to bash -c.
-    /// On error, the block is replaced with an error message.
+    /// Execute `!`backtick`` blocks in a prompt string and replace with stdout.
     fn expand_shell_commands(prompt: &str) -> String {
         let mut result = String::with_capacity(prompt.len());
         let mut remaining = prompt;
@@ -188,7 +167,6 @@ impl Skill {
 
                 remaining = &after_marker[end + 1..];
             } else {
-                // Unclosed backtick — keep as-is.
                 result.push_str("!`");
                 remaining = after_marker;
             }
@@ -197,19 +175,19 @@ impl Skill {
         result
     }
 
-    /// Whether this skill should run as a forked subagent (separate context).
+    /// Whether this skill runs as a forked subagent.
     pub fn is_fork_context(&self) -> bool {
-        self.skill.context.as_deref().is_some_and(|c| c == "fork")
+        self.context.as_deref().is_some_and(|c| c == "fork")
     }
 
     /// Whether this skill has auto-invocation criteria.
     pub fn has_auto_trigger(&self) -> bool {
-        self.skill.when_to_use.is_some()
+        self.when_to_use.is_some()
     }
 
-    /// Substitute `$arg_name` placeholders in the prompt with actual argument values.
+    /// Substitute `$arg_name` placeholders in the body.
     pub fn substitute_args(&self, args: &std::collections::HashMap<String, String>) -> String {
-        let mut prompt = self.prompt.system.clone();
+        let mut prompt = self.body.clone();
         for (key, value) in args {
             prompt = prompt.replace(&format!("${key}"), value);
         }
@@ -218,13 +196,13 @@ impl Skill {
 
     /// Check if a tool is allowed by this skill's policy.
     pub fn is_tool_allowed(&self, tool_name: &str) -> bool {
-        if !self.tools.deny.is_empty() && self.tools.deny.contains(&tool_name.to_string()) {
+        if !self.deny.is_empty() && self.deny.contains(&tool_name.to_string()) {
             return false;
         }
-        if !self.tools.allow.is_empty() {
-            return self.tools.allow.contains(&tool_name.to_string());
+        if !self.tools.is_empty() {
+            return self.tools.contains(&tool_name.to_string());
         }
-        true // If no allow/deny lists, everything is allowed.
+        true
     }
 }
 
@@ -233,86 +211,69 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_skill_with_new_fields() {
-        let toml = r#"
-[skill]
-name = "deploy"
-description = "Deploy a service"
-phase = "workflow"
-when_to_use = "Use when the user wants to deploy to production"
-context = "fork"
-arguments = ["service", "env"]
-argument_hint = "<service> <env>"
+    fn test_parse_skill() {
+        let md = r#"---
+name: deploy
+description: Deploy a service
+phase: workflow
+when_to_use: Use when the user wants to deploy to production
+context: fork
+arguments: [service, env]
+argument_hint: "<service> <env>"
+tools: [shell, read_file]
+parallel: 3
+worktree: true
+max_budget_usd: 1.50
+---
 
-[tools]
-allow = ["shell", "read_file"]
+Deploy $service to $env"#;
 
-[prompt]
-system = "Deploy $service to $env"
-
-[execution]
-mode = "parallel"
-agents = 3
-worktree = true
-max_budget_usd = 1.50
-"#;
-        let skill: Skill = toml::from_str(toml).unwrap();
-        assert_eq!(skill.skill.name, "deploy");
+        let skill = Skill::parse(md).unwrap();
+        assert_eq!(skill.name, "deploy");
         assert_eq!(
-            skill.skill.when_to_use.as_deref(),
+            skill.when_to_use.as_deref(),
             Some("Use when the user wants to deploy to production")
         );
-        assert_eq!(skill.skill.context.as_deref(), Some("fork"));
+        assert_eq!(skill.context.as_deref(), Some("fork"));
         assert!(skill.is_fork_context());
         assert!(skill.has_auto_trigger());
-        assert_eq!(skill.skill.arguments, vec!["service", "env"]);
-        assert_eq!(
-            skill.skill.argument_hint.as_deref(),
-            Some("<service> <env>")
-        );
-
-        let exec = skill.execution.unwrap();
-        assert_eq!(exec.mode, "parallel");
-        assert_eq!(exec.agents, 3);
-        assert!(exec.worktree);
-        assert!((exec.max_budget_usd.unwrap() - 1.50).abs() < f64::EPSILON);
+        assert_eq!(skill.arguments, vec!["service", "env"]);
+        assert_eq!(skill.argument_hint.as_deref(), Some("<service> <env>"));
+        assert_eq!(skill.parallel, Some(3));
+        assert!(skill.worktree);
+        assert!((skill.max_budget_usd.unwrap() - 1.50).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn test_backward_compatible_existing_skills() {
-        // Existing skills without new fields should still parse.
-        let toml = r#"
-[skill]
-name = "health-check"
-description = "Check health"
-phase = "autonomous"
+    fn test_minimal_skill() {
+        let md = r#"---
+name: health-check
+description: Check health
+phase: autonomous
+tools: [shell]
+---
 
-[tools]
-allow = ["shell"]
+Check health"#;
 
-[prompt]
-system = "Check health"
-"#;
-        let skill: Skill = toml::from_str(toml).unwrap();
-        assert_eq!(skill.skill.name, "health-check");
+        let skill = Skill::parse(md).unwrap();
+        assert_eq!(skill.name, "health-check");
         assert!(!skill.is_fork_context());
         assert!(!skill.has_auto_trigger());
-        assert!(skill.skill.arguments.is_empty());
-        assert!(skill.execution.is_none());
+        assert!(skill.arguments.is_empty());
+        assert!(skill.parallel.is_none());
     }
 
     #[test]
     fn test_argument_substitution() {
-        let toml = r#"
-[skill]
-name = "test"
-description = "test"
-arguments = ["name", "target"]
+        let md = r#"---
+name: test
+description: test
+arguments: [name, target]
+---
 
-[prompt]
-system = "Deploy $name to $target environment"
-"#;
-        let skill: Skill = toml::from_str(toml).unwrap();
+Deploy $name to $target environment"#;
+
+        let skill = Skill::parse(md).unwrap();
         let mut args = std::collections::HashMap::new();
         args.insert("name".to_string(), "myapp".to_string());
         args.insert("target".to_string(), "production".to_string());
@@ -323,16 +284,15 @@ system = "Deploy $name to $target environment"
 
     #[test]
     fn test_shell_expansion_in_prompt() {
-        let toml = r#"
-[skill]
-name = "test"
-description = "test"
-allow_shell_in_prompt = true
+        let md = r#"---
+name: test
+description: test
+allow_shell: true
+---
 
-[prompt]
-system = "Date: !`echo 2026-04-01` and host: !`echo testhost`"
-"#;
-        let skill: Skill = toml::from_str(toml).unwrap();
+Date: !`echo 2026-04-01` and host: !`echo testhost`"#;
+
+        let skill = Skill::parse(md).unwrap();
         let prompt = skill.system_prompt("");
         assert!(prompt.contains("2026-04-01"), "got: {prompt}");
         assert!(prompt.contains("testhost"), "got: {prompt}");
@@ -341,56 +301,64 @@ system = "Date: !`echo 2026-04-01` and host: !`echo testhost`"
 
     #[test]
     fn test_shell_expansion_disabled_by_default() {
-        let toml = r#"
-[skill]
-name = "test"
-description = "test"
+        let md = r#"---
+name: test
+description: test
+---
 
-[prompt]
-system = "Should not expand: !`echo danger`"
-"#;
-        let skill: Skill = toml::from_str(toml).unwrap();
+Should not expand: !`echo danger`"#;
+
+        let skill = Skill::parse(md).unwrap();
         let prompt = skill.system_prompt("");
-        // Shell blocks NOT expanded when allow_shell_in_prompt is false.
         assert!(prompt.contains("!`echo danger`"));
     }
 
     #[test]
     fn test_model_override() {
-        let toml = r#"
-[skill]
-name = "cheap-task"
-description = "Uses a cheaper model"
-model = "anthropic/claude-haiku-4-5"
+        let md = r#"---
+name: cheap-task
+description: Uses a cheaper model
+model: anthropic/claude-haiku-4-5
+---
 
-[prompt]
-system = "Do something cheap"
-"#;
-        let skill: Skill = toml::from_str(toml).unwrap();
+Do something cheap"#;
+
+        let skill = Skill::parse(md).unwrap();
         assert_eq!(
-            skill.skill.model.as_deref(),
+            skill.model.as_deref(),
             Some("anthropic/claude-haiku-4-5")
         );
     }
 
     #[test]
     fn test_tool_allowed() {
-        let toml = r#"
-[skill]
-name = "test"
-description = "test"
+        let md = r#"---
+name: test
+description: test
+tools: [shell, read_file]
+deny: [write_file]
+---
 
-[tools]
-allow = ["shell", "read_file"]
-deny = ["write_file"]
+test"#;
 
-[prompt]
-system = "test"
-"#;
-        let skill: Skill = toml::from_str(toml).unwrap();
+        let skill = Skill::parse(md).unwrap();
         assert!(skill.is_tool_allowed("shell"));
         assert!(skill.is_tool_allowed("read_file"));
         assert!(!skill.is_tool_allowed("write_file"));
-        assert!(!skill.is_tool_allowed("edit_file")); // Not in allow list
+        assert!(!skill.is_tool_allowed("edit_file"));
+    }
+
+    #[test]
+    fn test_inject_field() {
+        let md = r#"---
+name: primer
+description: Session primer
+inject: session
+---
+
+You are the system."#;
+
+        let skill = Skill::parse(md).unwrap();
+        assert_eq!(skill.inject.as_deref(), Some("session"));
     }
 }

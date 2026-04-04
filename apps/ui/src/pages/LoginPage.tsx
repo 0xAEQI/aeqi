@@ -16,8 +16,7 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <div className="login-card">
-        <h1 className="login-title">AEQI</h1>
-        <p className="login-subtitle">Agent Orchestration</p>
+        <h1 className="login-title">aeqi</h1>
         <form className="login-form" onSubmit={handleSubmit}>
           <input
             className="login-input"
@@ -32,9 +31,6 @@ export default function LoginPage() {
             {loading ? "Connecting..." : "Enter"}
           </button>
         </form>
-        <p className="login-footer">
-          Self-hosted instance. Enter your configured access key.
-        </p>
       </div>
     </div>
   );

@@ -1303,18 +1303,24 @@ impl AEQIConfig {
 // Agent discovery from disk
 // ──────────────────────────────────────────────────────────────
 
-/// Load a single agent's execution config from `agent_dir/agent.toml`.
+/// Load a single agent's config from `agent_dir/agent.md` (YAML frontmatter + prompt body).
 pub fn load_agent_config(agent_dir: &Path) -> Result<PeerAgentConfig> {
-    let path = agent_dir.join("agent.toml");
+    let path = agent_dir.join("agent.md");
     let content = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read agent.toml: {}", path.display()))?;
-    let config: PeerAgentConfig = toml::from_str(&content)
-        .with_context(|| format!("failed to parse agent.toml: {}", path.display()))?;
+        .with_context(|| format!("failed to read agent.md: {}", path.display()))?;
+    let (json, body) = crate::frontmatter::parse_frontmatter(&content)
+        .with_context(|| format!("failed to parse agent.md: {}", path.display()))?;
+    let mut config: PeerAgentConfig = serde_json::from_value(json)
+        .with_context(|| format!("failed to deserialize agent.md: {}", path.display()))?;
+    // The body is the system prompt.
+    if !body.is_empty() {
+        config.prompt = Some(AgentPromptConfig { system: body });
+    }
     Ok(config)
 }
 
 /// Discover all agents by scanning subdirectories of `agents_dir`.
-/// Skips `shared` and any directory without an `agent.toml`.
+/// Skips `shared` and any directory without an `agent.md`.
 /// Returns agents sorted by name for determinism.
 pub fn discover_agents(agents_dir: &Path) -> Result<Vec<PeerAgentConfig>> {
     let mut agents = Vec::new();
@@ -1344,8 +1350,8 @@ pub fn discover_agents(agents_dir: &Path) -> Result<Vec<PeerAgentConfig>> {
         if dir_name == "shared" {
             continue;
         }
-        let agent_toml = path.join("agent.toml");
-        if !agent_toml.exists() {
+        let agent_md = path.join("agent.md");
+        if !agent_md.exists() {
             continue;
         }
         match load_agent_config(&path) {
@@ -1355,14 +1361,14 @@ pub fn discover_agents(agents_dir: &Path) -> Result<Vec<PeerAgentConfig>> {
                     warn!(
                         dir = %dir_name,
                         config_name = %config.name,
-                        "agent.toml name doesn't match directory, using directory name"
+                        "agent.md name doesn't match directory, using directory name"
                     );
                     config.name = dir_name;
                 }
                 agents.push(config);
             }
             Err(e) => {
-                warn!(dir = %dir_name, error = %e, "failed to load agent.toml, skipping");
+                warn!(dir = %dir_name, error = %e, "failed to load agent.md, skipping");
             }
         }
     }
@@ -1387,7 +1393,7 @@ impl AEQIConfig {
         };
 
         if disk_agents.is_empty() {
-            // No agent.toml files found — TOML agents still work (backward compat).
+            // No agent.md files found — fall back to [[agents]] in TOML config.
             return warnings;
         }
 
@@ -1398,7 +1404,7 @@ impl AEQIConfig {
         for toml_agent in &self.agents {
             if disk_names.contains(toml_agent.name.as_str()) {
                 warnings.push(format!(
-                    "agent '{}' found in both [[agents]] and agents/{}/agent.toml — using disk version",
+                    "agent '{}' found in both [[agents]] and agents/{}/agent.md — using disk version",
                     toml_agent.name, toml_agent.name,
                 ));
             }
@@ -1707,22 +1713,22 @@ role = "orchestrator"
         let tmp = tempfile::tempdir().unwrap();
         let agents_dir = tmp.path().join("agents");
 
-        // Create agent directories with agent.toml.
+        // Create agent directories with agent.md.
         for (name, role) in &[("alice", "orchestrator"), ("bob", "advisor")] {
             let dir = agents_dir.join(name);
             std::fs::create_dir_all(&dir).unwrap();
-            let toml = format!(
-                "name = \"{name}\"\nprefix = \"{}\"\nrole = \"{role}\"\n",
+            let md = format!(
+                "---\nname: {name}\nprefix: {}\nrole: {role}\n---\n\nSystem prompt for {name}.",
                 &name[..2],
             );
-            std::fs::write(dir.join("agent.toml"), toml).unwrap();
+            std::fs::write(dir.join("agent.md"), md).unwrap();
         }
 
         // Create shared dir (should be skipped).
         std::fs::create_dir_all(agents_dir.join("shared")).unwrap();
-        std::fs::write(agents_dir.join("shared/agent.toml"), "name = \"shared\"\n").unwrap();
+        std::fs::write(agents_dir.join("shared/agent.md"), "---\nname: shared\n---\n").unwrap();
 
-        // Create dir without agent.toml (should be skipped).
+        // Create dir without agent.md (should be skipped).
         std::fs::create_dir_all(agents_dir.join("noconfig")).unwrap();
 
         let agents = discover_agents(&agents_dir).unwrap();
@@ -1757,8 +1763,8 @@ role = "orchestrator"
         let dir = agents_dir.join("alice");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
-            dir.join("agent.toml"),
-            "name = \"alice\"\nprefix = \"al\"\nrole = \"advisor\"\nmodel = \"disk-model\"\n",
+            dir.join("agent.md"),
+            "---\nname: alice\nprefix: al\nrole: advisor\nmodel: disk-model\n---\n\nAlice prompt.",
         )
         .unwrap();
 
@@ -1793,11 +1799,11 @@ role = "advisor"
     }
 
     #[test]
-    fn test_discover_and_merge_backward_compat() {
+    fn test_discover_and_merge_fallback_to_toml_config() {
         let tmp = tempfile::tempdir().unwrap();
         let agents_dir = tmp.path().join("agents");
         std::fs::create_dir_all(&agents_dir).unwrap();
-        // No agent.toml files — TOML agents should remain.
+        // No agent.md files — [[agents]] from TOML config should remain.
 
         let toml_str = r#"
 [aeqi]
@@ -1817,34 +1823,23 @@ role = "orchestrator"
     }
 
     #[test]
-    fn test_load_agent_config_roundtrip() {
+    fn test_load_agent_config_from_md() {
         let tmp = tempfile::tempdir().unwrap();
         let agent_dir = tmp.path();
-        let config = PeerAgentConfig {
-            name: "test".to_string(),
-            prefix: "tt".to_string(),
-            model: Some("claude-opus-4-6".to_string()),
-            runtime: Some("anthropic_agent".to_string()),
-            role: "advisor".to_string(),
-            voice: None,
-            execution_mode: ExecutionMode::Agent,
-            max_workers: 2,
-            max_turns: Some(15),
-            max_budget_usd: Some(1.0),
-            default_repo: Some("aeqi".to_string()),
-            expertise: vec!["testing".to_string()],
-            capabilities: vec!["memory".to_string()],
-            telegram_token_secret: Some("TOKEN".to_string()),
-            model_tier: None,
-            display_name: None,
-            color: None,
-            avatar: None,
-            faces: None,
-            triggers: vec![],
-            prompt: None,
-        };
-        let toml_str = toml::to_string_pretty(&config).unwrap();
-        std::fs::write(agent_dir.join("agent.toml"), &toml_str).unwrap();
+        let md = r#"---
+name: test
+prefix: tt
+model: claude-opus-4-6
+runtime: anthropic_agent
+role: advisor
+max_workers: 2
+max_turns: 15
+expertise: [testing]
+capabilities: [memory]
+---
+
+You are a test agent."#;
+        std::fs::write(agent_dir.join("agent.md"), md).unwrap();
 
         let loaded = load_agent_config(agent_dir).unwrap();
         assert_eq!(loaded.name, "test");
@@ -1852,10 +1847,10 @@ role = "orchestrator"
         assert_eq!(loaded.model.as_deref(), Some("claude-opus-4-6"));
         assert_eq!(loaded.runtime.as_deref(), Some("anthropic_agent"));
         assert_eq!(loaded.role, "advisor".to_string());
-        assert_eq!(loaded.execution_mode, ExecutionMode::Agent);
         assert_eq!(loaded.max_workers, 2);
         assert_eq!(loaded.max_turns, Some(15));
         assert_eq!(loaded.expertise, vec!["testing"]);
+        assert_eq!(loaded.prompt.unwrap().system, "You are a test agent.");
     }
 
     #[test]
@@ -1962,10 +1957,10 @@ role = "orchestrator"
         let agents_dir = tmp.path().join("agents");
         let dir = agents_dir.join("alice");
         std::fs::create_dir_all(&dir).unwrap();
-        // agent.toml has wrong name — should be corrected to dir name.
+        // agent.md has wrong name — should be corrected to dir name.
         std::fs::write(
-            dir.join("agent.toml"),
-            "name = \"wrong\"\nprefix = \"al\"\nrole = \"advisor\"\n",
+            dir.join("agent.md"),
+            "---\nname: wrong\nprefix: al\nrole: advisor\n---\n\nPrompt.",
         )
         .unwrap();
 

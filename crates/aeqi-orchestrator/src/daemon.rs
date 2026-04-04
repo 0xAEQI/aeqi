@@ -2455,7 +2455,7 @@ impl Daemon {
                                 "MEMORY.md",
                                 "PREFERENCES.md",
                                 "AGENTS.md",
-                                "agent.toml",
+                                "agent.md",
                             ];
                             for filename in &identity_files {
                                 let path = agent_dir.join(filename);
@@ -2496,7 +2496,7 @@ impl Daemon {
                         "MEMORY.md",
                         "PREFERENCES.md",
                         "AGENTS.md",
-                        "agent.toml",
+                        "agent.md",
                     ];
                     if agent_name.is_empty() || filename.is_empty() {
                         serde_json::json!({"ok": false, "error": "name and filename required"})
@@ -2752,7 +2752,7 @@ impl Daemon {
                     let cwd = std::env::current_dir().unwrap_or_default();
                     let mut skills = Vec::new();
 
-                    // Helper: scan a directory for .toml and .md files.
+                    // Helper: scan a directory for .md files.
                     let scan_skills =
                         |dir: &std::path::Path, source: &str, out: &mut Vec<serde_json::Value>| {
                             if !dir.exists() {
@@ -3069,14 +3069,7 @@ impl Daemon {
                         // Read template file from agents/ directory
                         let cwd = std::env::current_dir().unwrap_or_default();
                         let md_path = cwd.join("agents").join(template).join("agent.md");
-                        let toml_path = cwd.join("agents").join(template).join("agent.toml");
-                        let template_content = if md_path.exists() {
-                            std::fs::read_to_string(&md_path).ok()
-                        } else if toml_path.exists() {
-                            std::fs::read_to_string(&toml_path).ok()
-                        } else {
-                            None
-                        };
+                        let template_content = std::fs::read_to_string(&md_path).ok();
                         match template_content {
                             Some(content) => {
                                 let project = request.get("project").and_then(|v| v.as_str());

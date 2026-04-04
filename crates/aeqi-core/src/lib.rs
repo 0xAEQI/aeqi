@@ -10,6 +10,7 @@ pub mod agent;
 pub mod chat_stream;
 pub mod checkpoint;
 pub mod config;
+pub mod frontmatter;
 pub mod prompt;
 pub mod sanitize;
 pub mod security;

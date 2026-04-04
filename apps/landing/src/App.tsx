@@ -1,67 +1,47 @@
-import { useState, useEffect } from "react";
-import { Hero } from "./components/Hero";
-
+import { useState } from "react";
 import { motion } from "framer-motion";
 
-function GitHubStars() {
-  const [stars, setStars] = useState<number | null>(null);
+/* ─── Fade-in helper ─── */
+const fade = (delay = 0) => ({
+  initial: { opacity: 0, y: 8 } as const,
+  animate: { opacity: 1, y: 0 } as const,
+  transition: { duration: 0.5, ease: "easeOut" as const, delay },
+});
 
-  useEffect(() => {
-    fetch("https://api.github.com/repos/0xAEQI/aeqi")
-      .then((r) => r.json())
-      .then((d) => {
-        if (typeof d.stargazers_count === "number") setStars(d.stargazers_count);
-      })
-      .catch(() => {});
-  }, []);
+const fadeView = (delay = 0) => ({
+  initial: { opacity: 0, y: 12 } as const,
+  whileInView: { opacity: 1, y: 0 } as const,
+  viewport: { once: true, margin: "-60px" } as const,
+  transition: { duration: 0.5, ease: "easeOut" as const, delay },
+});
 
-  return (
-    <a
-      href="https://github.com/0xAEQI/aeqi"
-      className="flex items-center gap-2 text-white/35 hover:text-white/60 transition-colors"
-    >
-      <svg viewBox="0 0 16 16" fill="currentColor" className="w-[16px] h-[16px]">
-        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" />
-      </svg>
-      <span className="text-[13px]">star</span>
-      {stars !== null && (
-        <span className="text-[10px] bg-white/[0.06] px-1.5 py-0.5 rounded">
-          {stars}
-        </span>
-      )}
-    </a>
-  );
-}
-
+/* ─── Nav ─── */
 function Nav() {
   return (
     <motion.nav
-      className="fixed top-5 left-1/2 -translate-x-1/2 z-50"
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, delay: 0.4, ease: "easeOut" }}
+      className="fixed top-0 left-0 right-0 z-50 backdrop-blur-lg bg-white/80 border-b border-black/5"
+      {...fade(0.1)}
     >
-      <div
-        className="backdrop-blur-2xl bg-white/[0.03] border border-white/[0.07] rounded-full px-7 py-3.5 flex items-center gap-7"
-
-      >
-        <a
-          href="/"
-          className="text-[18px] font-bold tracking-[0.06em] hover:opacity-80 transition-opacity"
-        >
-          <span className="text-[#c0392b]">aeqi</span><span className="text-white/30">.</span><span className="text-white">ai</span>
+      <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
+        <a href="/" className="text-[18px] font-semibold tracking-tight text-black">
+          aeqi
         </a>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-5">
           <a
-            href="mailto:enterprise@aeqi.ai"
-            className="text-[14px] text-white/35 hover:text-white/60 transition-colors"
+            href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md"
+            className="text-[14px] text-black/40 hover:text-black/70 transition-colors"
           >
-            enterprise
+            docs
+          </a>
+          <a
+            href="https://github.com/0xAEQI/aeqi"
+            className="text-[14px] text-black/40 hover:text-black/70 transition-colors"
+          >
+            github
           </a>
           <a
             href="https://app.aeqi.ai"
-            className="bg-white text-[#06060E] rounded-full px-6 py-2.5 text-[14px] font-semibold hover:bg-white/90 transition-colors"
-    
+            className="bg-black text-white rounded-full px-5 py-2 text-[14px] font-medium hover:bg-black/85 transition-colors"
           >
             Get Started
           </a>
@@ -71,73 +51,187 @@ function Nav() {
   );
 }
 
-function Backdrop() {
+/* ─── Hero ─── */
+function Hero() {
+  const [copied, setCopied] = useState(false);
+
+  const copy = () => {
+    navigator.clipboard.writeText("cargo install aeqi");
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
-    <>
-      <video
-        autoPlay
-        muted
-        loop
-        playsInline
-        className="fixed inset-0 z-0 w-full h-full object-cover"
-        style={{
-          objectPosition: "center 35%",
-          filter: "blur(6px) saturate(1.4) brightness(0.3) contrast(1.3)",
-          transform: "scale(1.03)",
-        }}
-        poster="/bg.jpg"
-      >
-        <source src="/bg.mp4" type="video/mp4" />
-      </video>
-      <div
-        className="fixed inset-0 z-0"
-        style={{ background: "rgba(6, 6, 18, 0.5)", mixBlendMode: "multiply" }}
-      />
-      <div
-        className="fixed inset-0 z-0"
-        style={{
-          background: "radial-gradient(ellipse 70% 60% at 50% 45%, transparent 0%, rgba(6,6,18,0.85) 100%)",
-        }}
-      />
-      <div
-        className="fixed inset-0 z-0"
-        style={{
-          background: "linear-gradient(to bottom, rgba(6,6,18,0.7) 0%, transparent 25%)",
-        }}
-      />
-    </>
+    <section className="pt-36 pb-24 px-6">
+      <div className="max-w-3xl mx-auto text-center">
+        <motion.h1
+          className="text-5xl md:text-7xl font-bold tracking-tight text-black leading-[1.08]"
+          {...fade(0.2)}
+        >
+          aeqi
+        </motion.h1>
+
+        <motion.p
+          className="mt-5 text-lg md:text-xl text-black/40 tracking-wide"
+          {...fade(0.35)}
+        >
+          agent orchestration kernel
+        </motion.p>
+
+        <motion.p
+          className="mt-8 text-[15px] text-black/30 tracking-[0.04em]"
+          {...fade(0.5)}
+        >
+          agent&ensp;&middot;&ensp;event&ensp;&middot;&ensp;quest&ensp;&middot;&ensp;insight
+        </motion.p>
+
+        <motion.div className="mt-10" {...fade(0.6)}>
+          <button
+            onClick={copy}
+            className="group inline-flex items-center gap-3 bg-black/[0.03] hover:bg-black/[0.06] rounded-lg px-5 py-3 transition-colors cursor-pointer"
+          >
+            <code className="text-[14px] font-mono text-black/50">
+              <span className="text-black/25 select-none">$&nbsp;</span>
+              cargo install aeqi
+            </code>
+            <span className="text-[12px] text-black/20 group-hover:text-black/40 transition-colors">
+              {copied ? "copied" : "copy"}
+            </span>
+          </button>
+        </motion.div>
+
+        <motion.div className="mt-8" {...fade(0.7)}>
+          <a
+            href="https://app.aeqi.ai"
+            className="inline-block bg-black text-white rounded-full px-7 py-2.5 text-[15px] font-medium hover:bg-black/85 transition-colors"
+          >
+            Get Started
+          </a>
+        </motion.div>
+      </div>
+    </section>
   );
 }
 
+/* ─── Features: The four primitives ─── */
+const primitives = [
+  {
+    name: "Agent",
+    role: "who",
+    desc: "A node in a tree. Teams, specialists, departments — patterns that emerge from how agents arrange themselves.",
+  },
+  {
+    name: "Event",
+    role: "happened",
+    desc: "One row, one table. Audit log, cost report, session transcript — all queries on the same stream.",
+  },
+  {
+    name: "Quest",
+    role: "what",
+    desc: "A unit of work decomposed from intent. Dependencies resolve. Agents claim. Results compound.",
+  },
+  {
+    name: "Insight",
+    role: "known",
+    desc: "Knowledge that walks the tree. Each agent sees its own, its parent's, up to root.",
+  },
+];
+
+function Features() {
+  return (
+    <section className="py-24 px-6 border-t border-black/5">
+      <div className="max-w-5xl mx-auto">
+        <motion.div {...fadeView()} className="text-center mb-16">
+          <p className="text-[11px] uppercase tracking-[0.25em] text-black/25 mb-4">
+            Four Tables
+          </p>
+          <p className="text-[15px] text-black/40 max-w-sm mx-auto leading-relaxed">
+            The entire system. No schema for what you're building.
+          </p>
+        </motion.div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-10 md:gap-8">
+          {primitives.map((p, i) => (
+            <motion.div key={p.name} {...fadeView(0.08 * i)}>
+              <div className="border-t border-black/10 pt-6">
+                <span className="text-[11px] font-mono block mb-2 text-black/25">
+                  {p.role}
+                </span>
+                <h3 className="text-[18px] font-semibold mb-3 text-black">
+                  {p.name}
+                </h3>
+                <p className="text-[13px] leading-relaxed text-black/40">
+                  {p.desc}
+                </p>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ─── Schema block ─── */
+function Schema() {
+  const code = `agents    { id, parent_id, name, model, prompts }
+events    { id, agent_id, kind, payload, ts }
+quests    { id, agent_id, intent, status, deps }
+insights  { id, agent_id, scope, content }`;
+
+  return (
+    <section className="py-20 px-6">
+      <div className="max-w-2xl mx-auto">
+        <motion.div {...fadeView()} className="text-center mb-10">
+          <p className="text-[11px] uppercase tracking-[0.25em] text-black/25">
+            Schema
+          </p>
+        </motion.div>
+        <motion.pre
+          {...fadeView(0.1)}
+          className="bg-black/[0.03] border border-black/5 rounded-lg px-6 py-5 font-mono text-[13px] leading-relaxed text-black/50 overflow-x-auto"
+        >
+          {code}
+        </motion.pre>
+      </div>
+    </section>
+  );
+}
+
+/* ─── Footer ─── */
 function Footer() {
   return (
-    <motion.footer
-      className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, delay: 1.2, ease: "easeOut" }}
-    >
-      <div
-        className="backdrop-blur-2xl bg-white/[0.03] border border-white/[0.07] rounded-full px-7 py-3 flex items-center gap-6 text-[13px] text-white/25"
-
-      >
-        <span className="tracking-[0.08em]"><span className="text-[#c0392b]">aeqi</span><span className="text-white/30">.</span><span className="text-white">ai</span></span>
-        <div className="w-px h-3.5 bg-white/[0.08]" />
-        <GitHubStars />
-        <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="hover:text-white/50 transition-colors">docs</a>
-        <div className="w-px h-3.5 bg-white/[0.08]" />
-        <span className="text-white/15">open source · rust</span>
+    <footer className="border-t border-black/5 py-8 px-6">
+      <div className="max-w-5xl mx-auto flex items-center justify-between text-[13px] text-black/25">
+        <span className="font-medium tracking-tight">aeqi</span>
+        <div className="flex items-center gap-5">
+          <a
+            href="https://github.com/0xAEQI/aeqi"
+            className="hover:text-black/50 transition-colors"
+          >
+            github
+          </a>
+          <a
+            href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md"
+            className="hover:text-black/50 transition-colors"
+          >
+            docs
+          </a>
+          <span className="text-black/15">open source &middot; rust</span>
+        </div>
       </div>
-    </motion.footer>
+    </footer>
   );
 }
 
+/* ─── App ─── */
 export default function App() {
   return (
-    <div className="relative min-h-screen">
-      <Backdrop />
+    <div className="min-h-screen bg-white">
       <Nav />
       <Hero />
+      <Features />
+      <Schema />
       <Footer />
     </div>
   );

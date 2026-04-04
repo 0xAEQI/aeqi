@@ -19,7 +19,7 @@
 }
 
 .tree-item:hover {
-  background: var(--bg-hover);
+  background: var(--bg-elevated);
   color: var(--text-primary);
 }
 
@@ -156,7 +156,8 @@
 }
 
 .stat-card {
-  background: var(--bg-surface);
+  background: var(--bg-base);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-5);
 }
@@ -202,28 +203,28 @@
 }
 
 .status-badge-idle,
-.status-badge-pending { color: var(--text-secondary); background: rgba(136, 136, 160, 0.1); border-color: var(--text-secondary); }
+.status-badge-pending { color: var(--text-secondary); background: rgba(0, 0, 0, 0.04); border-color: var(--text-secondary); }
 .status-badge-idle .status-dot,
 .status-badge-pending .status-dot { background-color: var(--text-secondary); }
 
-.status-badge-working { color: var(--accent); background: rgba(99, 102, 241, 0.1); border-color: var(--accent); }
+.status-badge-working { color: var(--accent); background: rgba(0, 0, 0, 0.04); border-color: var(--accent); }
 .status-badge-working .status-dot { background-color: var(--accent); }
 
 .status-badge-offline,
-.status-badge-cancelled { color: var(--text-muted); background: rgba(85, 85, 106, 0.1); border-color: var(--text-muted); }
+.status-badge-cancelled { color: var(--text-muted); background: rgba(0, 0, 0, 0.02); border-color: var(--text-muted); }
 .status-badge-offline .status-dot,
 .status-badge-cancelled .status-dot { background-color: var(--text-muted); }
 
-.status-badge-in_progress { color: var(--info); background: rgba(59, 130, 246, 0.1); border-color: var(--info); }
+.status-badge-in_progress { color: var(--info); background: rgba(59, 130, 246, 0.06); border-color: var(--info); }
 .status-badge-in_progress .status-dot { background-color: var(--info); }
 
-.status-badge-done { color: var(--success); background: rgba(34, 197, 94, 0.1); border-color: var(--success); }
+.status-badge-done { color: var(--success); background: rgba(34, 197, 94, 0.06); border-color: var(--success); }
 .status-badge-done .status-dot { background-color: var(--success); }
 
-.status-badge-blocked { color: var(--warning); background: rgba(245, 158, 11, 0.1); border-color: var(--warning); }
+.status-badge-blocked { color: var(--warning); background: rgba(245, 158, 11, 0.06); border-color: var(--warning); }
 .status-badge-blocked .status-dot { background-color: var(--warning); }
 
-.status-badge-failed { color: var(--error); background: rgba(239, 68, 68, 0.1); border-color: var(--error); }
+.status-badge-failed { color: var(--error); background: rgba(239, 68, 68, 0.06); border-color: var(--error); }
 .status-badge-failed .status-dot { background-color: var(--error); }
 
 /* Two column layout */
@@ -234,7 +235,8 @@
 }
 
 .column-section {
-  background: var(--bg-surface);
+  background: var(--bg-base);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
@@ -278,7 +280,7 @@
 
 /* Project card */
 .project-card {
-  background: var(--bg-surface);
+  background: var(--bg-base);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-5);
@@ -288,10 +290,8 @@
 }
 
 .project-card:hover {
-  border-color: var(--border-accent);
-  background: var(--bg-elevated);
+  border-color: var(--border-hover);
   color: inherit;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1), 0 0 20px rgba(255, 255, 255, 0.02);
 }
 
 .project-card-header {
@@ -346,7 +346,7 @@
 .project-advisor {
   padding: 1px 6px;
   border-radius: var(--radius-sm);
-  background: var(--bg-hover);
+  background: var(--bg-elevated);
   color: var(--text-secondary);
 }
 
@@ -367,7 +367,7 @@
 .project-progress-bar {
   flex: 1;
   height: 4px;
-  background: var(--bg-hover);
+  background: var(--bg-elevated);
   border-radius: var(--space-0);
   overflow: hidden;
 }
@@ -387,7 +387,7 @@
 
 .progress-bar-bg {
   height: 6px;
-  background: var(--bg-hover);
+  background: var(--bg-elevated);
   border-radius: var(--radius-xs);
   overflow: hidden;
 }
@@ -437,7 +437,7 @@
 
 /* Agent card */
 .agent-card {
-  background: var(--bg-surface);
+  background: var(--bg-base);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-5);
@@ -447,10 +447,8 @@
 }
 
 .agent-card:hover {
-  border-color: var(--border-accent);
-  background: var(--bg-elevated);
+  border-color: var(--border-hover);
   color: inherit;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1), 0 0 20px rgba(255, 255, 255, 0.02);
 }
 
 .agent-card-compact {
@@ -463,7 +461,7 @@
 }
 
 .agent-card-compact:hover {
-  background: var(--bg-hover);
+  background: var(--bg-elevated);
   color: inherit;
 }
 
@@ -570,7 +568,7 @@
 .expertise-tag {
   padding: 1px 6px;
   border-radius: var(--radius-sm);
-  background: var(--bg-hover);
+  background: var(--bg-elevated);
   font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
@@ -590,10 +588,19 @@
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border);
   font-size: var(--font-size-sm);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: var(--transition-fast);
 }
 
 .task-row:last-child {
   border-bottom: none;
+}
+
+.task-row.selected {
+  background: transparent;
+  border: 1px solid var(--text-primary);
+  border-radius: var(--radius-lg);
 }
 
 .task-priority-bar {
@@ -657,7 +664,7 @@
   font-size: var(--font-size-2xs);
   padding: 0 5px;
   border-radius: var(--radius-sm);
-  background: var(--bg-hover);
+  background: var(--bg-elevated);
   color: var(--text-muted);
 }
 
@@ -688,7 +695,7 @@
   text-decoration: none;
   padding: 0 4px;
   border-radius: var(--radius-sm);
-  background: var(--bg-hover);
+  background: var(--bg-elevated);
 }
 
 .task-project:hover {
@@ -715,7 +722,7 @@
 
 /* Mission card */
 .mission-card {
-  background: var(--bg-surface);
+  background: var(--bg-base);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-5);
@@ -919,7 +926,8 @@
 }
 
 .detail-panel {
-  background: var(--bg-surface);
+  background: var(--bg-base);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-5);
   min-width: 0;
@@ -961,8 +969,8 @@
 }
 
 .filter-input {
-  background: var(--bg-surface);
-  border: none;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-3);
   color: var(--text-primary);
@@ -972,12 +980,12 @@
 
 .filter-input:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--border-hover);
 }
 
 .filter-select {
-  background: var(--bg-surface);
-  border: none;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-3);
   color: var(--text-primary);
@@ -987,7 +995,7 @@
 
 .filter-select:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--border-hover);
 }
 
 /* Empty state */
@@ -1018,7 +1026,7 @@
 
 /* Task table */
 .task-table {
-  background: var(--bg-surface);
+  background: var(--bg-base);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
@@ -1035,15 +1043,15 @@
   font-size: var(--font-size-sm);
   cursor: pointer;
   transition: all var(--transition-fast);
-  border: 1px solid transparent;
-  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  background: var(--bg-base);
   color: var(--text-primary);
   white-space: nowrap;
 }
 
 .btn:hover {
   border-color: var(--border-hover);
-  background: var(--bg-hover);
+  background: var(--bg-elevated);
 }
 
 .btn:disabled {
@@ -1052,18 +1060,20 @@
 }
 
 .btn-primary {
-  background: transparent;
-  border-color: var(--border-hover);
-  color: var(--text-primary);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-base);
   font-weight: 500;
   letter-spacing: 0.05em;
   transition: all var(--transition-smooth);
 }
 
 .btn-primary:hover {
-  background: var(--bg-elevated);
-  border-color: var(--text-muted);
+  opacity: 0.85;
+  background: var(--accent);
+  border-color: var(--accent);
 }
+
 /* ── Utility & Semantic Classes ── */
 
 .text-hint { font-size: var(--font-size-xs); color: var(--text-muted); }
@@ -1096,7 +1106,7 @@
 .file-tab:hover { color: var(--text-secondary); }
 .file-tab.active {
   color: var(--accent);
-  background: var(--bg-hover);
+  background: var(--bg-elevated);
   border-bottom-color: var(--accent);
 }
 
@@ -1121,7 +1131,7 @@
   font-family: var(--font-mono);
   font-size: var(--font-size-sm);
   color: var(--text-primary);
-  background: var(--bg-primary);
+  background: var(--bg-base);
   border: none;
   outline: none;
   line-height: 1.6;
@@ -1152,7 +1162,7 @@
   width: 16px;
   height: 16px;
   border-radius: var(--radius-xs);
-  background: var(--bg-hover);
+  background: var(--bg-elevated);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1209,10 +1219,10 @@
   border-radius: var(--radius-full); font-size: var(--font-size-xs);
   font-family: var(--font-mono); font-weight: 500;
 }
-.task-phase-prime { color: var(--info); background: rgba(96, 165, 250, 0.1); }
+.task-phase-prime { color: var(--info); background: rgba(59, 130, 246, 0.06); }
 .task-phase-frame { color: var(--accent); background: var(--accent-bg); }
-.task-phase-act { color: var(--warning); background: rgba(251, 191, 36, 0.1); }
-.task-phase-verify { color: var(--success); background: rgba(74, 222, 128, 0.1); }
+.task-phase-act { color: var(--warning); background: rgba(245, 158, 11, 0.06); }
+.task-phase-verify { color: var(--success); background: rgba(34, 197, 94, 0.06); }
 .task-phase-commit { color: var(--text-primary); background: var(--bg-elevated); }
 
 /* Timeline in detail panel */
@@ -1250,16 +1260,12 @@
 .task-dep-chip-subject { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
 .task-dep-empty { font-size: var(--font-size-xs); color: var(--text-muted); padding: 8px 0; }
 
-/* Selected task row */
-.task-row { cursor: pointer; border: 1px solid transparent; transition: var(--transition-fast); }
-.task-row.selected { background: transparent; border: 1px solid var(--text-primary); border-radius: var(--radius-lg); }
-
 /* Verification card */
 .task-verification {
   padding: 12px; border-radius: var(--radius-lg); border: 1px solid var(--border);
-  background: var(--bg-elevated); margin-top: 8px;
+  background: var(--bg-surface); margin-top: 8px;
 }
-.task-verification-approved { border-color: rgba(74, 222, 128, 0.2); }
+.task-verification-approved { border-color: rgba(34, 197, 94, 0.2); }
 .task-verification-warnings { margin-top: 8px; font-size: var(--font-size-xs); color: var(--warning); }
 
 /* ── Checkpoint Timeline ── */
@@ -1288,7 +1294,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--bg-elevated);
+  background: var(--bg-base);
   border: 2px solid var(--text-muted);
   flex-shrink: 0;
   margin-top: 4px;

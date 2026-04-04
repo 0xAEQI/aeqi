@@ -23,7 +23,7 @@ fn discover_project_skills(project_dir: &Path) -> Result<Vec<Skill>> {
 
     for dir in dirs {
         for skill in Skill::discover(&dir)? {
-            merged.insert(skill.skill.name.clone(), skill);
+            merged.insert(skill.name.clone(), skill);
         }
     }
 
@@ -51,19 +51,19 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
                     if !skills.is_empty() {
                         println!("=== {} ===", name);
                         for skill in &skills {
-                            let triggers = if skill.skill.triggers.is_empty() {
+                            let triggers = if skill.triggers.is_empty() {
                                 String::new()
                             } else {
-                                format!(" (triggers: {})", skill.skill.triggers.join(", "))
+                                format!(" (triggers: {})", skill.triggers.join(", "))
                             };
-                            let tools = if skill.tools.allow.is_empty() {
+                            let tools = if skill.tools.is_empty() {
                                 "all".to_string()
                             } else {
-                                skill.tools.allow.join(", ")
+                                skill.tools.join(", ")
                             };
                             println!(
                                 "  {} — {} [tools: {}]{}",
-                                skill.skill.name, skill.skill.description, tools, triggers
+                                skill.name, skill.description, tools, triggers
                             );
                         }
                     }
@@ -84,7 +84,7 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
 
             let skill = skills
                 .iter()
-                .find(|s| s.skill.name == name)
+                .find(|s| s.name == name)
                 .context(format!("skill not found: {name}"))?;
 
             // Build provider.
@@ -115,9 +115,9 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
             let final_prompt = skill.system_prompt(&base_prompt);
 
             let user_prompt = if let Some(ref p) = prompt {
-                format!("{}{}", skill.prompt.user_prefix, p)
+                format!("{}{}", skill.user_prefix, p)
             } else {
-                skill.prompt.user_prefix.clone()
+                skill.user_prefix.clone()
             };
 
             let observer: Arc<dyn Observer> = Arc::new(LogObserver);

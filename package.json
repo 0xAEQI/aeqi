@@ -7,5 +7,8 @@
     "ui:dev": "npm --prefix apps/ui run dev",
     "ui:build": "npm --prefix apps/ui run build",
     "ui:preview": "npm --prefix apps/ui run preview"
+  },
+  "dependencies": {
+    "playwright": "^1.52.0"
   }
 }
