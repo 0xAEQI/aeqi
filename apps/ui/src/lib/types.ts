@@ -1,24 +1,27 @@
 import type { TaskRuntime } from "./runtime";
 
-export interface Company {
+export interface Agent {
+  id: string;
   name: string;
-  prefix: string;
-  repo: string;
-  description?: string;
-  team: { leader: string; advisors: string[] };
-  stats: { pending: number; active: number; done: number; failed: number };
-  missions: Mission[];
+  display_name?: string;
+  parent_id?: string | null;
+  status: string;
+  model?: string;
+  prompts?: Record<string, string>;
+  capabilities?: string[];
+  project?: string;
+  template?: string;
+  session_id?: string;
+  color?: string;
+  avatar?: string;
+  created_at?: string;
 }
 
-export interface Agent {
+export interface AgentRef {
+  id: string;
   name: string;
-  prefix: string;
-  model: string;
-  role: "leader" | "advisor" | "worker";
-  status: "idle" | "working" | "offline";
-  expertise: string[];
-  current_task?: string;
-  stats: { completed: number; failed: number; avg_cost_usd: number };
+  display_name?: string;
+  model?: string;
 }
 
 export interface Checkpoint {
@@ -29,24 +32,25 @@ export interface Checkpoint {
   turns_used: number;
 }
 
-export interface TaskOutcome {
+export type QuestStatus = "pending" | "in_progress" | "done" | "blocked" | "cancelled";
+export type QuestPriority = "critical" | "high" | "normal" | "low";
+
+export interface QuestOutcome {
   kind: string;      // "done", "blocked", "failed", "handoff"
   summary: string;
   reason?: string;
   next_action?: string;
 }
 
-export interface Task {
+export interface Quest {
   id: string;
   subject: string;
   description: string;
-  status: "pending" | "in_progress" | "done" | "blocked" | "cancelled";
-  priority: "critical" | "high" | "normal" | "low";
+  status: QuestStatus;
+  priority: QuestPriority;
   assignee?: string;
   agent_id?: string;
   skill?: string;
-  mission_id?: string;
-  company: string;
   labels: string[];
   cost_usd: number;
   created_at: string;
@@ -64,49 +68,23 @@ export interface Task {
   runtime?: TaskRuntime;
 }
 
-export interface Mission {
-  id: string;
-  name: string;
-  description: string;
-  status: "pending" | "in_progress" | "done" | "cancelled";
-  company: string;
-  skill?: string;
-  schedule?: string;
-  task_count: number;
-  done_count: number;
-  created_at: string;
+export interface Event {
+  id: string | number;
+  timestamp: string;
+  event_type: string;
+  agent?: string;
+  summary: string;
+  quest_id?: string;
+  metadata?: Record<string, unknown>;
 }
 
-export interface AgentRef {
+export interface Insight {
   id: string;
-  name: string;
-  display_name?: string;
-  project?: string;
-  model?: string;
-}
-
-export interface PersistentAgent {
-  id: string;
-  name: string;
-  display_name?: string;
-  template: string;
-  project?: string;
-  department_id?: string;
-  model?: string;
-  capabilities: string[];
-  status: string;
-  created_at: string;
-  session_id?: string;
-  color?: string;
-  avatar?: string;
-}
-
-export interface Department {
-  id: string;
-  name: string;
-  project?: string;
-  manager_id?: string;
-  parent_id?: string;
+  key: string;
+  content: string;
+  category?: string;
+  scope?: string;
+  agent_id?: string;
   created_at: string;
 }
 
@@ -124,17 +102,14 @@ export interface AuditEntry {
 export interface DaemonStatus {
   running: boolean;
   uptime_secs: number;
-  companies: number;
   active_workers: number;
   total_cost_usd: number;
-  cron_jobs: number;
 }
 
 export interface DashboardStats {
   active_workers: number;
   total_cost_today: number;
   tasks_completed_24h: number;
-  companies_tracked: number;
   recent_activity: AuditEntry[];
   active_agents: Agent[];
 }

@@ -1,304 +1,256 @@
-import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { useChatStore } from "@/store/chat";
+import { useDaemonStore } from "@/store/daemon";
 import { api } from "@/lib/api";
-import { runtimeLabel } from "@/lib/runtime";
+import type { Agent } from "@/lib/types";
 
-function NotesTab({ channel }: { channel: string | null }) {
-  const [content, setContent] = useState("");
-  const [directives, setDirectives] = useState<any[]>([]);
-  const [saving, setSaving] = useState(false);
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const channelKey = channel || "aeqi";
+function timeAgo(ts: string | undefined | null): string {
+  if (!ts) return "";
+  const diff = Date.now() - new Date(ts).getTime();
+  if (diff < 0) return "now";
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  return `${Math.floor(hr / 24)}d`;
+}
 
-  // Load note on channel change
+type Tab = "prompts" | "quests" | "insights" | "events";
+
+function PromptsSection({ agentName, allAgents }: { agentName: string; allAgents: Agent[] }) {
+  const [identityFiles, setIdentityFiles] = useState<Record<string, string>>({});
+  const [ancestorChain, setAncestorChain] = useState<string[]>([]);
+
   useEffect(() => {
-    api.getNote(channelKey).then((d) => {
-      if (d.ok && d.note) {
-        setContent(d.note.content || "");
-        setDirectives(d.directives || []);
+    // Build ancestor chain
+    const chain: string[] = [];
+    const byName = new Map<string, Agent>();
+    for (const a of allAgents) byName.set(a.name, a);
+    const byId = new Map<string, Agent>();
+    for (const a of allAgents) byId.set(a.id, a);
+
+    let current = byName.get(agentName);
+    while (current) {
+      chain.unshift(current.name);
+      if (current.parent_id) {
+        current = byId.get(current.parent_id);
       } else {
-        setContent("");
-        setDirectives([]);
+        break;
       }
-    }).catch(() => {});
-  }, [channelKey]);
+    }
+    setAncestorChain(chain);
 
-  // Auto-save on debounce (1.5s)
-  const handleChange = (value: string) => {
-    setContent(value);
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(() => {
-      setSaving(true);
-      api.saveNote({ channel: channelKey, content: value }).then((d) => {
-        if (d.ok && d.directives) setDirectives(d.directives);
-        setSaving(false);
-      }).catch(() => setSaving(false));
-    }, 1500);
-  };
+    // Fetch identity/prompt files
+    api.getAgentIdentity(agentName)
+      .then((d: any) => {
+        if (d.ok && d.files) setIdentityFiles(d.files);
+        else setIdentityFiles({});
+      })
+      .catch(() => setIdentityFiles({}));
+  }, [agentName, allAgents]);
+
+  const fileNames = Object.keys(identityFiles);
 
   return (
-    <div className="ctx-content">
-      <div className="ctx-section">
-        <div className="ctx-section-header">
-          <span className="ctx-section-title">Notes</span>
-          {saving && <span className="ctx-link">saving...</span>}
-        </div>
-        <textarea
-          className="ctx-notes-editor"
-          value={content}
-          onChange={(e) => handleChange(e.target.value)}
-          placeholder="Write your directives here..."
-          rows={8}
-        />
-      </div>
-      {directives.length > 0 && (
+    <div className="ctx-tab-content">
+      {/* Ancestor chain */}
+      {ancestorChain.length > 1 && (
         <div className="ctx-section">
-          <div className="ctx-section-title">Directives</div>
-          <div className="ctx-list">
-            {directives.map((d: any) => (
-              <div key={d.id} className="ctx-directive">
-                <span className={`ctx-directive-status ctx-directive-${d.status}`}>
-                  {d.status === "pending" ? "\u25CB" : d.status === "active" ? "\u27F3" : d.status === "done" ? "\u2713" : "\u2717"}
-                </span>
-                <span className="ctx-directive-text">{d.content}</span>
-                {d.task_id && <code className="ctx-directive-task">{d.task_id}</code>}
-              </div>
+          <div className="ctx-section-title">Prompt Chain</div>
+          <div className="ctx-chain">
+            {ancestorChain.map((name, i) => (
+              <span key={name} className={`ctx-chain-item${name === agentName ? " ctx-chain-active" : ""}`}>
+                {i > 0 && <span className="ctx-chain-arrow">&rarr;</span>}
+                {name}
+              </span>
             ))}
           </div>
         </div>
       )}
-    </div>
-  );
-}
 
-function BriefTab() {
-  const [brief, setBrief] = useState<string | null>(null);
-
-  useEffect(() => {
-    api.getBrief().then((d) => setBrief(d.brief || null)).catch(() => {});
-  }, []);
-
-  return (
-    <div className="ctx-content">
-      {brief ? (
-        <div className="ctx-section">
-          <div className="ctx-section-title">Daily Brief</div>
-          <pre className="ctx-brief">{brief}</pre>
-        </div>
+      {/* Identity files */}
+      {fileNames.length > 0 ? (
+        fileNames.map((filename) => (
+          <div key={filename} className="ctx-section">
+            <div className="ctx-section-title">{filename}</div>
+            <pre className="ctx-pre">{identityFiles[filename]}</pre>
+          </div>
+        ))
       ) : (
-        <div className="ctx-empty">No brief available</div>
+        <div className="ctx-empty-state">No prompt files found</div>
       )}
     </div>
   );
 }
 
-function GlobalContext() {
-  const [brief, setBrief] = useState<string | null>(null);
-  const [tasks, setTasks] = useState<any[]>([]);
-  const [audit, setAudit] = useState<any[]>([]);
-  const [cost, setCost] = useState<any>(null);
+function QuestsSection({ agentName }: { agentName: string }) {
+  const quests = useDaemonStore((s) => s.quests);
 
-  useEffect(() => {
-    api.getBrief().then((d) => setBrief(d.brief || null)).catch(() => {});
-    api.getTasks({ status: "in_progress" }).then((d) => setTasks(d.tasks || [])).catch(() => {});
-    api.getAudit({ last: 12 }).then((d) => setAudit(d.events || [])).catch(() => {});
-    api.getCost().then(setCost).catch(() => {});
-    const interval = setInterval(() => {
-      api.getTasks({ status: "in_progress" }).then((d) => setTasks(d.tasks || [])).catch(() => {});
-      api.getAudit({ last: 12 }).then((d) => setAudit(d.events || [])).catch(() => {});
-    }, 12000);
-    return () => clearInterval(interval);
-  }, []);
+  const agentQuests = quests.filter((q: any) => {
+    const assignee = (q.assignee || q.agent || "").toLowerCase();
+    return assignee.includes(agentName.toLowerCase());
+  });
+
+  const active = agentQuests.filter((q: any) => q.status === "in_progress" || q.status === "pending");
+  const blocked = agentQuests.filter((q: any) => q.status === "blocked");
+  const done = agentQuests.filter((q: any) => q.status === "done").slice(0, 5);
 
   return (
-    <div className="ctx-content">
-      {brief && (
+    <div className="ctx-tab-content">
+      {active.length > 0 && (
         <div className="ctx-section">
-          <div className="ctx-section-title">Daily Brief</div>
-          <pre className="ctx-brief">{brief}</pre>
-        </div>
-      )}
-
-      {cost && (
-        <div className="ctx-section">
-          <div className="ctx-section-title">Budget</div>
-          <div className="ctx-budget">
-            <div className="ctx-budget-bar">
-              <div
-                className="ctx-budget-fill"
-                style={{ width: `${Math.min((cost.spent_today_usd / (cost.daily_budget_usd || 1)) * 100, 100)}%` }}
-              />
-            </div>
-            <span className="ctx-budget-label">
-              ${Number(cost.spent_today_usd).toFixed(2)} / ${Number(cost.daily_budget_usd).toFixed(0)}
-            </span>
-          </div>
-        </div>
-      )}
-
-      <div className="ctx-section">
-        <div className="ctx-section-header">
-          <span className="ctx-section-title">Active Work</span>
-          <Link to="/tasks" className="ctx-link">{tasks.length}</Link>
-        </div>
-        {tasks.length === 0 ? (
-          <div className="ctx-empty">No active tasks</div>
-        ) : (
+          <div className="ctx-section-title">Active ({active.length})</div>
           <div className="ctx-list">
-            {tasks.slice(0, 6).map((t: any) => (
-              <div key={t.id} className="ctx-task">
-                <code className="ctx-task-id">{t.id}</code>
-                <span className="ctx-task-subject">{t.subject}</span>
-                {runtimeLabel(t.runtime) && (
-                  <span className="ctx-task-status">{runtimeLabel(t.runtime)}</span>
-                )}
+            {active.map((q: any) => (
+              <div key={q.id} className="ctx-quest-row">
+                <span className="ctx-quest-status active" />
+                <div className="ctx-quest-info">
+                  <span className="ctx-quest-id">{q.id}</span>
+                  <span className="ctx-quest-subject">{q.subject}</span>
+                </div>
+                <span className="ctx-quest-time">{timeAgo(q.started_at || q.updated_at)}</span>
               </div>
             ))}
           </div>
-        )}
-      </div>
-
-      <div className="ctx-section">
-        <div className="ctx-section-header">
-          <span className="ctx-section-title">
-            <span className="ctx-feed-dot" />
-            Activity
-          </span>
-          <Link to="/audit" className="ctx-link">All</Link>
         </div>
-        <div className="ctx-list">
-          {audit.slice(0, 8).map((e: any, i: number) => (
-            <div key={i} className="ctx-event">
-              <span className="ctx-event-type">{e.decision_type?.replace(/_/g, " ")}</span>
-              <span className="ctx-event-detail">{e.reasoning?.slice(0, 60)}</span>
-            </div>
-          ))}
+      )}
+      {blocked.length > 0 && (
+        <div className="ctx-section">
+          <div className="ctx-section-title">Blocked ({blocked.length})</div>
+          <div className="ctx-list">
+            {blocked.map((q: any) => (
+              <div key={q.id} className="ctx-quest-row blocked">
+                <span className="ctx-quest-status blocked" />
+                <div className="ctx-quest-info">
+                  <span className="ctx-quest-id">{q.id}</span>
+                  <span className="ctx-quest-subject">{q.subject}</span>
+                  {q.blocked_reason && <span className="ctx-quest-reason">{q.blocked_reason}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
+      {done.length > 0 && (
+        <div className="ctx-section">
+          <div className="ctx-section-title">Recent Done</div>
+          <div className="ctx-list">
+            {done.map((q: any) => (
+              <div key={q.id} className="ctx-quest-row done">
+                <span className="ctx-quest-status done" />
+                <div className="ctx-quest-info">
+                  <span className="ctx-quest-subject">{q.subject}</span>
+                </div>
+                <span className="ctx-quest-time">{timeAgo(q.updated_at || q.closed_at)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {agentQuests.length === 0 && (
+        <div className="ctx-empty-state">No quests for this agent</div>
+      )}
     </div>
   );
 }
 
-function CompanyContext({ company }: { company: string }) {
-  const [tasks, setTasks] = useState<any[]>([]);
-  const [knowledge, setKnowledge] = useState<any[]>([]);
-  const [companyData, setCompanyData] = useState<any>(null);
+function InsightsSection({ agentName }: { agentName: string }) {
+  const [insights, setInsights] = useState<any[]>([]);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    setSearch("");
-    api.getTasks({ company }).then((d) => setTasks(d.tasks || [])).catch(() => {});
-    api.getChannelKnowledge({ company, limit: 15 }).then((d) => setKnowledge(d.items || [])).catch(() => {});
-    api.getCompanies().then((d) => {
-      const p = (d.companies || []).find((p: any) => p.name === company);
-      setCompanyData(p || null);
-    }).catch(() => {});
-  }, [company]);
+    api.getMemories({ query: agentName, limit: 20 })
+      .then((d: any) => setInsights(d.memories || d.items || []))
+      .catch(() => setInsights([]));
+  }, [agentName]);
 
   const handleSearch = (q: string) => {
     setSearch(q);
-    api.getChannelKnowledge({ company, query: q || undefined, limit: 15 })
-      .then((d) => setKnowledge(d.items || []))
+    const query = q || agentName;
+    api.getMemories({ query, limit: 20 })
+      .then((d: any) => setInsights(d.memories || d.items || []))
       .catch(() => {});
   };
 
-  const openTasks = tasks.filter((t: any) => t.status === "pending" || t.status === "in_progress");
-  const team = companyData?.team;
-
   return (
-    <div className="ctx-content">
-      {/* Team */}
-      {team && (
-        <div className="ctx-section">
-          <div className="ctx-section-title">Team</div>
-          <div className="ctx-team">
-            {[team.leader, ...(team.agents || [])].map((name: string) => (
-              <Link key={name} to={`/agents/${name}`} className="ctx-team-member">
-                <span className="ctx-team-avatar">{name[0].toUpperCase()}</span>
-                <span className="ctx-team-name">{name}</span>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Tasks */}
+    <div className="ctx-tab-content">
       <div className="ctx-section">
-        <div className="ctx-section-header">
-          <span className="ctx-section-title">Tasks</span>
-          <Link to="/tasks" className="ctx-link">{openTasks.length} open</Link>
-        </div>
-        {openTasks.length === 0 ? (
-          <div className="ctx-empty">No open tasks</div>
-        ) : (
-          <div className="ctx-list">
-            {openTasks.slice(0, 8).map((t: any) => (
-              <div key={t.id} className="ctx-task">
-                <code className="ctx-task-id">{t.id}</code>
-                <span className="ctx-task-subject">{t.subject}</span>
-                <span className={`ctx-task-status ctx-task-status-${t.status}`}>
-                  {runtimeLabel(t.runtime) || (t.status === "in_progress" ? "active" : t.status)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Knowledge */}
-      <div className="ctx-section">
-        <div className="ctx-section-header">
-          <span className="ctx-section-title">Knowledge</span>
-          <span className="ctx-link">{knowledge.length}</span>
-        </div>
         <input
           className="ctx-search"
-          placeholder="Search knowledge..."
+          placeholder="Search insights..."
           value={search}
           onChange={(e) => handleSearch(e.target.value)}
         />
-        <div className="ctx-list">
-          {knowledge.map((item: any) => (
-            <div key={item.id} className="ctx-knowledge">
-              <span className="ctx-knowledge-source" style={{
-                color: item.source === "memory" ? "var(--info)" : "var(--accent)"
-              }}>
-                {item.source === "memory" ? "M" : "B"}
-              </span>
-              <div className="ctx-knowledge-body">
-                <span className="ctx-knowledge-key">{item.key}</span>
-                <span className="ctx-knowledge-preview">{item.content?.slice(0, 60)}</span>
+      </div>
+      {insights.length > 0 ? (
+        <div className="ctx-section">
+          <div className="ctx-list">
+            {insights.map((item: any) => (
+              <div key={item.id || item.key} className="ctx-insight-row">
+                <span className="ctx-insight-key">{item.key || item.title || "insight"}</span>
+                <span className="ctx-insight-content">{(item.content || "").slice(0, 120)}</span>
               </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="ctx-empty-state">No insights found</div>
+      )}
+    </div>
+  );
+}
+
+function EventsSection({ agentName }: { agentName: string }) {
+  const events = useDaemonStore((s) => s.events);
+
+  const agentEvents = events.filter((e: any) => {
+    const agent = (e.agent || e.actor || "").toLowerCase();
+    return agent.includes(agentName.toLowerCase());
+  });
+
+  return (
+    <div className="ctx-tab-content">
+      {agentEvents.length > 0 ? (
+        <div className="ctx-list">
+          {agentEvents.slice(0, 20).map((e: any, i: number) => (
+            <div key={e.id || i} className="ctx-event-row">
+              <span className="ctx-event-time">{timeAgo(e.timestamp || e.created_at)}</span>
+              <span className="ctx-event-type">{e.decision_type || e.event_type || ""}</span>
+              <span className="ctx-event-summary">
+                {e.summary || e.reasoning || e.description || "\u2014"}
+              </span>
             </div>
           ))}
         </div>
-      </div>
+      ) : (
+        <div className="ctx-empty-state">No events for this agent</div>
+      )}
     </div>
   );
 }
 
 export default function ContextPanel() {
-  const channel = useChatStore((s) => s.channel);
-  const projectName = channel?.split("/")[0] || null;
-  const [tab, setTab] = useState<"notes" | "context" | "brief">("context");
+  const selectedAgent = useChatStore((s) => s.selectedAgent);
+  const allAgents = useDaemonStore((s) => s.agents);
+  const agentName = selectedAgent?.name || "";
+  const [tab, setTab] = useState<Tab>("quests");
+
+  if (!selectedAgent) return null;
 
   return (
     <aside className="context-panel">
       <div className="context-panel-header">
-        <button className={`ctx-tab ${tab === "notes" ? "ctx-tab-active" : ""}`} onClick={() => setTab("notes")}>Notes</button>
-        <button className={`ctx-tab ${tab === "context" ? "ctx-tab-active" : ""}`} onClick={() => setTab("context")}>Context</button>
-        <button className={`ctx-tab ${tab === "brief" ? "ctx-tab-active" : ""}`} onClick={() => setTab("brief")}>Brief</button>
+        <button className={`ctx-tab${tab === "prompts" ? " ctx-tab-active" : ""}`} onClick={() => setTab("prompts")}>Prompts</button>
+        <button className={`ctx-tab${tab === "quests" ? " ctx-tab-active" : ""}`} onClick={() => setTab("quests")}>Quests</button>
+        <button className={`ctx-tab${tab === "insights" ? " ctx-tab-active" : ""}`} onClick={() => setTab("insights")}>Insights</button>
+        <button className={`ctx-tab${tab === "events" ? " ctx-tab-active" : ""}`} onClick={() => setTab("events")}>Events</button>
       </div>
-      {tab === "notes" && <NotesTab channel={channel} />}
-      {tab === "context" && (
-        projectName ? (
-          <CompanyContext company={projectName} />
-        ) : (
-          <GlobalContext />
-        )
-      )}
-      {tab === "brief" && <BriefTab />}
+      {tab === "prompts" && <PromptsSection agentName={agentName} allAgents={allAgents} />}
+      {tab === "quests" && <QuestsSection agentName={agentName} />}
+      {tab === "insights" && <InsightsSection agentName={agentName} />}
+      {tab === "events" && <EventsSection agentName={agentName} />}
     </aside>
   );
 }

@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom";
 import type { AuditEntry as AuditEntryType } from "@/lib/types";
 
 interface AuditEntryProps {
@@ -77,9 +76,7 @@ export default function AuditEntryComponent({
           >
             {formatDecisionType(entry.decision_type)}
           </span>
-          <Link to={`/companies/${entry.company}`} className="audit-project">
-            {entry.company}
-          </Link>
+          <span className="audit-project">{entry.company}</span>
         </div>
         <span className="audit-timestamp">
           {formatTimestamp(entry.timestamp)}
@@ -90,9 +87,7 @@ export default function AuditEntryComponent({
 
       <div className="audit-entry-footer">
         {entry.agent && (
-          <Link to={`/agents/${entry.agent}`} className="audit-agent">
-            {entry.agent}
-          </Link>
+          <span className="audit-agent">{entry.agent}</span>
         )}
         {entry.task_id && (
           <code className="audit-task-id">{entry.task_id}</code>

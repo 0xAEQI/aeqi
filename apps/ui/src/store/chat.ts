@@ -1,20 +1,12 @@
 import { create } from "zustand";
 import type { AgentRef, ChatThreadState } from "@/lib/types";
 
-const CHANNEL_STORAGE_KEY = "aeqi_session_channel";
 const THREADS_STORAGE_KEY = "aeqi_session_threads";
-const GLOBAL_CHANNEL_KEY = "__global__";
+const SELECTED_AGENT_KEY = "aeqi_selected_agent";
+const GLOBAL_KEY = "__global__";
 
-function channelKey(channel: string | null): string {
-  return channel || GLOBAL_CHANNEL_KEY;
-}
-
-function readChannel(): string | null {
-  try {
-    return localStorage.getItem(CHANNEL_STORAGE_KEY);
-  } catch {
-    return null;
-  }
+function agentKey(agentId: string | null): string {
+  return agentId || GLOBAL_KEY;
 }
 
 function readThreads(): Record<string, ChatThreadState> {
@@ -28,15 +20,6 @@ function readThreads(): Record<string, ChatThreadState> {
   }
 }
 
-function persistChannel(channel: string | null) {
-  try {
-    if (channel) localStorage.setItem(CHANNEL_STORAGE_KEY, channel);
-    else localStorage.removeItem(CHANNEL_STORAGE_KEY);
-  } catch {
-    // ignore localStorage failures
-  }
-}
-
 function persistThreads(threads: Record<string, ChatThreadState>) {
   try {
     localStorage.setItem(THREADS_STORAGE_KEY, JSON.stringify(threads));
@@ -45,29 +28,42 @@ function persistThreads(threads: Record<string, ChatThreadState>) {
   }
 }
 
+function readSelectedAgent(): AgentRef | null {
+  try {
+    const raw = localStorage.getItem(SELECTED_AGENT_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as AgentRef;
+  } catch {
+    return null;
+  }
+}
+
+function persistSelectedAgent(agent: AgentRef | null) {
+  try {
+    if (agent) localStorage.setItem(SELECTED_AGENT_KEY, JSON.stringify(agent));
+    else localStorage.removeItem(SELECTED_AGENT_KEY);
+  } catch {
+    // ignore localStorage failures
+  }
+}
+
 interface ChatState {
-  channel: string | null;
   selectedAgent: AgentRef | null;
   threads: Record<string, ChatThreadState>;
-  setChannel: (ch: string | null) => void;
   setSelectedAgent: (agent: AgentRef | null) => void;
-  getOrCreateThread: (channel: string | null) => ChatThreadState;
-  updateThread: (channel: string | null, patch: Partial<ChatThreadState>) => void;
+  getOrCreateThread: (agentId: string | null) => ChatThreadState;
+  updateThread: (agentId: string | null, patch: Partial<ChatThreadState>) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
-  channel: readChannel(),
-  selectedAgent: null,
+  selectedAgent: readSelectedAgent(),
   threads: readThreads(),
-  setChannel: (ch) => {
-    persistChannel(ch);
-    set({ channel: ch });
-  },
   setSelectedAgent: (agent) => {
+    persistSelectedAgent(agent);
     set({ selectedAgent: agent });
   },
-  getOrCreateThread: (channel): ChatThreadState => {
-    const key = channelKey(channel);
+  getOrCreateThread: (agentId): ChatThreadState => {
+    const key = agentKey(agentId);
     const current = get().threads[key];
     if (current) {
       return current;
@@ -81,8 +77,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
     return next;
   },
-  updateThread: (channel, patch) => {
-    const key = channelKey(channel);
+  updateThread: (agentId, patch) => {
+    const key = agentKey(agentId);
     set((state) => {
       const current = state.threads[key] || {};
       const threads = {

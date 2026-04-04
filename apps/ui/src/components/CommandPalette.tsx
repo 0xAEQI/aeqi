@@ -23,62 +23,48 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
     if (!open) { setQuery(""); setSelected(0); return; }
     inputRef.current?.focus();
 
-    // Build items from API data
     const buildItems = async () => {
       const navItems: PaletteItem[] = [
-        { id: "nav-chat", label: "Chat", hint: "Home", section: "Navigate", action: () => go("/") },
-        { id: "nav-dashboard", label: "Dashboard", hint: "Command center", section: "Navigate", action: () => go("/dashboard") },
-        { id: "nav-tasks", label: "Tasks", hint: "View all tasks", section: "Navigate", action: () => go("/tasks") },
-        { id: "nav-missions", label: "Missions", hint: "Mission tracker", section: "Navigate", action: () => go("/missions") },
-        { id: "nav-knowledge", label: "Knowledge", hint: "Browse memories", section: "Navigate", action: () => go("/knowledge") },
-        { id: "nav-skills", label: "Skills", hint: "Skill catalog", section: "Navigate", action: () => go("/skills") },
-        { id: "nav-ops", label: "Operations", hint: "Crons & watchdogs", section: "Navigate", action: () => go("/operations") },
-        { id: "nav-cost", label: "Cost", hint: "Budget tracking", section: "Navigate", action: () => go("/cost") },
-        { id: "nav-audit", label: "Audit", hint: "Decision trail", section: "Navigate", action: () => go("/audit") },
+        { id: "nav-dashboard", label: "Dashboard", hint: "Overview", section: "Navigate", action: () => go("/") },
+        { id: "nav-quests", label: "Quests", hint: "View all quests", section: "Navigate", action: () => go("/quests") },
+        { id: "nav-sessions", label: "Sessions", hint: "Agent sessions", section: "Navigate", action: () => go("/sessions") },
+        { id: "nav-events", label: "Events", hint: "Event stream", section: "Navigate", action: () => go("/events") },
+        { id: "nav-insights", label: "Insights", hint: "Agent knowledge", section: "Navigate", action: () => go("/insights") },
         { id: "nav-settings", label: "Settings", hint: "Configuration", section: "Navigate", action: () => go("/settings") },
       ];
 
       try {
-        const [companiesData, agentsData, tasksData, memoriesData] = await Promise.all([
-          api.getCompanies().catch(() => ({ companies: [] })),
+        const [agentsData, questsData, insightsData] = await Promise.all([
           api.getAgents().catch(() => ({ agents: [] })),
           api.getTasks({}).catch(() => ({ tasks: [] })),
           api.getMemories({ limit: 30 }).catch(() => ({ memories: [] })),
         ]);
 
-        const companyItems: PaletteItem[] = (companiesData.companies || []).map((p: any) => ({
-          id: `comp-${p.name}`,
-          label: p.name,
-          hint: `${p.open_tasks || 0} open tasks`,
-          section: "Companies",
-          action: () => go(`/companies/${p.name}`),
-        }));
-
         const agentItems: PaletteItem[] = (agentsData.agents || []).map((a: any) => ({
           id: `agent-${a.name}`,
-          label: a.name,
-          hint: a.role,
+          label: a.display_name || a.name,
+          hint: a.model || a.status,
           section: "Agents",
           action: () => go(`/agents/${a.name}`),
         }));
 
-        const taskItems: PaletteItem[] = (tasksData.tasks || []).slice(0, 20).map((t: any) => ({
-          id: `task-${t.id}`,
-          label: `${t.id}: ${t.subject}`,
-          hint: t.status,
-          section: "Tasks",
-          action: () => go(`/issues`),
+        const questItems: PaletteItem[] = (questsData.tasks || []).slice(0, 20).map((q: any) => ({
+          id: `quest-${q.id}`,
+          label: `${q.id}: ${q.subject}`,
+          hint: q.status,
+          section: "Quests",
+          action: () => go(`/quests`),
         }));
 
-        const memoryItems: PaletteItem[] = (memoriesData.memories || []).slice(0, 15).map((m: any) => ({
-          id: `mem-${m.id || m.key}`,
-          label: m.key || m.title || "Memory",
+        const insightItems: PaletteItem[] = (insightsData.memories || []).slice(0, 15).map((m: any) => ({
+          id: `insight-${m.id || m.key}`,
+          label: m.key || m.title || "Insight",
           hint: (m.content || "").slice(0, 50),
-          section: "Memories",
-          action: () => go(`/memories`),
+          section: "Insights",
+          action: () => go(`/insights`),
         }));
 
-        setItems([...navItems, ...companyItems, ...agentItems, ...taskItems, ...memoryItems]);
+        setItems([...navItems, ...agentItems, ...questItems, ...insightItems]);
       } catch {
         setItems(navItems);
       }

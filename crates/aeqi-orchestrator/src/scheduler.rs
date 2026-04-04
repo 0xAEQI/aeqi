@@ -32,7 +32,7 @@ use crate::metrics::AEQIMetrics;
 use crate::middleware::{
     ClarificationMiddleware, ContextBudgetMiddleware, ContextCompressionMiddleware,
     CostTrackingMiddleware, GraphGuardrailsMiddleware, GuardrailsMiddleware,
-    LoopDetectionMiddleware, MemoryRefreshMiddleware, MiddlewareChain, SafetyNetMiddleware,
+    LoopDetectionMiddleware, InsightRefreshMiddleware, MiddlewareChain, SafetyNetMiddleware,
 };
 use crate::session_store::SessionStore;
 use crate::trigger::TriggerStore;
@@ -550,7 +550,7 @@ impl Scheduler {
             )),
             Box::new(GuardrailsMiddleware::with_defaults()),
             Box::new(ContextCompressionMiddleware::new()),
-            Box::new(MemoryRefreshMiddleware::new()),
+            Box::new(InsightRefreshMiddleware::new()),
             Box::new(ClarificationMiddleware::new()),
             Box::new(SafetyNetMiddleware::new()),
         ]);

@@ -6,7 +6,7 @@ export function useDaemonSocket() {
   const token = useAuthStore((s) => s.token);
   const pushWorkerEvent = useDaemonStore((s) => s.pushWorkerEvent);
   const setWsConnected = useDaemonStore((s) => s.setWsConnected);
-  const fetchTasks = useDaemonStore((s) => s.fetchTasks);
+  const fetchQuests = useDaemonStore((s) => s.fetchQuests);
   const fetchAgents = useDaemonStore((s) => s.fetchAgents);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -31,7 +31,7 @@ export function useDaemonSocket() {
             pushWorkerEvent(msg.data);
           }
           if (msg.event === "task_update") {
-            fetchTasks();
+            fetchQuests();
           }
           if (msg.event === "agent_update") {
             fetchAgents();
@@ -57,5 +57,5 @@ export function useDaemonSocket() {
       wsRef.current?.close();
       setWsConnected(false);
     };
-  }, [token, pushWorkerEvent, setWsConnected, fetchTasks, fetchAgents]);
+  }, [token, pushWorkerEvent, setWsConnected, fetchQuests, fetchAgents]);
 }

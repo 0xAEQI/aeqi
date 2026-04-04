@@ -23,32 +23,33 @@ function formatUsd(n: number): string {
 
 export default function DashboardPage() {
   const status = useDaemonStore((s) => s.status);
-  const tasks = useDaemonStore((s) => s.tasks);
+  const quests = useDaemonStore((s) => s.quests);
   const agents = useDaemonStore((s) => s.agents);
   const cost = useDaemonStore((s) => s.cost);
-  const audit = useDaemonStore((s) => s.audit);
+  const events = useDaemonStore((s) => s.events);
   const fetchAll = useDaemonStore((s) => s.fetchAll);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  const pendingTasks = tasks.filter((t: any) => t.status === "pending");
-  const activeTasks = tasks.filter((t: any) => t.status === "in_progress");
-  const blockedTasks = tasks.filter((t: any) => t.status === "blocked");
-  const doneTasks = tasks
-    .filter((t: any) => t.status === "done")
+  const pendingQuests = quests.filter((q: any) => q.status === "pending");
+  const activeQuests = quests.filter((q: any) => q.status === "in_progress");
+  const blockedQuests = quests.filter((q: any) => q.status === "blocked");
+  const doneQuests = quests
+    .filter((q: any) => q.status === "done")
     .sort((a: any, b: any) =>
       new Date(b.updated_at || b.created_at).getTime() -
       new Date(a.updated_at || a.created_at).getTime()
     )
     .slice(0, 5);
-  const activeWorkers = status?.active_workers ?? activeTasks.length;
+  const activeWorkers = status?.active_workers ?? activeQuests.length;
   const spent = cost?.spent_today_usd ?? 0;
   const budget = cost?.daily_budget_usd ?? 10;
   const remaining = Math.max(0, budget - spent);
   const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
-
-  const rawPerProject = cost?.per_project;
-  const perProject = Array.isArray(rawPerProject) ? rawPerProject : [];
+  const activeAgentCount = agents.filter((a: any) => {
+    const s = (a.status || "").toLowerCase();
+    return s === "active" || s === "working" || s === "running";
+  }).length;
 
   return (
     <div className="page-content">
@@ -61,24 +62,22 @@ export default function DashboardPage() {
           <div className="dash-hero-label">Active Workers</div>
         </div>
         <div className="dash-hero-stat">
-          <div className="dash-hero-value">{pendingTasks.length}</div>
-          <div className="dash-hero-label">Pending Tasks</div>
+          <div className="dash-hero-value">{activeAgentCount}</div>
+          <div className="dash-hero-label">Agents Online</div>
         </div>
         <div className="dash-hero-stat">
-          <div className={`dash-hero-value${blockedTasks.length > 0 ? " dash-hero-value-warning" : ""}`}>
-            {blockedTasks.length}
+          <div className="dash-hero-value">{pendingQuests.length}</div>
+          <div className="dash-hero-label">Pending Quests</div>
+        </div>
+        <div className="dash-hero-stat">
+          <div className={`dash-hero-value${blockedQuests.length > 0 ? " dash-hero-value-warning" : ""}`}>
+            {blockedQuests.length}
           </div>
           <div className="dash-hero-label">Blocked</div>
         </div>
         <div className="dash-hero-stat">
           <div className="dash-hero-value">{formatUsd(spent)}</div>
           <div className="dash-hero-label">Daily Cost</div>
-        </div>
-        <div className="dash-hero-stat">
-          <div className={`dash-hero-value${remaining > 0 ? " dash-hero-value-success" : " dash-hero-value-error"}`}>
-            {formatUsd(remaining)}
-          </div>
-          <div className="dash-hero-label">Budget Remaining</div>
         </div>
       </div>
 
@@ -101,22 +100,22 @@ export default function DashboardPage() {
           {/* Active Work panel */}
           <div className="dash-panel">
             <div className="dash-panel-header">
-              <span className="dash-panel-title">Active Work</span>
+              <span className="dash-panel-title">Active Quests</span>
             </div>
-            {activeTasks.length === 0 ? (
-              <div className="dash-panel-empty">No active tasks</div>
+            {activeQuests.length === 0 ? (
+              <div className="dash-panel-empty">No active quests</div>
             ) : (
-              activeTasks.map((t: any) => {
-                const phase = runtimeLabel(t.runtime);
+              activeQuests.map((q: any) => {
+                const phase = runtimeLabel(q.runtime);
                 return (
-                  <div key={t.id} className="dash-active-row">
+                  <div key={q.id} className="dash-active-row">
                     <span className="dash-active-agent">
-                      {t.assignee || t.agent || "—"}
+                      {q.assignee || q.agent || "\u2014"}
                     </span>
-                    <span className="dash-active-subject">{t.subject}</span>
+                    <span className="dash-active-subject">{q.subject}</span>
                     {phase && <span className="dash-active-phase">{phase}</span>}
                     <span className="dash-done-time">
-                      {timeAgo(t.started_at || t.updated_at || t.created_at)}
+                      {timeAgo(q.started_at || q.updated_at || q.created_at)}
                     </span>
                   </div>
                 );
@@ -129,16 +128,16 @@ export default function DashboardPage() {
             <div className="dash-panel-header">
               <span className="dash-panel-title">Blocked</span>
             </div>
-            {blockedTasks.length === 0 ? (
+            {blockedQuests.length === 0 ? (
               <div className="dash-panel-empty">Nothing blocked</div>
             ) : (
-              blockedTasks.map((t: any) => (
-                <div key={t.id} className="dash-blocked-row">
+              blockedQuests.map((q: any) => (
+                <div key={q.id} className="dash-blocked-row">
                   <span className="dash-blocked-subject">
-                    {t.id} — {t.subject}
+                    {q.id} — {q.subject}
                   </span>
-                  {t.blocked_reason && (
-                    <span className="dash-blocked-reason">{t.blocked_reason}</span>
+                  {q.blocked_reason && (
+                    <span className="dash-blocked-reason">{q.blocked_reason}</span>
                   )}
                 </div>
               ))
@@ -150,14 +149,14 @@ export default function DashboardPage() {
             <div className="dash-panel-header">
               <span className="dash-panel-title">Recently Completed</span>
             </div>
-            {doneTasks.length === 0 ? (
-              <div className="dash-panel-empty">No completed tasks</div>
+            {doneQuests.length === 0 ? (
+              <div className="dash-panel-empty">No completed quests</div>
             ) : (
-              doneTasks.map((t: any) => (
-                <div key={t.id} className="dash-done-row">
-                  <span className="dash-done-subject">{t.subject}</span>
+              doneQuests.map((q: any) => (
+                <div key={q.id} className="dash-done-row">
+                  <span className="dash-done-subject">{q.subject}</span>
                   <span className="dash-done-time">
-                    {timeAgo(t.updated_at || t.created_at)}
+                    {timeAgo(q.updated_at || q.created_at)}
                   </span>
                 </div>
               ))
@@ -166,41 +165,24 @@ export default function DashboardPage() {
         </div>
 
         <div className="dash-col">
-          {/* Cost breakdown */}
-          <div className="dash-panel">
-            <div className="dash-panel-header">
-              <span className="dash-panel-title">Cost by Company</span>
-            </div>
-            {perProject.length === 0 ? (
-              <div className="dash-panel-empty">No cost data</div>
-            ) : (
-              perProject.map((p: any) => (
-                <div key={p.name || p.company} className="dash-cost-row">
-                  <span className="dash-cost-company">{p.name || p.company}</span>
-                  <span className="dash-cost-amount">{formatUsd(p.spent ?? p.cost ?? 0)}</span>
-                </div>
-              ))
-            )}
-          </div>
-
           {/* Activity Feed */}
           <div className="dash-panel">
             <div className="dash-panel-header">
               <span className="dash-panel-title">Activity</span>
             </div>
-            {audit.length === 0 ? (
+            {events.length === 0 ? (
               <div className="dash-panel-empty">No recent activity</div>
             ) : (
-              audit.slice(0, 15).map((e: any, i: number) => (
+              events.slice(0, 15).map((e: any, i: number) => (
                 <div key={e.id || i} className="dash-audit-row">
                   <span className="dash-audit-time">
                     {timeAgo(e.timestamp || e.created_at)}
                   </span>
                   <span className="dash-audit-agent">
-                    {e.agent || e.actor || "—"}
+                    {e.agent || e.actor || "\u2014"}
                   </span>
                   <span className="dash-audit-summary">
-                    {e.summary || e.reasoning || e.description || e.decision_type || "—"}
+                    {e.summary || e.reasoning || e.description || e.decision_type || "\u2014"}
                   </span>
                 </div>
               ))

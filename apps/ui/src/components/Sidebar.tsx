@@ -2,8 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useChatStore } from "@/store/chat";
 import { useDaemonStore } from "@/store/daemon";
-import CompanyPatternIcon from "./CompanyPatternIcon";
-import type { AgentRef, PersistentAgent, Department } from "@/lib/types";
+import type { Agent, AgentRef } from "@/lib/types";
 
 function Chevron({ expanded }: { expanded: boolean }) {
   return (
@@ -29,217 +28,176 @@ function Chevron({ expanded }: { expanded: boolean }) {
   );
 }
 
-interface DeptNode {
-  dept: Department;
-  agents: PersistentAgent[];
-  children: DeptNode[];
+interface AgentNode {
+  id: string;
+  name: string;
+  display_name?: string;
+  status: string;
+  model?: string;
+  children: AgentNode[];
 }
 
-function buildTree(
-  departments: Department[],
-  agents: PersistentAgent[],
-  parentId: string | null
-): DeptNode[] {
-  return departments
-    .filter((d) => (d.parent_id || null) === parentId)
-    .map((dept) => ({
-      dept,
-      agents: agents.filter((a) => a.department_id === dept.id),
-      children: buildTree(departments, agents, dept.id),
-    }))
-    .filter((n) => n.agents.length > 0 || n.children.length > 0);
-}
+function buildAgentTree(agents: Agent[]): AgentNode[] {
+  const byId = new Map<string, Agent>();
+  for (const a of agents) byId.set(a.id, a);
 
-function countAgents(nodes: DeptNode[]): number {
-  let count = 0;
-  for (const n of nodes) {
-    count += n.agents.length;
-    count += countAgents(n.children);
+  const childrenMap = new Map<string, Agent[]>();
+  const roots: Agent[] = [];
+
+  for (const a of agents) {
+    if (a.parent_id && byId.has(a.parent_id)) {
+      const existing = childrenMap.get(a.parent_id) || [];
+      existing.push(a);
+      childrenMap.set(a.parent_id, existing);
+    } else {
+      roots.push(a);
+    }
   }
-  return count;
+
+  function toNode(agent: Agent): AgentNode {
+    const kids = childrenMap.get(agent.id) || [];
+    return {
+      id: agent.id,
+      name: agent.name,
+      display_name: agent.display_name,
+      status: agent.status,
+      model: agent.model,
+      children: kids.map(toNode),
+    };
+  }
+
+  return roots.map(toNode);
 }
 
-function DeptGroupView({
+function statusColor(status: string): string {
+  const s = status.toLowerCase();
+  if (s === "active" || s === "working" || s === "running") return "var(--success)";
+  if (s === "paused" || s === "idle") return "var(--text-muted)";
+  if (s === "error" || s === "failed") return "var(--error)";
+  return "var(--text-muted)";
+}
+
+function AgentNodeView({
   node,
   depth,
   selectedAgent,
   collapsed,
   onSelectAgent,
-  onSelectDept,
   onToggle,
 }: {
-  node: DeptNode;
+  node: AgentNode;
   depth: number;
   selectedAgent: AgentRef | null;
   collapsed: Record<string, boolean>;
   onSelectAgent: (agent: AgentRef) => void;
-  onSelectDept: (id: string, name: string) => void;
   onToggle: (id: string, e: React.MouseEvent) => void;
 }) {
-  const isCollapsed = collapsed[node.dept.id] ?? false;
-  const isDeptActive = selectedAgent?.id === `dept:${node.dept.id}`;
-  const totalAgents = node.agents.length + countAgents(node.children);
+  const isActive = selectedAgent?.id === node.id;
+  const hasChildren = node.children.length > 0;
+  const isCollapsed = collapsed[node.id] ?? false;
+  const label = node.display_name || node.name;
 
   return (
-    <div className="dept-group">
+    <div className="agent-tree-node">
       <div
-        className={`dept-name${isDeptActive ? " active" : ""}`}
-        onClick={() => onSelectDept(node.dept.id, node.dept.name)}
+        className={`agent-row${isActive ? " active" : ""}`}
+        style={{ paddingLeft: `${8 + depth * 12}px` }}
+        onClick={() =>
+          onSelectAgent({
+            id: node.id,
+            name: node.name,
+            display_name: node.display_name,
+            model: node.model,
+          })
+        }
       >
-        <span className="dept-chevron" onClick={(e) => onToggle(node.dept.id, e)}>
-          <Chevron expanded={!isCollapsed} />
-        </span>
-        <span className="dept-name-label">{node.dept.name}</span>
-        <span className="dept-count">{totalAgents}</span>
+        {hasChildren ? (
+          <span
+            className="agent-tree-toggle"
+            onClick={(e) => onToggle(node.id, e)}
+          >
+            <Chevron expanded={!isCollapsed} />
+          </span>
+        ) : (
+          <span className="agent-tree-spacer" />
+        )}
+        <span
+          className="agent-dot"
+          style={{ background: statusColor(node.status) }}
+        />
+        <span className="agent-row-label">{label}</span>
       </div>
-      {!isCollapsed && (
-        <>
-          {node.agents.map((agent) => {
-            const label = agent.display_name || agent.name;
-            return (
-              <div
-                key={agent.id}
-                className={`agent-row dept-agent${selectedAgent?.id === agent.id ? " active" : ""}`}
-                onClick={() => onSelectAgent({ id: agent.id, name: agent.name, display_name: agent.display_name, project: agent.project, model: agent.model })}
-              >
-                <span className="agent-dot" />
-                {label}
-              </div>
-            );
-          })}
+      {hasChildren && !isCollapsed && (
+        <div className="agent-tree-children">
           {node.children.map((child) => (
-            <DeptGroupView
-              key={child.dept.id}
+            <AgentNodeView
+              key={child.id}
               node={child}
               depth={depth + 1}
               selectedAgent={selectedAgent}
               collapsed={collapsed}
               onSelectAgent={onSelectAgent}
-              onSelectDept={onSelectDept}
               onToggle={onToggle}
             />
           ))}
-        </>
+        </div>
       )}
     </div>
   );
 }
 
-export default function AgentNav() {
+export default function AgentTree() {
   const navigate = useNavigate();
-  const channel = useChatStore((s) => s.channel);
   const selectedAgent = useChatStore((s) => s.selectedAgent);
   const setSelectedAgent = useChatStore((s) => s.setSelectedAgent);
   const allAgents = useDaemonStore((s) => s.agents);
-  const allDepartments = useDaemonStore((s) => s.departments);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  const filtered = channel
-    ? allAgents.filter((a) => (a.status === "Active" || a.status === "active") && (a.project === channel || !a.project))
-    : allAgents.filter((a) => (a.status === "Active" || a.status === "active") && !a.project);
+  const tree = buildAgentTree(allAgents);
 
-  const filteredDepts = allDepartments.filter((d) => !channel || d.project === channel);
-  const tree = buildTree(filteredDepts, filtered, null);
-
-  // Root agents: not in any department
-  const allDeptAgentIds = new Set<string>();
-  const collectIds = (nodes: DeptNode[]) => {
-    for (const n of nodes) {
-      n.agents.forEach((a) => allDeptAgentIds.add(a.id));
-      collectIds(n.children);
-    }
-  };
-  collectIds(tree);
-  const rootAgents = filtered.filter((a) => !allDeptAgentIds.has(a.id));
-
-  const companyName = channel || "AEQI";
-  const isCompanyCollapsed = collapsed["__company__"] ?? false;
-  const isCompanyActive = !selectedAgent;
-  const totalAgentCount = filtered.length;
-
-  const toggleDept = (id: string, e: React.MouseEvent) => {
+  const toggleNode = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setCollapsed((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const toggleCompany = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setCollapsed((prev) => ({ ...prev, __company__: !prev.__company__ }));
-  };
-
-  const currentPath = () => {
-    const p = window.location.pathname;
-    return p === "/login" ? "/" : p;
-  };
-
   const handleSelectAgent = (agent: AgentRef) => {
     setSelectedAgent(agent);
-    navigate(`${currentPath()}?agent=${encodeURIComponent(agent.name)}`);
+    navigate(`/agents/${encodeURIComponent(agent.name)}`);
   };
 
-  const handleSelectDept = (id: string, name: string) => {
-    setSelectedAgent({ id: `dept:${id}`, name });
-    navigate(`${currentPath()}?dept=${encodeURIComponent(name)}`);
-  };
-
-  const handleSelectCompany = () => {
+  const handleClearSelection = () => {
     setSelectedAgent(null);
     navigate("/");
   };
 
   return (
-    <nav className="agent-nav">
-      <div className="agent-nav-panel">
-        {/* Company as root group */}
-        <div className="company-root-group">
-          <div
-            className={`company-root-header${isCompanyActive ? " active" : ""}`}
-            onClick={handleSelectCompany}
-          >
-            <span className="company-root-toggle" onClick={toggleCompany}>
-              <Chevron expanded={!isCompanyCollapsed} />
-            </span>
-            <CompanyPatternIcon name={companyName} selected={isCompanyActive} />
-            <span className="company-root-name">{companyName}</span>
-            <span className="dept-count">{totalAgentCount}</span>
-          </div>
-
-          {!isCompanyCollapsed && (
-            <div className="company-root-body">
-              {/* Department groups */}
-              {tree.map((node) => (
-                <DeptGroupView
-                  key={node.dept.id}
-                  node={node}
-                  depth={0}
-                  selectedAgent={selectedAgent}
-                  collapsed={collapsed}
-                  onSelectAgent={handleSelectAgent}
-                  onSelectDept={handleSelectDept}
-                  onToggle={toggleDept}
-                />
-              ))}
-
-              {/* Root agents (no department) */}
-              {rootAgents.map((agent) => {
-                const label = agent.display_name || agent.name;
-                return (
-                  <div
-                    key={agent.id}
-                    className={`agent-row${selectedAgent?.id === agent.id ? " active" : ""}`}
-                    onClick={() => handleSelectAgent({ id: agent.id, name: agent.name, display_name: agent.display_name, project: agent.project, model: agent.model })}
-                  >
-                    <span className="agent-dot" />
-                    {label}
-                  </div>
-                );
-              })}
-
-              {/* Add agent button */}
-              <div className="agent-nav-panel-add" onClick={() => navigate("/agents")}>+</div>
-            </div>
-          )}
+    <nav className="agent-tree">
+      <div className="agent-tree-list">
+        {/* "All" root item */}
+        <div
+          className={`agent-row agent-row-root${!selectedAgent ? " active" : ""}`}
+          onClick={handleClearSelection}
+        >
+          <span className="agent-row-label">All Agents</span>
+          <span className="agent-tree-count">{allAgents.length}</span>
         </div>
+
+        {/* Agent tree */}
+        {tree.map((node) => (
+          <AgentNodeView
+            key={node.id}
+            node={node}
+            depth={0}
+            selectedAgent={selectedAgent}
+            collapsed={collapsed}
+            onSelectAgent={handleSelectAgent}
+            onToggle={toggleNode}
+          />
+        ))}
+
+        {allAgents.length === 0 && (
+          <div className="agent-tree-empty">No agents registered</div>
+        )}
       </div>
     </nav>
   );

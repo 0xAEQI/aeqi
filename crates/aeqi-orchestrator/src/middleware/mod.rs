@@ -15,7 +15,7 @@ pub mod cost_tracking;
 pub mod graph_guardrails;
 pub mod guardrails;
 pub mod loop_detection;
-pub mod memory_refresh;
+pub mod insight_refresh;
 pub mod safety_net;
 
 pub use clarification::ClarificationMiddleware;
@@ -25,7 +25,7 @@ pub use cost_tracking::CostTrackingMiddleware;
 pub use graph_guardrails::GraphGuardrailsMiddleware;
 pub use guardrails::GuardrailsMiddleware;
 pub use loop_detection::LoopDetectionMiddleware;
-pub use memory_refresh::MemoryRefreshMiddleware;
+pub use insight_refresh::InsightRefreshMiddleware;
 pub use safety_net::SafetyNetMiddleware;
 
 use async_trait::async_trait;
@@ -53,8 +53,8 @@ pub const ORDER_GUARDRAILS: u32 = 200;
 pub const ORDER_LOOP_DETECTION: u32 = 500;
 /// Cost tracking: enforce per-task budget ceilings.
 pub const ORDER_COST_TRACKING: u32 = 600;
-/// Memory refresh: periodic memory re-search during long executions.
-pub const ORDER_MEMORY_REFRESH: u32 = 700;
+/// Insight refresh: periodic insight re-search during long executions.
+pub const ORDER_INSIGHT_REFRESH: u32 = 700;
 /// Safety net: preserve partial work on failure (runs late).
 pub const ORDER_SAFETY_NET: u32 = 900;
 

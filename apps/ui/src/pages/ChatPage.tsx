@@ -385,14 +385,15 @@ function ScrollAnchor({ show, onClick }: { show: boolean; onClick: () => void })
 }
 
 export default function ChatPage() {
-  const channel = useChatStore((s) => s.channel);
-  const thread = useChatStore((s) => s.threads[channel || "__global__"]);
+  const selectedAgent = useChatStore((s) => s.selectedAgent);
+  const agentId = selectedAgent?.id || null;
+  const thread = useChatStore((s) => s.threads[agentId || "__global__"]);
   const getOrCreateThread = useChatStore((s) => s.getOrCreateThread);
   const updateThread = useChatStore((s) => s.updateThread);
 
   // Daemon state for context bar
   const dashboard = useDaemonStore((s) => s.dashboard);
-  const tasks = useDaemonStore((s) => s.tasks);
+  const quests = useDaemonStore((s) => s.quests);
   const wsConnected = useDaemonStore((s) => s.wsConnected);
 
   const [timelineEvents, setTimelineEvents] = useState<ThreadEvent[]>([]);
@@ -417,16 +418,16 @@ export default function ChatPage() {
   const isAtBottom = useRef(true);
   const refreshInFlight = useRef(false);
 
-  const scope = parseChannelScope(channel);
+  const scope = parseChannelScope(selectedAgent?.name || null);
 
   // Compute live stats for context bar
   const liveStats = useMemo(() => {
-    const blockedCount = tasks.filter((t: any) => t.status === "blocked").length;
-    const activeCount = tasks.filter((t: any) => t.status === "in_progress").length;
-    const pendingCount = tasks.filter((t: any) => t.status === "pending").length;
+    const blockedCount = quests.filter((t: any) => t.status === "blocked").length;
+    const activeCount = quests.filter((t: any) => t.status === "in_progress").length;
+    const pendingCount = quests.filter((t: any) => t.status === "pending").length;
     const todayCost = dashboard?.cost_today_usd ?? dashboard?.total_cost_usd ?? 0;
     return { blockedCount, activeCount, pendingCount, todayCost };
-  }, [tasks, dashboard]);
+  }, [quests, dashboard]);
 
   // Compute smart suggestions based on current state
   const suggestions = useMemo(() => {
@@ -462,13 +463,13 @@ export default function ChatPage() {
     : [];
 
   useEffect(() => {
-    getOrCreateThread(channel);
-  }, [channel, getOrCreateThread]);
+    getOrCreateThread(agentId);
+  }, [agentId, getOrCreateThread]);
 
   useEffect(() => {
     setPendingMessages([]);
     setError(null);
-  }, [channel]);
+  }, [agentId]);
 
   const refreshTimeline = useCallback(async (silent = false) => {
     if (!thread || refreshInFlight.current) return;
@@ -485,7 +486,7 @@ export default function ChatPage() {
       });
 
       if (typeof response.chat_id === "number" && response.chat_id !== thread.chatId) {
-        updateThread(channel, { chatId: response.chat_id });
+        updateThread(agentId, { chatId: response.chat_id });
       }
 
       setTimelineEvents(Array.isArray(response.events) ? response.events : []);
@@ -499,7 +500,7 @@ export default function ChatPage() {
       refreshInFlight.current = false;
       setLoadingTimeline(false);
     }
-  }, [channel, thread, updateThread]);
+  }, [agentId, thread, updateThread]);
 
   useEffect(() => {
     if (!thread) return;
@@ -610,7 +611,7 @@ export default function ChatPage() {
       );
 
       if (typeof response.chat_id === "number" && response.chat_id !== thread.chatId) {
-        updateThread(channel, { chatId: response.chat_id });
+        updateThread(agentId, { chatId: response.chat_id });
       }
 
       await refreshTimeline(true);
@@ -690,7 +691,7 @@ export default function ChatPage() {
   const activeWorkerEvents = (() => {
     const byTask = new Map<string, WorkerEvent>();
     for (const event of workerEvents) {
-      if (scope.company && event.company && event.company !== scope.company) continue;
+      if (selectedAgent && event.agent && event.agent !== selectedAgent.name) continue;
       if (event.task_id && (event.event_type === "QuestStarted" || event.event_type === "Progress")) {
         const existing = byTask.get(event.task_id);
         byTask.set(event.task_id, {
@@ -839,11 +840,11 @@ export default function ChatPage() {
         )}
 
         <div className={`c-composer-inner ${loading ? "c-composer-busy" : ""}`}>
-          {channel && <span className="c-composer-ctx">#{channel.split("/").pop()}</span>}
+          {selectedAgent && <span className="c-composer-ctx">{selectedAgent.display_name || selectedAgent.name}</span>}
           <textarea
             ref={inputRef}
             className="c-textarea"
-            placeholder={channel ? `Message #${channel.split("/").pop()}...` : "What needs to happen?"}
+            placeholder={selectedAgent ? `Message ${selectedAgent.display_name || selectedAgent.name}...` : "What needs to happen?"}
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
