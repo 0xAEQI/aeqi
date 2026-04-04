@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import { useState } from "react";
 
 const primitives = [
   { text: "agent", color: "#c0392b", direction: 1 },
@@ -6,6 +7,40 @@ const primitives = [
   { text: "quest", color: "#c0392b", direction: 1 },
   { text: "insight", color: "#c0392b", direction: -1 },
 ];
+
+function InstallCommand() {
+  const [copied, setCopied] = useState(false);
+
+  const copy = () => {
+    navigator.clipboard.writeText("cargo install aeqi");
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <motion.div
+      className="mt-12 relative z-10"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.8, delay: 1.3, ease: "easeOut" }}
+    >
+      <button
+        onClick={copy}
+        className="group flex items-center gap-3 text-[13px] tracking-wide cursor-pointer transition-colors"
+      >
+        <code className="text-white/25 group-hover:text-white/40 transition-colors">
+          <span className="text-white/15 select-none">$ </span>cargo install aeqi
+        </code>
+        <span
+          className="text-[11px] transition-all duration-300"
+          style={{ color: copied ? "#c0392b" : "rgba(255,255,255,0.15)" }}
+        >
+          {copied ? "copied" : "copy"}
+        </span>
+      </button>
+    </motion.div>
+  );
+}
 
 export function Hero() {
   return (
@@ -73,20 +108,7 @@ export function Hero() {
       </motion.p>
 
       {/* Install command */}
-      <motion.div
-        className="mt-12 relative z-10"
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8, delay: 1.3, ease: "easeOut" }}
-      >
-        <code
-          className="text-[13px] text-white/25 tracking-wide cursor-pointer hover:text-white/40 transition-colors"
-          onClick={() => { navigator.clipboard.writeText("cargo install aeqi"); }}
-          title="click to copy"
-        >
-          <span className="text-white/15 select-none">$ </span>cargo install aeqi
-        </code>
-      </motion.div>
+      <InstallCommand />
 
       {/* Scroll indicator */}
       <motion.div
