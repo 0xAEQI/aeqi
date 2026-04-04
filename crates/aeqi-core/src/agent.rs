@@ -563,6 +563,7 @@ const SYNTHETIC_TOOL_RESULT: &str = "[Tool result unavailable — context was co
 ///
 /// - **after_turn hook**: Enables AEQI's verification pipeline to validate the
 ///   agent's work before accepting a "done" signal.
+///
 /// A turn-level prompt that is re-read from disk before each API call.
 #[derive(Debug, Clone)]
 pub struct TurnPromptSpec {
