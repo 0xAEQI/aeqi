@@ -36,6 +36,29 @@ function GitHubStars() {
   );
 }
 
+function ToriiGate() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      className="w-[20px] h-[20px]"
+      stroke="#c0392b"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* Top beam — the kasagi */}
+      <path d="M2 6 C2 4.5, 12 3, 12 3 C12 3, 22 4.5, 22 6" />
+      {/* Second beam — the nuki */}
+      <line x1="4" y1="9" x2="20" y2="9" />
+      {/* Left pillar */}
+      <line x1="6" y1="6" x2="6" y2="22" />
+      {/* Right pillar */}
+      <line x1="18" y1="6" x2="18" y2="22" />
+    </svg>
+  );
+}
+
 function Nav() {
   return (
     <motion.nav
@@ -50,9 +73,12 @@ function Nav() {
       >
         <a
           href="/"
-          className="text-[16px] font-bold tracking-[0.06em] text-white hover:text-white/80 transition-colors"
+          className="flex items-center gap-2 hover:opacity-80 transition-opacity"
         >
-          &#xC6;QI
+          <ToriiGate />
+          <span className="text-[14px] font-bold tracking-[0.06em] text-white">
+            &#xC6;QI
+          </span>
         </a>
         <div className="w-px h-3.5 bg-white/[0.08]" />
         <GitHubStars />
@@ -81,24 +107,24 @@ function Backdrop() {
         className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat"
         style={{
           backgroundImage: "url('/bg.jpg')",
-          filter: "blur(16px) saturate(0.3) brightness(0.35)",
-          transform: "scale(1.05)",
+          filter: "blur(8px) saturate(0.4) brightness(0.45)",
+          transform: "scale(1.03)",
         }}
       />
       <div
         className="fixed inset-0 z-0"
-        style={{ background: "rgba(6, 6, 18, 0.5)", mixBlendMode: "multiply" }}
+        style={{ background: "rgba(6, 6, 18, 0.35)", mixBlendMode: "multiply" }}
       />
       <div
         className="fixed inset-0 z-0"
         style={{
-          background: "radial-gradient(ellipse 65% 55% at 50% 45%, transparent 0%, rgba(6,6,18,0.8) 100%)",
+          background: "radial-gradient(ellipse 70% 60% at 50% 45%, transparent 0%, rgba(6,6,18,0.7) 100%)",
         }}
       />
       <div
         className="fixed inset-0 z-0"
         style={{
-          background: "linear-gradient(to bottom, rgba(6,6,18,0.9) 0%, transparent 20%)",
+          background: "linear-gradient(to bottom, rgba(6,6,18,0.7) 0%, transparent 25%)",
         }}
       />
     </>
