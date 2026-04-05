@@ -409,8 +409,8 @@
   font-weight: 500;
 }
 .pm-item-accent:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); }
-.pm-item-danger { color: var(--error); }
-.pm-item-danger:hover { background: color-mix(in srgb, var(--error) 8%, transparent); color: var(--error); }
+.pm-item-muted { color: var(--text-muted); }
+.pm-item-muted:hover { color: var(--text-secondary); }
 
 /* Keep old .sidebar-profile for compat but hide */
 .sidebar-profile {
