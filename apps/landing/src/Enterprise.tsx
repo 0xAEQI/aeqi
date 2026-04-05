@@ -81,7 +81,7 @@ function Pricing() {
               </div>
               <div className="flex items-center gap-2.5">
                 <span className="text-black/15">+</span>
-                <span>Unlimited agents</span>
+                <span>Up to 10 agents</span>
               </div>
               <div className="flex items-center gap-2.5">
                 <span className="text-black/15">+</span>
@@ -118,8 +118,12 @@ function Pricing() {
               <span className="text-[36px] font-semibold tracking-tight text-black/80">$100</span>
               <span className="text-[15px] text-black/30 ml-1">/mo</span>
             </div>
-            <p className="text-[13px] text-black/25 mb-8">Run a portfolio. See everything.</p>
+            <p className="text-[13px] text-black/25 mb-8">Run a portfolio. No limits.</p>
             <div className="space-y-3.5 text-[14px] text-black/45 mb-10">
+              <div className="flex items-center gap-2.5">
+                <span className="text-black/15">+</span>
+                <span>Everything in Starter</span>
+              </div>
               <div className="flex items-center gap-2.5">
                 <span className="text-black/15">+</span>
                 <span>Unlimited companies</span>
@@ -134,15 +138,7 @@ function Pricing() {
               </div>
               <div className="flex items-center gap-2.5">
                 <span className="text-black/15">+</span>
-                <span>Portfolio dashboard</span>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <span className="text-black/15">+</span>
                 <span>Priority support</span>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <span className="text-black/15">+</span>
-                <span>Everything in Starter</span>
               </div>
             </div>
             <a
