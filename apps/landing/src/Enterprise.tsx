@@ -27,9 +27,6 @@ function Nav() {
           aeqi
         </a>
         <div className="flex items-center gap-1">
-          <a href="/economy" className="text-[13px] text-black/40 hover:text-black/70 hover:bg-black/[0.04] rounded-lg px-3 py-1.5 transition-all">
-            Economy
-          </a>
           <a href="/pricing" className="text-[13px] text-black/70 font-medium hover:bg-black/[0.04] rounded-lg px-3 py-1.5 transition-all">
             Pricing
           </a>
