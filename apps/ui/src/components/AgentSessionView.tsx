@@ -1432,6 +1432,15 @@ export default function AgentSessionView({
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
+            onDrop={(e) => {
+              if (e.dataTransfer.files.length > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                dragCounter.current = 0;
+                setDragOver(false);
+                readFiles(e.dataTransfer.files);
+              }
+            }}
             disabled={streaming}
             rows={1}
           />
