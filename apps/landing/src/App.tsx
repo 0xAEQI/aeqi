@@ -8,6 +8,13 @@ const fade = (delay = 0) => ({
   transition: { duration: 0.5, ease: "easeOut" as const, delay },
 });
 
+const fadeView = (delay = 0) => ({
+  initial: { opacity: 0, y: 12 } as const,
+  whileInView: { opacity: 1, y: 0 } as const,
+  viewport: { once: true, margin: "-60px" } as const,
+  transition: { duration: 0.5, ease: "easeOut" as const, delay },
+});
+
 /* ─── Nav ─── */
 function Nav() {
   return (
@@ -56,7 +63,7 @@ function Hero() {
 
   return (
     <section className="flex-1 flex items-center justify-center px-6">
-      <div className="max-w-3xl mx-auto text-center">
+      <div className="max-w-3xl mx-auto text-center py-32">
         <motion.div {...fade(0.1)}>
           <span className="text-[120px] md:text-[180px] font-bold tracking-tighter leading-none text-black select-none">
             æ
@@ -89,35 +96,21 @@ function Hero() {
   );
 }
 
-
-/* ─── Scroll fade helper ─── */
-const fadeView = (delay = 0) => ({
-  initial: { opacity: 0, y: 12 } as const,
-  whileInView: { opacity: 1, y: 0 } as const,
-  viewport: { once: true, margin: "-60px" } as const,
-  transition: { duration: 0.5, ease: "easeOut" as const, delay },
-});
-
 /* ─── Marquee ─── */
-const marqueeWords = [
-  { text: "agent", bold: "a" },
-  { text: "event", bold: "e" },
-  { text: "quest", bold: "q" },
-  { text: "insight", bold: "i" },
-];
+const marqueeWords = ["agent", "event", "quest", "insight"];
 
 function Marquee() {
-  const items = [...marqueeWords, ...marqueeWords, ...marqueeWords, ...marqueeWords];
+  const items = [...marqueeWords, ...marqueeWords, ...marqueeWords, ...marqueeWords, ...marqueeWords, ...marqueeWords];
 
   return (
-    <div className="overflow-hidden py-16 select-none">
+    <div className="overflow-hidden select-none">
       <div className="animate-marquee flex items-center whitespace-nowrap">
         {items.map((w, i) => (
           <span key={i} className="flex items-center">
-            <span className="text-[48px] md:text-[72px] font-bold tracking-tighter text-black/[0.06]">
-              <span className="text-black/60">{w.bold}</span>{w.text.slice(w.bold.length)}
+            <span className="text-[56px] md:text-[80px] font-bold tracking-tighter text-black/[0.04]">
+              <span className="text-black/[0.12]">{w[0]}</span>{w.slice(1)}
             </span>
-            <span className="mx-6 md:mx-10 text-[36px] text-black/[0.08]">&middot;</span>
+            <span className="mx-8 md:mx-12 text-[40px] text-black/[0.06]">&middot;</span>
           </span>
         ))}
       </div>
@@ -128,59 +121,46 @@ function Marquee() {
 /* ─── Footer ─── */
 function Footer() {
   return (
-    <footer className="bg-black/[0.02] flex flex-col">
-      {/* Links + brand */}
-      <div className="border-t border-black/5">
-        <div className="max-w-5xl mx-auto px-6 py-12">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            <motion.div {...fadeView(0.05)}>
-              <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Product</p>
-              <div className="space-y-2.5 text-[13px]">
-                <a href="https://app.aeqi.ai" className="block text-black/40 hover:text-black transition-colors">Get Started</a>
-                <a href="https://aeqi.ai/enterprise" className="block text-black/40 hover:text-black transition-colors">Enterprise</a>
-                <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="block text-black/40 hover:text-black transition-colors">Docs</a>
-              </div>
-            </motion.div>
+    <footer className="flex flex-col">
+      {/* Links */}
+      <div className="max-w-5xl mx-auto px-6 py-12 w-full">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+          <motion.div {...fadeView(0.05)}>
+            <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Product</p>
+            <div className="space-y-2.5 text-[13px]">
+              <a href="https://app.aeqi.ai" className="block text-black/40 hover:text-black transition-colors">Get Started</a>
+              <a href="https://aeqi.ai/enterprise" className="block text-black/40 hover:text-black transition-colors">Enterprise</a>
+              <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="block text-black/40 hover:text-black transition-colors">Docs</a>
+            </div>
+          </motion.div>
 
-            <motion.div {...fadeView(0.1)}>
-              <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Community</p>
-              <div className="space-y-2.5 text-[13px]">
-                <a href="https://github.com/0xAEQI/aeqi" className="block text-black/40 hover:text-black transition-colors">GitHub</a>
-                <a href="https://x.com/0xAEQI" className="block text-black/40 hover:text-black transition-colors">X</a>
-              </div>
-            </motion.div>
+          <motion.div {...fadeView(0.1)}>
+            <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Community</p>
+            <div className="space-y-2.5 text-[13px]">
+              <a href="https://github.com/0xAEQI/aeqi" className="block text-black/40 hover:text-black transition-colors">GitHub</a>
+              <a href="https://x.com/0xAEQI" className="block text-black/40 hover:text-black transition-colors">X</a>
+            </div>
+          </motion.div>
 
-            <motion.div {...fadeView(0.15)}>
-              <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Legal</p>
-              <div className="space-y-2.5 text-[13px]">
-                <a href="https://aeqi.ai/terms" className="block text-black/40 hover:text-black transition-colors">Terms</a>
-                <a href="https://aeqi.ai/privacy" className="block text-black/40 hover:text-black transition-colors">Privacy</a>
-              </div>
-            </motion.div>
+          <motion.div {...fadeView(0.15)}>
+            <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Legal</p>
+            <div className="space-y-2.5 text-[13px]">
+              <a href="https://aeqi.ai/terms" className="block text-black/40 hover:text-black transition-colors">Terms</a>
+              <a href="https://aeqi.ai/privacy" className="block text-black/40 hover:text-black transition-colors">Privacy</a>
+            </div>
+          </motion.div>
 
-            <motion.div className="flex flex-col justify-between" {...fadeView(0.2)}>
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Brand</p>
-                <span className="text-[32px] font-bold tracking-tighter text-black leading-none">æ</span>
-              </div>
-            </motion.div>
-          </div>
-
-          {/* Bottom */}
-          <motion.div
-            className="mt-12 pt-6 border-t border-black/5 flex items-center justify-between"
-            {...fadeView(0.25)}
-          >
-            <span className="text-[13px] font-bold tracking-tight text-black">aeqi</span>
-            <span className="text-[12px] text-black/20">
+          <motion.div {...fadeView(0.2)}>
+            <span className="text-[36px] font-bold tracking-tighter text-black leading-none">æ</span>
+            <p className="mt-2 text-[12px] text-black/20">
               &copy; {new Date().getFullYear()} aeqi
-            </span>
+            </p>
           </motion.div>
         </div>
       </div>
 
-      {/* Marquee fills remaining space */}
-      <div className="flex-1 flex items-end overflow-hidden">
+      {/* Marquee — fills remaining space, bleeds edge to edge */}
+      <div className="flex-1 flex items-end pb-8">
         <Marquee />
       </div>
     </footer>
@@ -190,12 +170,15 @@ function Footer() {
 /* ─── App ─── */
 export default function App() {
   return (
-    <div className="min-h-screen flex flex-col bg-black/[0.02]">
-      <div className="bg-white flex-1 flex flex-col">
-        <Nav />
-        <Hero />
+    <div className="min-h-screen flex flex-col bg-white">
+      {/* Hero — white */}
+      <Nav />
+      <Hero />
+
+      {/* Footer — subtle bg, extends to bottom */}
+      <div className="bg-black/[0.02] flex-1 flex flex-col">
+        <Footer />
       </div>
-      <Footer />
     </div>
   );
 }
