@@ -141,7 +141,7 @@ function Footer() {
           <motion.div {...fadeView(0.2)}>
             <span className="text-[36px] font-bold tracking-tighter text-black leading-none">æ</span>
             <p className="mt-2 text-[12px] text-black/20">
-              &copy; {new Date().getFullYear()} aeqi
+              &copy; {new Date().getFullYear()} aeqi.ai
             </p>
           </motion.div>
         </div>
