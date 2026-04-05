@@ -195,7 +195,7 @@ function Footer() {
   return (
     <footer className="border-t border-black/[0.04]">
       <div className="max-w-4xl mx-auto px-6 py-14 w-full">
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-10">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-10 md:gap-14">
           <motion.div {...fadeView(0.05)}>
             <p className="text-[11px] uppercase tracking-[0.2em] text-black/20 mb-4">Product</p>
             <div className="space-y-2.5 text-[13px]">
