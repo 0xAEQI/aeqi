@@ -67,14 +67,14 @@ function Hero() {
           className="mt-5 text-lg md:text-xl text-black/40 tracking-wide"
           {...fade(0.35)}
         >
-          the agent runtime
+          agentic execution
         </motion.p>
 
         <motion.p
           className="mt-8 text-[15px] text-black/30 tracking-[0.04em]"
           {...fade(0.5)}
         >
-          agent&ensp;&middot;&ensp;event&ensp;&middot;&ensp;quest&ensp;&middot;&ensp;insight
+          <span className="font-bold text-black">a</span>gent&ensp;&middot;&ensp;<span className="font-bold text-black">e</span>vent&ensp;&middot;&ensp;<span className="font-bold text-black">q</span>uest&ensp;&middot;&ensp;<span className="font-bold text-black">i</span>nsight
         </motion.p>
 
         <motion.div className="mt-10" {...fade(0.6)}>
