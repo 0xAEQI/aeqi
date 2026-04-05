@@ -23,7 +23,7 @@ function Nav() {
       {...fade(0.1)}
     >
       <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-        <a href="/" className="text-[20px] font-bold tracking-tight text-black">
+        <a href="/" className="text-[20px] font-bold tracking-tight text-black/60">
           aeqi
         </a>
         <div className="flex items-center gap-5">
@@ -65,7 +65,7 @@ function Hero() {
     <section className="flex-1 flex items-center justify-center px-6">
       <div className="max-w-3xl mx-auto text-center py-32">
         <motion.div {...fade(0.1)}>
-          <span className="text-[120px] md:text-[180px] font-bold tracking-tighter leading-none text-black select-none">
+          <span className="text-[120px] md:text-[180px] font-bold tracking-tighter leading-none text-black/60 select-none">
             æ
           </span>
         </motion.div>
@@ -139,7 +139,7 @@ function Footer() {
           </motion.div>
 
           <motion.div {...fadeView(0.2)}>
-            <span className="text-[36px] font-bold tracking-tighter text-black leading-none">æ</span>
+            <span className="text-[36px] font-bold tracking-tighter text-black/60 leading-none">æ</span>
             <p className="mt-2 text-[12px] text-black/20">
               &copy; {new Date().getFullYear()} aeqi.ai
             </p>
