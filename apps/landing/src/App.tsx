@@ -105,9 +105,9 @@ function Hero() {
           className="mt-2 text-[22px] md:text-[28px] font-semibold tracking-tight text-black/80 leading-snug"
           {...fade(0.3)}
         >
-          Self-executing companies.
+          Unlock the agent economy.
           <br />
-          <span className="text-black/40">Ownership is code.</span>
+          <span className="text-black/40">Companies that run, learn, and fund themselves.</span>
         </motion.h1>
 
         {/* CTA */}
@@ -138,8 +138,8 @@ function Hero() {
 
 /* ─── Value props ─── */
 const props = [
-  { title: "Autonomous orchestration", desc: "Agents delegate, coordinate, and execute across every function — engineering, marketing, operations, finance. The company runs itself. You set direction, not tasks." },
-  { title: "Compounding intelligence", desc: "Every task teaches. Every failure refines. Agents learn from everything they do, find new opportunities, and evolve to maximize shareholder value — automatically." },
+  { title: "Agent orchestration", desc: "Agents delegate, coordinate, and execute across every function — engineering, marketing, operations, finance. The company runs itself. You set direction, not tasks." },
+  { title: "Autonomous compounding", desc: "Every task teaches. Every failure refines. Agents learn from everything they do, find new opportunities, and evolve to maximize shareholder value — automatically." },
   { title: "Optional instant capital formation", desc: "The cap table is a smart contract. Equity is tokenized from day one. Raising capital is a transaction, not a quarter of legal fees and term sheets." },
 ];
 
