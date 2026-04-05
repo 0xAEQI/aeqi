@@ -80,14 +80,14 @@ export default function AppLayout() {
             </a>
           </nav>
           <div className="left-sidebar-body">
-            <div className="sidebar-tree-header">
-              <a className={`sidebar-tree-header-link ${isActive("/agents") ? "active" : ""}`} href="/agents" onClick={(e) => { e.preventDefault(); navigate("/agents"); }}>
+            <div className="sidebar-tree-nav">
+              <a className={`sidebar-nav-item ${isActive("/agents") ? "active" : ""}`} href="/agents" onClick={(e) => { e.preventDefault(); navigate("/agents"); }}>
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3"><circle cx="7" cy="5" r="2.5" /><path d="M3 12.5c0-2.2 1.8-4 4-4s4 1.8 4 4" /></svg>
-                <span>Agents</span>
+                <span className="sidebar-nav-label">Agents</span>
+                <span className="sidebar-nav-action" onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate("/agents?create=1"); }} title="New agent">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M6 2.5v7M2.5 6h7" /></svg>
+                </span>
               </a>
-              <span className="sidebar-tree-action" onClick={() => navigate("/agents?create=1")} title="New agent">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M6 2.5v7M2.5 6h7" /></svg>
-              </span>
             </div>
             <AgentTree />
           </div>
