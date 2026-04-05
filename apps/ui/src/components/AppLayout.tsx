@@ -86,7 +86,7 @@ export default function AppLayout() {
           </div>
           <nav className="sidebar-nav">
             <a
-              className={`sidebar-nav-item ${isActive("/agents") || isActive("/") ? "active" : ""}`}
+              className={`sidebar-nav-item ${isActive("/agents") ? "active" : ""}`}
               href="/agents"
               onClick={(e) => {
                 e.preventDefault();
@@ -176,6 +176,37 @@ export default function AppLayout() {
           <div className="left-sidebar-body">
             <AgentTree />
           </div>
+          <nav className="sidebar-nav sidebar-nav-bottom">
+            <a
+              className={`sidebar-nav-item ${isActive("/drive") ? "active" : ""}`}
+              href="/drive"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate("/drive");
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
+                <path d="M2 4.5h10M2 4.5v6a1 1 0 001 1h8a1 1 0 001-1v-6M5 2.5h4a1 1 0 011 1v1H4v-1a1 1 0 011-1z" />
+              </svg>
+              Drive
+            </a>
+            <a
+              className={`sidebar-nav-item ${isActive("/apps") ? "active" : ""}`}
+              href="/apps"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate("/apps");
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
+                <rect x="2" y="2" width="4" height="4" rx="0.5" />
+                <rect x="8" y="2" width="4" height="4" rx="0.5" />
+                <rect x="2" y="8" width="4" height="4" rx="0.5" />
+                <rect x="8" y="8" width="4" height="4" rx="0.5" />
+              </svg>
+              Apps
+            </a>
+          </nav>
           <div className="sidebar-profile">
             <BlockAvatar name={userName} size={22} />
             <div className="sidebar-profile-info">
