@@ -6,6 +6,8 @@ import BlockAvatar from "./BlockAvatar";
 import CommandPalette from "./CommandPalette";
 import AgentSessionView from "./AgentSessionView";
 import DashboardHome from "./DashboardHome";
+import InboxPage from "@/pages/InboxPage";
+import QuestsPage from "@/pages/QuestsPage";
 import { useDaemonStore } from "@/store/daemon";
 import { useDaemonSocket } from "@/hooks/useDaemonSocket";
 
@@ -16,6 +18,7 @@ export default function AppLayout() {
 
   const agentId = params.get("agent");
   const sessionId = params.get("session");
+  const page = params.get("page");
 
   const fetchAll = useDaemonStore((s) => s.fetchAll);
   useEffect(() => { fetchAll(); const i = setInterval(fetchAll, 30000); return () => clearInterval(i); }, [fetchAll]);
@@ -59,6 +62,35 @@ export default function AppLayout() {
               </svg>
             </span>
           </div>
+          <nav className="sidebar-nav">
+            <a
+              className={`sidebar-nav-item ${!agentId && !page ? "active" : ""}`}
+              href="/"
+              onClick={(e) => { e.preventDefault(); navigate("/"); }}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M2 7l5-4.5L12 7M3.5 6v5.5h7V6" /></svg>
+              Home
+            </a>
+            <a
+              className={`sidebar-nav-item ${page === "inbox" ? "active" : ""}`}
+              href="/?page=inbox"
+              onClick={(e) => { e.preventDefault(); navigate("/?page=inbox"); }}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M2 4l5 3.5L12 4M2 4v6.5h10V4" /></svg>
+              Inbox
+              {(useDaemonStore.getState().events || []).length > 0 && (
+                <span className="sidebar-nav-badge" />
+              )}
+            </a>
+            <a
+              className={`sidebar-nav-item ${page === "quests" ? "active" : ""}`}
+              href="/?page=quests"
+              onClick={(e) => { e.preventDefault(); navigate("/?page=quests"); }}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M4 3h8M4 7h8M4 11h6M2 3v0M2 7v0M2 11v0" strokeLinecap="round" /></svg>
+              Quests
+            </a>
+          </nav>
           <div className="left-sidebar-body">
             <AgentTree />
           </div>
@@ -77,10 +109,14 @@ export default function AppLayout() {
           </div>
         </div>
 
-        {/* Main content: Session view or Dashboard */}
+        {/* Main content */}
         <div className="content-area">
           {agentId ? (
             <AgentSessionView agentId={agentId} sessionId={sessionId} />
+          ) : page === "inbox" ? (
+            <InboxPage />
+          ) : page === "quests" ? (
+            <QuestsPage />
           ) : (
             <div className="content-scroll">
               <DashboardHome />
