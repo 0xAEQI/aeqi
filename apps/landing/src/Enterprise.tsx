@@ -23,9 +23,8 @@ function Nav() {
       transition={{ duration: 0.6, delay: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
     >
       <div className="w-full max-w-3xl backdrop-blur-2xl bg-white/60 border border-black/[0.06] rounded-2xl shadow-lg shadow-black/[0.03] px-5 h-12 flex items-center justify-between">
-        <a href="/" className="flex items-baseline gap-2 hover:opacity-80 transition-opacity">
-          <span className="text-[22px] font-bold tracking-tighter text-black/50">æ</span>
-          <span className="text-[17px] font-bold tracking-tighter text-black/50">aeqi</span>
+        <a href="/" className="text-[17px] font-bold tracking-tighter text-black/50 hover:text-black/70 transition-colors">
+          æ aeqi
         </a>
         <div className="flex items-center gap-1">
           <a href="/pricing" className="text-[13px] text-black/70 font-medium hover:bg-black/[0.04] rounded-lg px-3 py-1.5 transition-all">
