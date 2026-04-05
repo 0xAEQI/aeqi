@@ -85,9 +85,9 @@ export default function SignupPage() {
       <div className="auth-footer">
         <p>
           By continuing, you agree to the{" "}
-          <a href="/terms">Terms of Service</a>
+          <a href="https://aeqi.ai/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a>
           {" "}and{" "}
-          <a href="/privacy">Privacy Policy</a>.
+          <a href="https://aeqi.ai/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.
         </p>
       </div>
     </div>

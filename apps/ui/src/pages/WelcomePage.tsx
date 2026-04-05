@@ -157,9 +157,9 @@ export default function WelcomePage() {
         <div className="welcome-footer">
           <p>
             By using aeqi.ai you agree to our{" "}
-            <a href="/terms" className="welcome-link">Terms of Service</a>
+            <a href="https://aeqi.ai/terms" className="welcome-link" target="_blank" rel="noopener noreferrer">Terms of Service</a>
             {" "}and{" "}
-            <a href="/privacy" className="welcome-link">Privacy Policy</a>.
+            <a href="https://aeqi.ai/privacy" className="welcome-link" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.
           </p>
         </div>
       </div>
