@@ -257,6 +257,101 @@
 }
 
 /* ── Profile bar (sidebar bottom) ── */
+/* Profile menu */
+.pm-container {
+  position: relative;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.pm-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.pm-trigger:hover { background: var(--bg-elevated); }
+.pm-trigger-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pm-trigger-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pm-trigger-plan {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.pm-trigger-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+/* Dropup */
+.pm-dropup {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 100%;
+  margin-bottom: 4px;
+  z-index: 100;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.25);
+  padding: 4px 0;
+  animation: ws-fade-in 0.15s ease;
+}
+.pm-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.pm-header-text {
+  display: flex;
+  flex-direction: column;
+}
+.pm-header-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.pm-header-email {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.pm-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+.pm-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+.pm-item:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.pm-item-danger { color: var(--error); }
+.pm-item-danger:hover { background: color-mix(in srgb, var(--error) 8%, transparent); color: var(--error); }
+
+/* Keep old .sidebar-profile for compat but hide */
 .sidebar-profile {
   display: flex;
   align-items: center;

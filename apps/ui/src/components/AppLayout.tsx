@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation, useSearchParams, Outlet } from "react-router-dom";
 import AgentTree from "./Sidebar";
 import ContextDrawer from "./ContextDrawer";
-import BlockAvatar from "./BlockAvatar";
 import CommandPalette from "./CommandPalette";
 import AgentSessionView from "./AgentSessionView";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
+import ProfileMenu from "./ProfileMenu";
 import { useDaemonStore } from "@/store/daemon";
 import { useDaemonSocket } from "@/hooks/useDaemonSocket";
 
@@ -26,8 +26,6 @@ export default function AppLayout() {
     return () => clearInterval(i);
   }, [fetchAll]);
   useDaemonSocket();
-
-  const userName = localStorage.getItem("aeqi_user_name") || "Operator";
 
   const openSearch = useCallback(() => setSearching(true), []);
   const closeSearch = useCallback(() => setSearching(false), []);
@@ -105,32 +103,7 @@ export default function AppLayout() {
               <span className="sidebar-nav-label">Apps</span>
             </a>
           </nav>
-          <div className="sidebar-profile">
-            <BlockAvatar name={userName} size={22} />
-            <div className="sidebar-profile-info">
-              <span className="sidebar-profile-name">{userName}</span>
-              <span className="sidebar-profile-plan">free plan</span>
-            </div>
-            <span
-              className="sidebar-profile-settings"
-              onClick={() => navigate("/settings")}
-              title="Settings"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="8" cy="8" r="2.5" />
-                <path d="M13.5 8a5.5 5.5 0 01-.4 1.6l1.1 1.3-1.1 1.1-1.3-1.1A5.5 5.5 0 018 13.5a5.5 5.5 0 01-3.8-2.6L3 12l-1.1-1.1 1.1-1.3A5.5 5.5 0 012.5 8a5.5 5.5 0 01.5-1.6L1.9 5.1 3 4l1.3 1.1A5.5 5.5 0 018 2.5a5.5 5.5 0 013.8 2.6L13 4l1.1 1.1-1.1 1.3A5.5 5.5 0 0113.5 8z" />
-              </svg>
-            </span>
-          </div>
+          <ProfileMenu />
         </div>
 
         {/* Main content */}
