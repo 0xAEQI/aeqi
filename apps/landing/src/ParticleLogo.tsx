@@ -194,8 +194,8 @@ export default function ParticleLogo({
         positions[i3 + 1] += velocities[i3 + 1];
       }
 
-      // Fire onReady when particles have mostly converged
-      if (!settled && totalDist / PARTICLE_COUNT < 2) {
+      // Fire onReady when particles have mostly converged or after 1.5s
+      if (!settled && (totalDist / PARTICLE_COUNT < 15 || frame > 90)) {
         settled = true;
         onReady?.();
       }
