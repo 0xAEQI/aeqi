@@ -138,9 +138,9 @@ function Hero() {
 
 /* ─── Value props ─── */
 const props = [
-  { title: "Companies that run themselves", desc: "Execution is autonomous. Structure is real." },
-  { title: "Ownership is code", desc: "Equity, governance, and capital flows exist on-chain. No paperwork. No ambiguity." },
-  { title: "Sovereign by design", desc: "No platforms. No lock-in. Just infrastructure you control." },
+  { title: "Near-zero operations", desc: "Agents handle execution — coordination, reporting, decisions. The company runs whether you're watching or not. No payroll. No overhead." },
+  { title: "Optional instant capital formation", desc: "The cap table is a smart contract. Equity is tokenized from day one. Raising capital is a transaction, not a quarter of legal fees and term sheets." },
+  { title: "Real-time economics", desc: "Revenue, burn, and ownership visible on-chain. Investors don't wait for quarterly reports. Everyone sees the same numbers at the same time." },
 ];
 
 function ValueProps() {
