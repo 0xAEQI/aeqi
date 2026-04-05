@@ -1,66 +1,76 @@
 # Quick Start
 
-This guide gets AEQI running locally with the daemon, API, and web UI.
+Get AEQI running locally with the daemon, web server, and dashboard.
 
-## Prerequisites
+## Install
 
-- Rust stable
-- Node.js 22+
-- At least one model provider key
-
-## 1. Create Local Config
+### Option A: Install Script
 
 ```bash
-cp config/aeqi.example.toml config/aeqi.toml
+curl -fsSL https://raw.githubusercontent.com/0xAEQI/aeqi/main/scripts/install.sh | sh
 ```
 
-`config/aeqi.toml` is local-only and should stay uncommitted.
+### Option B: Build from Source
 
-Configure a provider and enable the web server:
-
-```toml
-[providers.openrouter]
-api_key = "${OPENROUTER_API_KEY}"
-default_model = "xiaomi/mimo-v2-pro"
-
-[web]
-enabled = true
-bind = "127.0.0.1:8400"
-ui_dist_dir = "../apps/ui/dist"
-auth_secret = "${AEQI_WEB_SECRET}"
-```
-
-## 2. Build
+Requires Rust stable.
 
 ```bash
-cargo build
+git clone https://github.com/0xAEQI/aeqi.git
+cd aeqi
+cargo build --release
+```
+
+The binary is at `target/release/aeqi`.
+
+### Option C: Docker
+
+```bash
+docker compose up
+```
+
+## Setup
+
+Run the setup wizard. It auto-detects your environment: if you're inside a git repo it configures the current workspace, otherwise it writes config to `~/.aeqi/`.
+
+```bash
+aeqi setup
+```
+
+You'll be prompted for provider keys and basic settings. SQLite databases are created automatically in `~/.aeqi/` -- no external database required.
+
+Set the dashboard auth secret:
+
+```bash
+export AEQI_WEB_SECRET=change-me
+```
+
+## Start
+
+A single command runs the daemon, web server, and embedded dashboard:
+
+```bash
+aeqi start
+```
+
+The UI is embedded in the binary via rust-embed. No Node.js or npm needed.
+
+## Open Dashboard
+
+Navigate to `http://127.0.0.1:8400` and authenticate with your `AEQI_WEB_SECRET`.
+
+## Development
+
+For contributors working on the frontend:
+
+```bash
 npm run ui:install
 npm run ui:build
 ```
 
-## 3. Start AEQI
-
-In one shell:
-
-```bash
-cargo run --bin aeqi -- daemon start
-```
-
-In a second shell:
-
-```bash
-export AEQI_WEB_SECRET=change-me
-cargo run --bin aeqi -- web start
-```
-
-Open `http://127.0.0.1:8400`.
-
-## 4. UI Development Mode
-
-If you want Vite hot reload instead of the compiled UI:
+For hot-reload during UI development:
 
 ```bash
 npm run ui:dev
 ```
 
-That serves the frontend on `http://127.0.0.1:5173` and proxies `/api/*` to `aeqi-web` on `:8400`.
+This serves the frontend on `http://127.0.0.1:5173` and proxies `/api/*` to AEQI on `:8400`.

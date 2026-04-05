@@ -1,5 +1,7 @@
 # Company Setup
 
+> **Quick start:** Run `aeqi setup` -- it auto-detects whether you're in a workspace (git repo with `config/` and `agents/` dirs) or a fresh install, and creates all necessary structure. Fresh installs write to `~/.aeqi/` automatically. This document covers advanced/manual project configuration.
+
 A **company** is an isolated operating unit in AEQI. Each company has its own:
 
 - Git repository (working directory)

@@ -1,40 +1,80 @@
 # AEQI UI
 
-React web control plane for AEQI.
+Web dashboard for the AEQI agent runtime. React 19, Vite 6, TypeScript, Zustand.
 
-Canonical source lives in the AEQI monorepo at `apps/ui`.
+In production the UI is embedded directly into the `aeqi` Rust binary via `rust-embed` at compile time. No Node.js required to run the dashboard -- it ships inside the binary.
 
-## Quick Start
+## Dev Workflow
 
-From the repository root:
-
-```bash
-npm run ui:install
-npm run ui:dev
-```
-
-Or from inside `apps/ui`:
+Start the Vite dev server with hot reload:
 
 ```bash
+cd apps/ui
 npm install
-npm run dev
-npm run build
+npm run dev        # :5173, proxies /api to :8400
 ```
 
-The dev server runs on `http://127.0.0.1:5173`.
+The `aeqi` daemon must be running on port 8400 for API calls to work.
 
-## API and Serving
+To use the dev build instead of the embedded UI, set an optional override in `aeqi.toml`:
 
-- In development, the Vite server proxies `/api/*` to `aeqi-web` on `http://127.0.0.1:8400`.
-- In production, `aeqi-web` can serve the compiled `dist/` directory directly when `[web].ui_dist_dir` is configured.
-- `nginx` or `caddy` should sit in front only for TLS and host routing.
+```toml
+[web]
+ui_dist_dir = "apps/ui/dist"
+```
+
+This tells the daemon to serve files from disk rather than the compiled-in assets.
+
+## Build
+
+```bash
+npm run build      # tsc + vite build -> apps/ui/dist
+```
+
+The CI embeds `dist/` into the Rust binary. You only need to build manually when testing the production bundle locally.
+
+## Styling
+
+All design tokens live in `src/styles/primitives.css` as CSS custom properties:
+
+- **Palette:** light zinc (white base, zinc-50 surfaces, zinc-200 borders)
+- **Typography:** Inter for UI text, JetBrains Mono for code
+- **No CSS framework** -- plain CSS files per component/page in `src/styles/`
 
 ## Stack
 
-- React 19
-- Vite 6
-- TypeScript 5
-- Zustand
-- React Router 7
+| Layer | Choice |
+|-------|--------|
+| Framework | React 19 |
+| Build | Vite 6 |
+| Language | TypeScript 5 |
+| State | Zustand 5 (auth, daemon, chat, ui stores) |
+| Routing | React Router 7 |
+| API | Fetch wrapper with JWT auth (`src/lib/api.ts`) |
 
-Main project: <https://github.com/0xAEQI/aeqi>
+## Pages
+
+| Page | Path | Description |
+|------|------|-------------|
+| Dashboard | `/` | Stats, active quests, activity feed |
+| Quests | `/quests` | Linear-style grouped list, filterable by status and agent |
+| Sessions | `/sessions` | Split pane: session list + transcript, WebSocket chat |
+| Events | `/events` | Audit/activity event stream |
+| Insights | `/insights` | Agent knowledge and memory search |
+| Agent Detail | `/agents/:name` | Identity, files, activity |
+| Settings | `/settings` | Daemon connection, logout |
+| Login | `/login` | JWT authentication |
+
+## Project Structure
+
+```
+src/
+  components/    # Shared components
+  hooks/         # Custom React hooks
+  lib/           # API client, utilities
+  pages/         # Route-level page components
+  store/         # Zustand stores (auth, daemon, chat, ui)
+  styles/        # CSS files (primitives.css + per-page/component sheets)
+  App.tsx        # Router + layout shell
+  main.tsx       # Entry point
+```
