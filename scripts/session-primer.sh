@@ -214,9 +214,9 @@ if [ -n "$PROJECT" ] && [ "$PROJECT" != "shared" ]; then
         # Workflow skills — shown prominently with descriptions for selection
         WORKFLOW_FMT=$(printf '%s' "$SKILLS_RAW" | jq -r '
             .skills // [] |
-            map(select(.phase == "workflow")) |
+            map(select(.tags // [] | index("workflow"))) |
             if length == 0 then empty else
-            .[] | "  - \(.name): \(.preview)"
+            .[] | "  - \(.name): \(.description // .preview // "")"
             end
         ' 2>/dev/null)
         if [ -n "$WORKFLOW_FMT" ]; then
@@ -226,17 +226,20 @@ if [ -n "$PROJECT" ] && [ "$PROJECT" != "shared" ]; then
         # Phase skills — grouped by phase, excluding workflows
         SKILLS_FMT=$(printf '%s' "$SKILLS_RAW" | jq -r --arg proj "$PROJECT" '
             .skills // [] |
-            map(select((.source == $proj or .source == "shared") and .phase != "workflow")) |
-            group_by(.phase // "implement") |
+            map(select(
+                (.source == $proj or .source == "shared") and
+                ((.tags // []) | index("workflow") | not)
+            )) |
+            group_by((.tags // ["implement"])[0]) |
             map({
-                phase: (.[0].phase // "implement"),
+                tag: (.[0].tags // ["implement"])[0],
                 names: ([.[] | .name] | .[0:5] | join(", ")) +
                     (if length > 5 then ", ..." else "" end)
             }) |
             sort_by(
-                {"workflow":-1,"discover":0,"plan":1,"implement":2,"verify":3,"finalize":4}[.phase] // 99
+                {"discover":0,"plan":1,"implement":2,"verify":3,"finalize":4}[.tag] // 99
             ) |
-            .[] | "  \(.phase): \(.names)"
+            .[] | "  \(.tag): \(.names)"
         ' 2>/dev/null)
         if [ -n "$SKILLS_FMT" ]; then
             printf '\n## Skills for %s (load per phase as needed)\n%s\n' "$PROJECT" "$SKILLS_FMT"
@@ -251,10 +254,7 @@ if [ -n "$AGENTS_RAW" ]; then
     AGENTS_FMT=$(printf '%s' "$AGENTS_RAW" | jq -r --arg proj "$PROJ_FILTER" '
         .agents // [] |
         map(select(.source == $proj or .source == "shared")) |
-        sort_by(
-            {"workflow":-1,"discover":0,"plan":1,"implement":2,"verify":3,"finalize":4}[.phase] // 99
-        ) |
-        .[] | "  \(.phase): \(.name) (\(.model))"
+        .[] | "  \(.name) — \(.description // "")"
     ' 2>/dev/null)
     if [ -n "$AGENTS_FMT" ]; then
         printf '\n## Agents (use aeqi_agents to load templates)\n%s\n' "$AGENTS_FMT"
