@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useUIStore } from "@/store/ui";
 
@@ -10,6 +11,7 @@ interface Workspace {
 export default function WorkspaceSwitcher() {
   const activeWorkspace = useUIStore((s) => s.activeWorkspace);
   const setActiveWorkspace = useUIStore((s) => s.setActiveWorkspace);
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [creating, setCreating] = useState(false);
@@ -62,25 +64,27 @@ export default function WorkspaceSwitcher() {
 
   return (
     <div className="ws-switcher" ref={ref}>
-      <button className="ws-trigger" onClick={() => setOpen(!open)}>
-        <span className="ws-brand">æ</span>
-        <div className="ws-trigger-text">
+      <div className="ws-trigger">
+        <span className="ws-brand" onClick={() => navigate("/")}>æ</span>
+        <div className="ws-trigger-text" onClick={() => navigate("/")}>
           <span className="ws-trigger-name">{display}</span>
-          <span className="ws-trigger-plan">aeqi.ai</span>
+          <span className="ws-trigger-plan">hosted</span>
         </div>
-        <svg
-          className={`ws-chevron ${open ? "open" : ""}`}
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        >
-          <path d="M3 5l3 3 3-3" />
-        </svg>
-      </button>
+        <button className="ws-chevron-btn" onClick={() => setOpen(!open)} title="Switch workspace">
+          <svg
+            className={`ws-chevron ${open ? "open" : ""}`}
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          >
+            <path d="M3 5l3 3 3-3" />
+          </svg>
+        </button>
+      </div>
 
       {open && (
         <div className="ws-dropdown">
