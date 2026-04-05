@@ -170,7 +170,7 @@ function Pricing() {
               </div>
               <div className="flex items-center gap-2.5">
                 <span className="text-black/15">+</span>
-                <span>Unlimited LLM tokens</span>
+                <span>Custom token volume pricing</span>
               </div>
               <div className="flex items-center gap-2.5">
                 <span className="text-black/15">+</span>
@@ -198,13 +198,27 @@ function Pricing() {
           </motion.div>
         </div>
 
-        {/* Token note */}
-        <motion.p
-          className="text-center text-[13px] text-black/20 mt-12"
-          {...fadeView(0.1)}
-        >
-          All plans support bring-your-own OpenRouter key. Extra tokens available as top-ups.
-        </motion.p>
+        {/* Token pricing transparency */}
+        <motion.div className="mt-20 max-w-2xl mx-auto" {...fadeView(0.1)}>
+          <h3 className="text-[14px] font-semibold tracking-wide uppercase text-black/50 mb-4 text-center">Token pricing</h3>
+          <p className="text-[15px] leading-[1.7] text-black/35 text-center mb-8">
+            We pass through LLM costs at provider rates plus a 10% platform fee. No hidden margins. Bring your own OpenRouter key to pay providers directly on any plan.
+          </p>
+          <div className="grid grid-cols-3 gap-6 text-center">
+            <div>
+              <p className="text-[24px] font-semibold tracking-tight text-black/70">10%</p>
+              <p className="text-[12px] text-black/25 mt-1">Platform fee on tokens</p>
+            </div>
+            <div>
+              <p className="text-[24px] font-semibold tracking-tight text-black/70">$0</p>
+              <p className="text-[12px] text-black/25 mt-1">Markup with your own key</p>
+            </div>
+            <div>
+              <p className="text-[24px] font-semibold tracking-tight text-black/70">Pay as you go</p>
+              <p className="text-[12px] text-black/25 mt-1">Top up when you need more</p>
+            </div>
+          </div>
+        </motion.div>
       </div>
     </section>
   );
