@@ -1,28 +1,29 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useLocation, useSearchParams, Outlet } from "react-router-dom";
 import AgentTree from "./Sidebar";
 import ContextDrawer from "./ContextDrawer";
 import BlockAvatar from "./BlockAvatar";
 import CommandPalette from "./CommandPalette";
 import AgentSessionView from "./AgentSessionView";
-import DashboardHome from "./DashboardHome";
-import EventsPage from "@/pages/EventsPage";
-import QuestsPage from "@/pages/QuestsPage";
-import InsightsPage from "@/pages/InsightsPage";
 import { useDaemonStore } from "@/store/daemon";
 import { useDaemonSocket } from "@/hooks/useDaemonSocket";
 
 export default function AppLayout() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [params] = useSearchParams();
   const [searching, setSearching] = useState(false);
 
   const agentId = params.get("agent");
   const sessionId = params.get("session");
-  const page = params.get("page");
+  const path = location.pathname;
 
   const fetchAll = useDaemonStore((s) => s.fetchAll);
-  useEffect(() => { fetchAll(); const i = setInterval(fetchAll, 30000); return () => clearInterval(i); }, [fetchAll]);
+  useEffect(() => {
+    fetchAll();
+    const i = setInterval(fetchAll, 30000);
+    return () => clearInterval(i);
+  }, [fetchAll]);
   useDaemonSocket();
 
   const userName = localStorage.getItem("aeqi_user_name") || "Operator";
@@ -45,19 +46,39 @@ export default function AppLayout() {
     return () => window.removeEventListener("keydown", handler);
   }, [searching, openSearch, closeSearch]);
 
+  const isActive = (p: string) => {
+    if (p === "/") return path === "/" && !agentId;
+    return path.startsWith(p) && !agentId;
+  };
+
   return (
     <>
       <div className="shell">
-        {/* Left sidebar: Agent tree */}
+        {/* Left sidebar */}
         <div className="left-sidebar">
           <div className="sidebar-profile sidebar-profile-top">
-            <a href="/" className="sidebar-brand-mark">æ</a>
+            <a href="/" className="sidebar-brand-mark">
+              æ
+            </a>
             <div className="sidebar-profile-info">
               <span className="sidebar-profile-name">aeqi.ai</span>
               <span className="sidebar-profile-plan">hosted</span>
             </div>
-            <span className="sidebar-profile-settings" onClick={openSearch} title="Search (Cmd+K)">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+            <span
+              className="sidebar-profile-settings"
+              onClick={openSearch}
+              title="Search (Cmd+K)"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <circle cx="7" cy="7" r="4.5" />
                 <path d="M10.5 10.5L14 14" />
               </svg>
@@ -65,38 +86,90 @@ export default function AppLayout() {
           </div>
           <nav className="sidebar-nav">
             <a
-              className={`sidebar-nav-item ${!agentId && !page ? "active" : ""}`}
-              href="/"
-              onClick={(e) => { e.preventDefault(); navigate("/"); }}
+              className={`sidebar-nav-item ${isActive("/agents") || isActive("/") ? "active" : ""}`}
+              href="/agents"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate("/agents");
+              }}
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3"><circle cx="7" cy="5" r="2.5" /><path d="M3 12.5c0-2.2 1.8-4 4-4s4 1.8 4 4" /></svg>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.3"
+              >
+                <circle cx="7" cy="5" r="2.5" />
+                <path d="M3 12.5c0-2.2 1.8-4 4-4s4 1.8 4 4" />
+              </svg>
               Agents
             </a>
             <a
-              className={`sidebar-nav-item ${page === "inbox" ? "active" : ""}`}
-              href="/?page=inbox"
-              onClick={(e) => { e.preventDefault(); navigate("/?page=inbox"); }}
+              className={`sidebar-nav-item ${isActive("/events") ? "active" : ""}`}
+              href="/events"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate("/events");
+              }}
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M2 4l5 3.5L12 4M2 4v6.5h10V4" /></svg>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.3"
+              >
+                <path d="M2 4l5 3.5L12 4M2 4v6.5h10V4" />
+              </svg>
               Events
-              {(useDaemonStore.getState().events || []).length > 0 && (
-                <span className="sidebar-nav-badge" />
-              )}
             </a>
             <a
-              className={`sidebar-nav-item ${page === "quests" ? "active" : ""}`}
-              href="/?page=quests"
-              onClick={(e) => { e.preventDefault(); navigate("/?page=quests"); }}
+              className={`sidebar-nav-item ${isActive("/quests") ? "active" : ""}`}
+              href="/quests"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate("/quests");
+              }}
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M4 3h8M4 7h8M4 11h6M2 3v0M2 7v0M2 11v0" strokeLinecap="round" /></svg>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.3"
+              >
+                <path
+                  d="M4 3h8M4 7h8M4 11h6M2 3v0M2 7v0M2 11v0"
+                  strokeLinecap="round"
+                />
+              </svg>
               Quests
             </a>
             <a
-              className={`sidebar-nav-item ${page === "insights" ? "active" : ""}`}
-              href="/?page=insights"
-              onClick={(e) => { e.preventDefault(); navigate("/?page=insights"); }}
+              className={`sidebar-nav-item ${isActive("/insights") ? "active" : ""}`}
+              href="/insights"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate("/insights");
+              }}
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M7 2v2M7 10v2M2 7h2M10 7h2M3.8 3.8l1.4 1.4M8.8 8.8l1.4 1.4M10.2 3.8l-1.4 1.4M5.2 8.8l-1.4 1.4" strokeLinecap="round" /></svg>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.3"
+              >
+                <path
+                  d="M7 2v2M7 10v2M2 7h2M10 7h2M3.8 3.8l1.4 1.4M8.8 8.8l1.4 1.4M10.2 3.8l-1.4 1.4M5.2 8.8l-1.4 1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
               Insights
             </a>
           </nav>
@@ -109,8 +182,21 @@ export default function AppLayout() {
               <span className="sidebar-profile-name">{userName}</span>
               <span className="sidebar-profile-plan">free plan</span>
             </div>
-            <span className="sidebar-profile-settings" onClick={() => navigate("/settings")} title="Settings">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+            <span
+              className="sidebar-profile-settings"
+              onClick={() => navigate("/settings")}
+              title="Settings"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <circle cx="8" cy="8" r="2.5" />
                 <path d="M13.5 8a5.5 5.5 0 01-.4 1.6l1.1 1.3-1.1 1.1-1.3-1.1A5.5 5.5 0 018 13.5a5.5 5.5 0 01-3.8-2.6L3 12l-1.1-1.1 1.1-1.3A5.5 5.5 0 012.5 8a5.5 5.5 0 01.5-1.6L1.9 5.1 3 4l1.3 1.1A5.5 5.5 0 018 2.5a5.5 5.5 0 013.8 2.6L13 4l1.1 1.1-1.1 1.3A5.5 5.5 0 0113.5 8z" />
               </svg>
@@ -122,20 +208,14 @@ export default function AppLayout() {
         <div className="content-area">
           {agentId ? (
             <AgentSessionView agentId={agentId} sessionId={sessionId} />
-          ) : page === "inbox" ? (
-            <EventsPage />
-          ) : page === "quests" ? (
-            <QuestsPage />
-          ) : page === "insights" ? (
-            <InsightsPage />
           ) : (
             <div className="content-scroll">
-              <DashboardHome />
+              <Outlet />
             </div>
           )}
         </div>
 
-        {/* Right context panel: visible when agent selected */}
+        {/* Right context drawer */}
         <ContextDrawer agentId={agentId} sessionId={sessionId} />
       </div>
       <CommandPalette open={searching} onClose={closeSearch} />

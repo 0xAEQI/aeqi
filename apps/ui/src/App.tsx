@@ -2,6 +2,11 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuthStore } from "@/store/auth";
 import AppLayout from "@/components/AppLayout";
 import LoginPage from "@/pages/LoginPage";
+import DashboardHome from "@/components/DashboardHome";
+import EventsPage from "@/pages/EventsPage";
+import QuestsPage from "@/pages/QuestsPage";
+import InsightsPage from "@/pages/InsightsPage";
+import AgentSessionView from "@/components/AgentSessionView";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -20,7 +25,13 @@ export default function App() {
             <AppLayout />
           </ProtectedRoute>
         }
-      />
+      >
+        <Route index element={<DashboardHome />} />
+        <Route path="agents" element={<DashboardHome />} />
+        <Route path="events" element={<EventsPage />} />
+        <Route path="quests" element={<QuestsPage />} />
+        <Route path="insights" element={<InsightsPage />} />
+      </Route>
     </Routes>
   );
 }
