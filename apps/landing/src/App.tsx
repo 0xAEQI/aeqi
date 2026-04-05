@@ -98,27 +98,44 @@ const fadeView = (delay = 0) => ({
   transition: { duration: 0.5, ease: "easeOut" as const, delay },
 });
 
+/* ─── Marquee ─── */
+const marqueeWords = [
+  { text: "agent", bold: "a" },
+  { text: "event", bold: "e" },
+  { text: "quest", bold: "q" },
+  { text: "insight", bold: "i" },
+  { text: "artificial intelligence", bold: "ai" },
+];
+
+function Marquee() {
+  const items = [...marqueeWords, ...marqueeWords, ...marqueeWords, ...marqueeWords];
+
+  return (
+    <div className="overflow-hidden py-16 select-none">
+      <div className="animate-marquee flex items-center whitespace-nowrap">
+        {items.map((w, i) => (
+          <span key={i} className="flex items-center">
+            <span className="text-[48px] md:text-[72px] font-bold tracking-tighter text-black/[0.06]">
+              {w.bold === "ai" ? (
+                <><span className="text-black/60">a</span>rtificial <span className="text-black/60">i</span>ntelligence</>
+              ) : (
+                <><span className="text-black/60">{w.bold}</span>{w.text.slice(w.bold.length)}</>
+              )}
+            </span>
+            <span className="mx-6 md:mx-10 text-[36px] text-black/[0.08]">&middot;</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Footer ─── */
 function Footer() {
   return (
     <footer className="bg-black/[0.02]">
-      {/* Vision — the name reveal */}
-      <div className="max-w-5xl mx-auto px-6 pt-24 pb-16">
-        <motion.div className="max-w-2xl" {...fadeView()}>
-          <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-8">
-            vision
-          </p>
-          <div className="flex flex-wrap items-baseline justify-start gap-x-6 gap-y-2 text-[40px] md:text-[56px] font-bold tracking-tighter leading-tight text-black/10">
-            <motion.span {...fadeView(0.05)}><span className="text-black">a</span>gent</motion.span>
-            <motion.span {...fadeView(0.1)}><span className="text-black">e</span>vent</motion.span>
-            <motion.span {...fadeView(0.15)}><span className="text-black">q</span>uest</motion.span>
-            <motion.span {...fadeView(0.2)}><span className="text-black">i</span>nsight</motion.span>
-          </div>
-          <motion.p className="mt-8 text-[16px] text-black/40 leading-relaxed max-w-lg" {...fadeView(0.25)}>
-            Four building blocks. Everything else emerges.
-          </motion.p>
-        </motion.div>
-      </div>
+      {/* Floating banner */}
+      <Marquee />
 
       {/* Links + brand */}
       <div className="border-t border-black/5">
@@ -176,12 +193,14 @@ function Footer() {
 /* ─── App ─── */
 export default function App() {
   return (
-    <div className="min-h-screen bg-black/[0.02]">
+    <div className="min-h-screen flex flex-col bg-black/[0.02]">
       <div className="bg-white">
         <Nav />
         <Hero />
       </div>
-      <Footer />
+      <div className="flex-1 flex flex-col">
+        <Footer />
+      </div>
     </div>
   );
 }
