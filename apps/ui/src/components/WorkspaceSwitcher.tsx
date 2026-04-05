@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useUIStore } from "@/store/ui";
+import BlockAvatar from "./BlockAvatar";
 
 interface Workspace {
   name: string;
@@ -24,11 +25,12 @@ export default function WorkspaceSwitcher() {
     api
       .getCompanies()
       .then((data: any) => {
-        const items = data?.companies || data?.projects || [];
-        setWorkspaces(items.map((c: any) => ({ name: c.name, prefix: c.prefix })));
+        const raw = data?.companies || data?.projects || data?.agent_spawns || [];
+        const items = Array.isArray(raw) ? raw : [];
+        setWorkspaces(items.map((c: any) => ({ name: c.name || c.company || "", prefix: c.prefix })));
         // Auto-select first if none active
         if (!activeWorkspace && items.length > 0) {
-          setActiveWorkspace(items[0].name);
+          setActiveWorkspace(items[0].name || items[0].company || "");
         }
       })
       .catch(() => {});
@@ -65,7 +67,9 @@ export default function WorkspaceSwitcher() {
   return (
     <div className="ws-switcher" ref={ref}>
       <div className="ws-trigger">
-        <span className="ws-brand" onClick={() => navigate("/")}>æ</span>
+        <span className="ws-brand" onClick={() => navigate("/")}>
+          {activeWorkspace ? <BlockAvatar name={activeWorkspace} size={22} /> : "æ"}
+        </span>
         <div className="ws-trigger-text" onClick={() => navigate("/")}>
           <span className="ws-trigger-name">{display}</span>
           <span className="ws-trigger-plan">{localStorage.getItem("aeqi_workspace_tagline") || "The agent runtime."}</span>
