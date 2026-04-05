@@ -12,10 +12,14 @@
 .welcome-hero {
   text-align: center;
   margin-bottom: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 
 .welcome-title {
-  font-size: 32px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--text-primary);
   margin: 0;
@@ -141,7 +145,16 @@
 }
 
 .welcome-footer p {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
   margin: 0;
+  line-height: 1.5;
+}
+.welcome-link {
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.welcome-link:hover {
+  color: var(--text-secondary);
 }

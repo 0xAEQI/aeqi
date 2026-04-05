@@ -68,7 +68,7 @@ export default function WorkspaceSwitcher() {
         <span className="ws-brand" onClick={() => navigate("/")}>æ</span>
         <div className="ws-trigger-text" onClick={() => navigate("/")}>
           <span className="ws-trigger-name">{display}</span>
-          <span className="ws-trigger-plan">hosted</span>
+          <span className="ws-trigger-plan">{localStorage.getItem("aeqi_workspace_tagline") || "The agent runtime."}</span>
         </div>
         <button className="ws-chevron-btn" onClick={() => setOpen(!open)} title="Switch workspace">
           <svg
