@@ -34,6 +34,7 @@ export default function Footer() {
             <div className="space-y-2.5 text-[14px]">
               <a href="/terms" className="block text-black/60 hover:text-black/80 transition-colors">Terms</a>
               <a href="/privacy" className="block text-black/60 hover:text-black/80 transition-colors">Privacy</a>
+              <a href="/brand" className="block text-black/60 hover:text-black/80 transition-colors">Brand</a>
             </div>
           </motion.div>
         </div>
