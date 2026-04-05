@@ -116,7 +116,7 @@ function Footer() {
             <motion.span {...fadeView(0.1)}>conomy</motion.span>
           </div>
           <motion.p className="mt-6 text-[15px] text-black/35 leading-relaxed max-w-md" {...fadeView(0.15)}>
-            Four primitives power the runtime. Agents organize into trees. Events stream. Quests decompose intent. Insights compound knowledge.
+            What&apos;s the smallest system that produces intelligence? Four building blocks. Everything else emerges.
           </motion.p>
           <motion.div className="mt-6 flex items-center gap-6 text-[13px] font-mono text-black/25" {...fadeView(0.2)}>
             <span><span className="font-bold text-black/50">a</span>gent</span>
