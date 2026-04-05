@@ -772,7 +772,12 @@ export default function AgentSessionView({
   if (!agentId) return null;
 
   return (
-    <div className="asv">
+    <div
+      className={`asv ${dragOver ? "asv--dragover" : ""}`}
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+    >
       {/* Session header */}
       <div className="asv-header">
         <div className="asv-header-info">
@@ -1085,10 +1090,7 @@ export default function AgentSessionView({
       {/* Session attachments — prompts, task, files (only visible before first message) */}
       {!activeSessionId && (
         <div
-          className={`asv-attach-bar ${dragOver ? "asv-attach-bar--dragover" : ""}`}
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
+          className="asv-attach-bar"
         >
           {/* Hidden file input */}
           <input

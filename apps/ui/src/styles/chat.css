@@ -835,6 +835,11 @@
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  transition: outline 0.15s;
+}
+.asv--dragover {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .asv-header {
@@ -1294,10 +1299,6 @@
   flex-shrink: 0;
   width: 100%;
   transition: background 0.15s;
-}
-.asv-attach-bar--dragover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  border-top-color: var(--accent);
 }
 .asv-attach-chips {
   display: flex;
