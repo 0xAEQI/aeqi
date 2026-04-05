@@ -202,7 +202,7 @@ function Pricing() {
         <motion.div className="mt-20 max-w-2xl mx-auto" {...fadeView(0.1)}>
           <h3 className="text-[14px] font-semibold tracking-wide uppercase text-black/50 mb-4 text-center">Token pricing</h3>
           <p className="text-[15px] leading-[1.7] text-black/35 text-center mb-8">
-            LLM costs at provider rates. 20% platform fee. That's it. Or bring your own OpenRouter API key to use any model on any plan.
+            LLM costs at provider rates. 20% platform fee. That's it. Or bring your own OpenRouter or Xiaomi API key to use instead.
           </p>
           <div className="grid grid-cols-3 gap-6 text-center">
             <div>
