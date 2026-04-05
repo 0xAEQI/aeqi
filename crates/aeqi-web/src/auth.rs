@@ -69,6 +69,17 @@ pub fn signing_secret(state: &AppState) -> &str {
     }
 }
 
+/// Extract user_id from a validated request (for data scoping).
+pub fn extract_user_id(state: &AppState, req: &Request) -> Option<String> {
+    if state.auth_mode != AuthMode::Accounts {
+        return None;
+    }
+    let token = extract_bearer(req)?;
+    let secret = signing_secret(state);
+    let claims = validate_token(token, secret).ok()?;
+    claims.user_id
+}
+
 /// Axum middleware — dispatches by auth mode.
 pub async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
     match state.auth_mode {

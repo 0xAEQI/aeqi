@@ -1,6 +1,6 @@
 use axum::{
     Json, Router,
-    extract::{Query, State},
+    extract::{Query, Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -73,15 +73,63 @@ async fn status(State(state): State<AppState>) -> Response {
 
 // --- Companies ---
 
-async fn projects(State(state): State<AppState>) -> Response {
+async fn projects(State(state): State<AppState>, req: Request) -> Response {
+    let user_id = crate::auth::extract_user_id(&state, &req);
+
+    // In accounts mode with a user, filter by membership.
+    if let Some(ref uid) = user_id {
+        if let Some(ref store) = state.user_store {
+            let user_companies = store.get_user_companies(uid);
+
+            let ipc_resp = ipc_proxy(state, "companies", serde_json::Value::Null).await;
+            let body_bytes = axum::body::to_bytes(ipc_resp.into_body(), 1024 * 1024)
+                .await
+                .unwrap_or_default();
+
+            if let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+                if let Some(companies) = json.get_mut("companies").and_then(|v| v.as_array_mut()) {
+                    companies.retain(|c| {
+                        c.get("name")
+                            .and_then(|n| n.as_str())
+                            .map(|n| user_companies.contains(&n.to_string()))
+                            .unwrap_or(false)
+                    });
+                }
+                return axum::Json(json).into_response();
+            }
+            return (StatusCode::INTERNAL_SERVER_ERROR, "failed to parse companies").into_response();
+        }
+    }
+
+    // Non-accounts mode or no user: return all.
     ipc_proxy(state, "companies", serde_json::Value::Null).await
 }
 
 async fn create_company(
     State(state): State<AppState>,
-    axum::Json(body): axum::Json<serde_json::Value>,
+    req: Request,
 ) -> Response {
-    ipc_proxy(state, "create_company", body).await
+    let user_id = crate::auth::extract_user_id(&state, &req);
+
+    // Extract body.
+    let body_bytes = axum::body::to_bytes(req.into_body(), 1024 * 64)
+        .await
+        .unwrap_or_default();
+    let body: serde_json::Value =
+        serde_json::from_slice(&body_bytes).unwrap_or(serde_json::Value::Null);
+
+    let resp = ipc_proxy(state.clone(), "create_company", body.clone()).await;
+
+    // Associate company with user in accounts mode.
+    if let Some(uid) = user_id {
+        if let Some(name) = body.get("name").and_then(|n| n.as_str()) {
+            if let Some(ref store) = state.user_store {
+                store.add_user_company(&uid, name, "owner");
+            }
+        }
+    }
+
+    resp
 }
 
 // --- Tasks ---
