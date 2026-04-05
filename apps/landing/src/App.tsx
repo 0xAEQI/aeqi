@@ -109,16 +109,7 @@ function Footer() {
   return (
     <footer className="border-t border-black/5 py-8 px-6">
       <div className="max-w-5xl mx-auto flex items-center justify-between text-[13px] text-black/25">
-        <span className="text-[13px] font-bold tracking-tight text-black">
-          aeqi.ai&ensp;/&ensp;æ
-        </span>
         <div className="flex items-center gap-5">
-          <a
-            href="https://github.com/0xAEQI/aeqi"
-            className="hover:text-black/50 transition-colors"
-          >
-            github
-          </a>
           <a
             href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md"
             className="hover:text-black/50 transition-colors"
@@ -126,12 +117,33 @@ function Footer() {
             docs
           </a>
           <a
-            href="https://x.com/0xAEQI"
+            href="https://github.com/0xAEQI/aeqi"
             className="hover:text-black/50 transition-colors"
           >
-            x
+            github
+          </a>
+          <a
+            href="https://aeqi.ai/enterprise"
+            className="hover:text-black/50 transition-colors"
+          >
+            enterprise
+          </a>
+          <a
+            href="https://app.aeqi.ai"
+            className="hover:text-black/50 transition-colors"
+          >
+            get started
           </a>
         </div>
+        <span className="text-[13px] font-bold tracking-tight text-black">
+          aeqi.ai&ensp;/&ensp;æ
+        </span>
+        <a
+          href="https://x.com/0xAEQI"
+          className="hover:text-black/50 transition-colors"
+        >
+          x
+        </a>
       </div>
     </footer>
   );
