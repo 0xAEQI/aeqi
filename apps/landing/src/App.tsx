@@ -49,7 +49,7 @@ function Hero() {
                 exit={{ opacity: 0, scale: 1.02 }}
                 transition={{ duration: 0.25 }}
               >
-                æqi
+                æq<span className="inline-block translate-y-[0.04em]">i</span>
               </motion.span>
             ) : (
               <motion.div

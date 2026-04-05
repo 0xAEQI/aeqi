@@ -10,7 +10,7 @@ export default function Nav() {
     >
       <div className="w-full max-w-3xl backdrop-blur-2xl bg-white/60 border border-black/[0.06] rounded-2xl shadow-lg shadow-black/[0.03] px-5 h-12 flex items-center justify-between">
         <a href="/" className="text-[18px] font-bold tracking-[-0.08em] text-black/70 hover:text-black/85 transition-colors">
-          æqi
+          æq<span className="inline-block translate-y-[0.04em]">i</span>
         </a>
         <div className="flex items-center gap-1">
           <a href="/pricing" className="text-[13px] sm:text-[14px] text-black/60 hover:text-black/85 hover:bg-black/[0.04] rounded-lg px-3 py-1.5 transition-all hidden sm:block">
