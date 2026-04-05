@@ -1,21 +1,8 @@
 import Header from "@/components/Header";
 import { useDaemonStore } from "@/store/daemon";
 import { useChatStore } from "@/store/chat";
+import { timeAgo } from "@/lib/format";
 import { DataState } from "@/components/ui";
-
-function timeAgo(ts: string): string {
-  if (!ts) return "";
-  const diff = Date.now() - new Date(ts).getTime();
-  if (diff < 0) return "now";
-  const sec = Math.floor(diff / 1000);
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const d = Math.floor(hr / 24);
-  return `${d}d ago`;
-}
 
 function formatDecisionType(type: string): string {
   return type.replace(/_/g, " ");

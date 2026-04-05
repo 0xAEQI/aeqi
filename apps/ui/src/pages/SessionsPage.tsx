@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import { api } from "@/lib/api";
+import { timeAgo } from "@/lib/format";
 import StatusBadge from "@/components/StatusBadge";
 import { useChatStore } from "@/store/chat";
 import { useAuthStore } from "@/store/auth";
@@ -181,16 +182,6 @@ interface SessionInfo {
   time?: string;
   sessionId?: string;
   agentId?: string;
-}
-
-function timeAgo(ts: string): string {
-  const diff = Date.now() - new Date(ts).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "now";
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  return `${Math.floor(hrs / 24)}d`;
 }
 
 export default function SessionsPage() {

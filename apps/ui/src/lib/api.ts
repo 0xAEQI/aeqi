@@ -234,7 +234,14 @@ export const api = {
   },
 
   // Write: Create Task
-  createTask: (data: { company: string; subject: string; description?: string }) =>
+  createTask: (data: {
+    company: string;
+    subject: string;
+    description?: string;
+    priority?: string;
+    acceptance_criteria?: string;
+    assignee?: string;
+  }) =>
     request<any>("/tasks", {
       method: "POST",
       body: JSON.stringify(data),

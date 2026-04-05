@@ -4,6 +4,7 @@ import Header from "@/components/Header";
 import { useDaemonStore } from "@/store/daemon";
 import { useChatStore } from "@/store/chat";
 import { api } from "@/lib/api";
+import { timeAgo } from "@/lib/format";
 import type { QuestStatus, QuestPriority } from "@/lib/types";
 
 /* ── Helpers ──────────────────────────────────────────── */
@@ -21,18 +22,6 @@ const COLUMNS: { status: QuestStatus; label: string }[] = [
   { status: "blocked", label: "Blocked" },
   { status: "done", label: "Done" },
 ];
-
-function timeAgo(iso: string): string {
-  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return `${Math.floor(days / 30)}mo ago`;
-}
 
 /* ── Create Quest Modal ───────────────────────────────── */
 
@@ -76,6 +65,9 @@ function CreateQuestModal({ open, defaultStatus, onClose }: CreateModalProps) {
         company: agentName || selectedAgent?.name || "default",
         subject: subject.trim(),
         description: description.trim() || undefined,
+        priority,
+        acceptance_criteria: acceptance.trim() || undefined,
+        assignee: agentName || undefined,
       });
       await fetchQuests();
       onClose();

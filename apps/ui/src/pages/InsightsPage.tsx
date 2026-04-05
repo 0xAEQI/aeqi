@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Header from "@/components/Header";
 import { DataState } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -23,13 +23,22 @@ export default function InsightsPage() {
   const selectedAgent = useChatStore((s) => s.selectedAgent);
   const [insights, setInsights] = useState<any[]>([]);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Debounce search input — 300ms
+  useEffect(() => {
+    debounceRef.current = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(debounceRef.current);
+  }, [search]);
 
   useEffect(() => {
     setLoading(true);
     api
       .getMemories({
-        query: search || undefined,
+        query: debouncedSearch || undefined,
+        company: selectedAgent?.name || undefined,
         limit: 100,
       })
       .then((d) => {
@@ -37,14 +46,9 @@ export default function InsightsPage() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [search]);
+  }, [debouncedSearch, selectedAgent]);
 
-  let filtered = insights;
-  if (selectedAgent) {
-    filtered = filtered.filter(
-      (m: any) => m.agent_id === selectedAgent.id || m.agent_id === selectedAgent.name
-    );
-  }
+  const filtered = insights;
 
   return (
     <div className="page-content">
