@@ -1,4 +1,6 @@
 import { motion } from "framer-motion";
+import Nav from "./Nav";
+import Footer from "./Footer";
 
 const fade = (delay = 0) => ({
   initial: { opacity: 0, y: 8 } as const,
@@ -12,39 +14,6 @@ const fadeView = (delay = 0) => ({
   viewport: { once: true, margin: "-40px" } as const,
   transition: { duration: 0.7, ease: [0.25, 0.1, 0.25, 1] as const, delay },
 });
-
-/* ─── Nav ─── */
-function Nav() {
-  return (
-    <motion.nav
-      className="fixed top-0 left-0 right-0 z-50 flex justify-center pt-4 px-4"
-      initial={{ opacity: 0, y: -20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, delay: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
-    >
-      <div className="w-full max-w-3xl backdrop-blur-2xl bg-white/60 border border-black/[0.06] rounded-2xl shadow-lg shadow-black/[0.03] px-5 h-12 flex items-center justify-between">
-        <a href="/" className="text-[18px] font-bold tracking-tighter text-black/50 hover:text-black/70 transition-colors">
-          æqi
-        </a>
-        <div className="flex items-center gap-1">
-          <a href="/pricing" className="text-[13px] text-black/70 font-medium hover:bg-black/[0.04] rounded-lg px-3 py-1.5 transition-all">
-            Pricing
-          </a>
-          <div className="w-px h-5 bg-black/[0.08] mx-1.5" />
-          <a href="https://app.aeqi.ai/login" className="text-[13px] text-black/40 hover:text-black/70 hover:bg-black/[0.04] rounded-lg px-3 py-1.5 transition-all">
-            Log in
-          </a>
-          <a
-            href="https://app.aeqi.ai/signup"
-            className="bg-black text-white rounded-xl px-4 py-1.5 text-[13px] font-medium hover:bg-black/85 transition-all hover:shadow-md hover:shadow-black/10 active:scale-[0.97]"
-          >
-            Sign up
-          </a>
-        </div>
-      </div>
-    </motion.nav>
-  );
-}
 
 /* ─── Pricing ─── */
 function Pricing() {
@@ -218,49 +187,6 @@ function Pricing() {
         </motion.div>
       </div>
     </section>
-  );
-}
-
-/* ─── Footer ─── */
-function Footer() {
-  return (
-    <footer className="border-t border-black/[0.04]">
-      <div className="max-w-4xl mx-auto px-6 py-14 w-full">
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-10 md:gap-14">
-          <motion.div {...fadeView(0.05)}>
-            <p className="text-[11px] uppercase tracking-[0.2em] text-black/40 mb-4">Product</p>
-            <div className="space-y-2.5 text-[13px]">
-              <a href="https://app.aeqi.ai" className="block text-black/50 hover:text-black/70 transition-colors">Launch a Company</a>
-              <a href="/pricing" className="block text-black/50 hover:text-black/70 transition-colors">Pricing</a>
-              <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="block text-black/50 hover:text-black/70 transition-colors">Docs</a>
-            </div>
-          </motion.div>
-
-          <motion.div {...fadeView(0.1)}>
-            <p className="text-[11px] uppercase tracking-[0.2em] text-black/40 mb-4">Community</p>
-            <div className="space-y-2.5 text-[13px]">
-              <a href="https://github.com/0xAEQI/aeqi" className="block text-black/50 hover:text-black/70 transition-colors">GitHub</a>
-              <a href="https://x.com/0xAEQI" className="block text-black/50 hover:text-black/70 transition-colors">X</a>
-            </div>
-          </motion.div>
-
-          <motion.div {...fadeView(0.15)}>
-            <p className="text-[11px] uppercase tracking-[0.2em] text-black/40 mb-4">Legal</p>
-            <div className="space-y-2.5 text-[13px]">
-              <a href="/terms" className="block text-black/50 hover:text-black/70 transition-colors">Terms</a>
-              <a href="/privacy" className="block text-black/50 hover:text-black/70 transition-colors">Privacy</a>
-            </div>
-          </motion.div>
-        </div>
-
-        <motion.div {...fadeView(0.2)} className="mt-14 pt-6 border-t border-black/[0.04] flex items-center justify-between">
-          <a href="/" className="text-[18px] font-bold tracking-tighter text-black/25 hover:text-black/40 transition-colors">æqi</a>
-          <p className="text-[12px] text-black/20">
-            &copy; {new Date().getFullYear()} aeqi.ai
-          </p>
-        </motion.div>
-      </div>
-    </footer>
   );
 }
 

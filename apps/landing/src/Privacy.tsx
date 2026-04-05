@@ -1,4 +1,6 @@
 import { motion } from "framer-motion";
+import Nav from "./Nav";
+import Footer from "./Footer";
 
 const fade = (delay = 0) => ({
   initial: { opacity: 0, y: 8 } as const,
@@ -8,11 +10,11 @@ const fade = (delay = 0) => ({
 
 export default function Privacy() {
   return (
-    <div className="min-h-screen bg-white">
-      <div className="max-w-2xl mx-auto px-6 pt-32 pb-20">
-        <motion.div {...fade(0.1)}>
-          <a href="/" className="text-[18px] font-bold tracking-tighter text-black/50 hover:text-black/70 transition-colors">æqi</a>
-          <h1 className="mt-8 text-[28px] font-semibold tracking-tight text-black/80">Privacy Policy</h1>
+    <div className="min-h-screen flex flex-col bg-white">
+      <Nav />
+      <section className="flex-1 px-6 pt-28 pb-20">
+        <motion.div className="max-w-2xl mx-auto" {...fade(0.1)}>
+          <h1 className="text-[28px] font-semibold tracking-tight text-black/80">Privacy Policy</h1>
           <p className="mt-2 text-[14px] text-black/40">Last updated: April 2026</p>
           <div className="mt-10 space-y-6 text-[15px] leading-[1.8] text-black/60">
             <h2 className="text-[17px] font-semibold text-black/80 pt-4">What we collect</h2>
@@ -35,6 +37,9 @@ export default function Privacy() {
             <p>We may update this policy at any time. We will notify you of material changes via email or through the Platform.</p>
           </div>
         </motion.div>
+      </section>
+      <div className="bg-[#fafafa]">
+        <Footer />
       </div>
     </div>
   );
