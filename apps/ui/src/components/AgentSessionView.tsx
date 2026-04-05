@@ -841,49 +841,39 @@ export default function AgentSessionView({
       {/* Session header */}
       <div className="asv-header">
         <div className="asv-header-info">
-          <span className="asv-header-name">{displayName}</span>
-          {agentInfo?.model && (
-            <span className="asv-header-model">{agentInfo.model}</span>
-          )}
+          <BlockAvatar name={agentName} size={24} />
+          <div className="asv-header-text">
+            <span className="asv-header-name">{displayName}</span>
+            {activeSessionId && (
+              <span className="asv-header-session-name">
+                {sessions.find((s) => s.id === activeSessionId)?.first_message?.slice(0, 40) || `Session ${activeSessionId.slice(0, 8)}`}
+              </span>
+            )}
+          </div>
           <span className={`asv-header-dot ${wsConnected ? "live" : ""}`} />
         </div>
         <div className="asv-header-actions">
+          {agentInfo?.model && (
+            <span className="asv-header-model">{agentInfo.model}</span>
+          )}
           <button
-            className="asv-session-toggle"
+            className={`asv-session-toggle ${showSessionList ? "asv-session-toggle--open" : ""}`}
             onClick={() => setShowSessionList(!showSessionList)}
             title="Sessions"
           >
-            {sessions.length > 0 ? `${sessions.length} sessions` : "sessions"}
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 12 12"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            >
-              <path
-                d={
-                  showSessionList ? "M3 7.5L6 4.5L9 7.5" : "M3 4.5L6 7.5L9 4.5"
-                }
-              />
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M2 3.5h10M2 7h10M2 10.5h10" />
             </svg>
+            {sessions.length > 0 && (
+              <span className="asv-session-count">{sessions.length}</span>
+            )}
           </button>
           <button
             className="asv-new-session"
             onClick={handleNewConversation}
             title="New conversation"
           >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 14 14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M7 3v8M3 7h8" />
             </svg>
           </button>
@@ -898,35 +888,32 @@ export default function AgentSessionView({
               No sessions yet. Start a conversation below.
             </div>
           ) : (
-            sessions.map((s) => (
-              <div
-                key={s.id}
-                className={`asv-session-item${s.id === activeSessionId ? " active" : ""}`}
-                onClick={() => handleSelectSession(s.id)}
-              >
-                <div className="asv-session-item-info">
-                  <span className="asv-session-item-preview">
-                    {s.first_message || `Session ${s.id.slice(0, 8)}`}
-                  </span>
-                  <span className="asv-session-item-date">
-                    {new Date(s.created_at).toLocaleDateString([], {
-                      month: "short",
-                      day: "numeric",
-                    })}
-                  </span>
+            sessions.map((s) => {
+              const isActive = s.id === activeSessionId;
+              const isLive = s.status === "active";
+              const preview = s.first_message || `Session ${s.id.slice(0, 8)}`;
+              const date = new Date(s.created_at);
+              const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              const dateStr = date.toLocaleDateString([], { month: "short", day: "numeric" });
+              return (
+                <div
+                  key={s.id}
+                  className={`asv-session-item${isActive ? " active" : ""}`}
+                  onClick={() => { handleSelectSession(s.id); setShowSessionList(false); }}
+                >
+                  <div className="asv-session-item-top">
+                    <span className={`asv-session-dot ${isLive ? "live" : ""}`} />
+                    <span className="asv-session-item-preview">{preview}</span>
+                  </div>
+                  <div className="asv-session-item-bottom">
+                    <span className="asv-session-item-date">{dateStr} {timeStr}</span>
+                    {s.message_count != null && (
+                      <span className="asv-session-item-count">{s.message_count} msgs</span>
+                    )}
+                  </div>
                 </div>
-                <div className="asv-session-item-meta">
-                  <span className={`asv-session-status ${s.status}`}>
-                    {s.status}
-                  </span>
-                  {s.message_count != null && (
-                    <span className="asv-session-item-count">
-                      {s.message_count} msgs
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       )}
