@@ -85,7 +85,7 @@ function Pricing() {
               </div>
               <div className="flex items-center gap-2.5">
                 <span className="text-black/15">+</span>
-                <span>500K LLM tokens included</span>
+                <span>50M LLM tokens included</span>
               </div>
               <div className="flex items-center gap-2.5">
                 <span className="text-black/15">+</span>
@@ -134,7 +134,7 @@ function Pricing() {
               </div>
               <div className="flex items-center gap-2.5">
                 <span className="text-black/15">+</span>
-                <span>5M LLM tokens included</span>
+                <span>500M LLM tokens included</span>
               </div>
               <div className="flex items-center gap-2.5">
                 <span className="text-black/15">+</span>
