@@ -1196,6 +1196,43 @@ impl Daemon {
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
 
+            // Extract tenancy scope from IPC params (injected by web layer).
+            let allowed_companies: Option<Vec<String>> = request
+                .get("allowed_companies")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                });
+
+            // Helper: check if a company/project name is allowed.
+            let is_allowed = |name: &str| -> bool {
+                match &allowed_companies {
+                    None => true,
+                    Some(list) => list.iter().any(|c| c == name),
+                }
+            };
+
+            // Helper: validate project param against scope. Returns error JSON if forbidden.
+            let check_project = |req: &serde_json::Value| -> Option<serde_json::Value> {
+                if allowed_companies.is_none() { return None; }
+                if let Some(project) = req.get("project").and_then(|v| v.as_str()) {
+                    if !project.is_empty() && !is_allowed(project) {
+                        return Some(serde_json::json!({"ok": false, "error": "access denied"}));
+                    }
+                }
+                None
+            };
+
+            // Pre-check: if request has a `project` param, validate it against scope.
+            if let Some(denied) = check_project(&request) {
+                let _ = writer.write_all(denied.to_string().as_bytes()).await;
+                let _ = writer.write_all(b"\n").await;
+                let _ = writer.flush().await;
+                continue;
+            }
+
             let response = match cmd {
                 "ping" => serde_json::json!({"ok": true, "pong": true}),
 
@@ -1885,6 +1922,15 @@ impl Daemon {
                         Ok(tasks) => {
                             let all_tasks: Vec<serde_json::Value> = tasks
                                 .iter()
+                                .filter(|task| {
+                                    // Tenancy filter: check if task's agent belongs to an allowed company.
+                                    if allowed_companies.is_none() {
+                                        return true;
+                                    }
+                                    // Task prefix (e.g. "sg-001") maps to company prefix.
+                                    // Also check agent_id against company agent names.
+                                    task.assignee.as_deref().map(|a| is_allowed(a)).unwrap_or(true)
+                                })
                                 .map(|task| {
                                     serde_json::json!({
                                         "id": task.id.0,
@@ -3084,7 +3130,26 @@ impl Daemon {
                     });
                     match agent_registry.list(parent_filter, status).await {
                         Ok(agents) => {
-                            let items: Vec<serde_json::Value> = agents
+                            // Build set of allowed agent IDs (company agents + all their descendants).
+                            let filtered_agents = if allowed_companies.is_some() {
+                                // Find IDs of company agents the user owns.
+                                let company_ids: std::collections::HashSet<String> = agents
+                                    .iter()
+                                    .filter(|a| a.template == "company" && is_allowed(&a.name))
+                                    .map(|a| a.id.clone())
+                                    .collect();
+                                // Include company agents + agents whose parent is a company agent.
+                                agents
+                                    .into_iter()
+                                    .filter(|a| {
+                                        company_ids.contains(&a.id)
+                                            || a.parent_id.as_ref().map(|pid| company_ids.contains(pid)).unwrap_or(false)
+                                    })
+                                    .collect::<Vec<_>>()
+                            } else {
+                                agents
+                            };
+                            let items: Vec<serde_json::Value> = filtered_agents
                                 .iter()
                                 .map(|a| {
                                     serde_json::json!({

@@ -81,7 +81,7 @@ pub fn extract_user_id(state: &AppState, req: &Request) -> Option<String> {
 }
 
 /// Axum middleware — dispatches by auth mode.
-pub async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
+pub async fn require_auth(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     match state.auth_mode {
         AuthMode::None => next.run(req).await,
         AuthMode::Secret | AuthMode::Accounts => {
@@ -90,7 +90,11 @@ pub async fn require_auth(State(state): State<AppState>, req: Request, next: Nex
                 return (StatusCode::UNAUTHORIZED, "missing authorization header").into_response();
             };
             match validate_token(token, secret) {
-                Ok(_) => next.run(req).await,
+                Ok(claims) => {
+                    // Stash claims in request extensions for downstream extractors.
+                    req.extensions_mut().insert(claims);
+                    next.run(req).await
+                }
                 Err(_) => {
                     (StatusCode::UNAUTHORIZED, "invalid or expired token").into_response()
                 }

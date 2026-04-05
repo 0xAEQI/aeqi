@@ -5,6 +5,7 @@ pub mod email;
 pub mod embedded_ui;
 pub mod ipc;
 pub mod routes;
+pub mod scope;
 pub mod server;
 pub mod session_ws;
 pub mod users;
