@@ -1162,7 +1162,7 @@ export default function AgentSessionView({
                   placeholder={
                     showAttachPicker === "prompt"
                       ? "Search prompts..."
-                      : "Search tasks..."
+                      : "Search quests..."
                   }
                   value={attachSearch}
                   onChange={(e) => setAttachSearch(e.target.value)}
@@ -1252,7 +1252,7 @@ export default function AgentSessionView({
                       ))}
                     {availableTasks.length === 0 && (
                       <div className="asv-attach-picker-empty">
-                        No open tasks
+                        No open quests
                       </div>
                     )}
                   </>
@@ -1282,7 +1282,7 @@ export default function AgentSessionView({
                 className="asv-attach-toggle"
                 onClick={() => setShowAttachPicker("task")}
               >
-                + task
+                + quest
               </button>
               <button
                 className="asv-attach-toggle"
