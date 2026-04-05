@@ -183,10 +183,12 @@ function Footer() {
 /* ─── App ─── */
 export default function App() {
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen flex flex-col bg-white">
       <Nav />
       <Hero />
-      <Footer />
+      <div className="flex-1 bg-black/[0.02]">
+        <Footer />
+      </div>
     </div>
   );
 }
