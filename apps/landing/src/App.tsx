@@ -194,8 +194,8 @@ function ClosingCTA() {
 function Footer() {
   return (
     <footer className="border-t border-black/[0.04]">
-      <div className="max-w-5xl mx-auto px-6 py-14 w-full">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-10">
+      <div className="max-w-4xl mx-auto px-6 py-14 w-full">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-10">
           <motion.div {...fadeView(0.05)}>
             <p className="text-[11px] uppercase tracking-[0.2em] text-black/20 mb-4">Product</p>
             <div className="space-y-2.5 text-[13px]">
@@ -220,16 +220,14 @@ function Footer() {
               <a href="https://aeqi.ai/privacy" className="block text-black/35 hover:text-black/60 transition-colors">Privacy</a>
             </div>
           </motion.div>
-
-          <motion.div {...fadeView(0.2)} className="flex flex-col justify-between">
-            <div>
-              <span className="text-[28px] font-bold tracking-tighter text-black/40 leading-none">æ</span>
-              <p className="mt-3 text-[12px] text-black/15">
-                &copy; {new Date().getFullYear()} aeqi.ai
-              </p>
-            </div>
-          </motion.div>
         </div>
+
+        <motion.div {...fadeView(0.2)} className="mt-14 pt-6 border-t border-black/[0.04] flex items-center justify-between">
+          <span className="text-[22px] font-bold tracking-tighter text-black/25 leading-none">æ</span>
+          <p className="text-[12px] text-black/20">
+            &copy; {new Date().getFullYear()} aeqi.ai
+          </p>
+        </motion.div>
       </div>
     </footer>
   );
