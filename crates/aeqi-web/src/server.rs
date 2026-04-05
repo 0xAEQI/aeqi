@@ -371,10 +371,21 @@ async fn signup_handler(
             tokio::spawn(async move { es.send_verification(&to, &n, &c).await });
         }
 
+        // Return a token so the user can onboard while unverified.
+        let signing_key = auth::signing_secret(&state);
+        let token = auth::create_token(signing_key, 24, Some(&user.id), Some(&user.email))
+            .unwrap_or_default();
+
         return axum::Json(serde_json::json!({
             "ok": true,
             "pending_verification": true,
             "email": email,
+            "token": token,
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "name": user.name,
+            },
         }))
         .into_response();
     }

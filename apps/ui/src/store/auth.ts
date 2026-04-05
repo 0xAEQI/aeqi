@@ -104,7 +104,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const resp = await api.signup(email, password, name);
       if (resp.ok && (resp as any).pending_verification) {
-        set({ loading: false, pendingEmail: email });
+        // Save token so user can onboard while unverified.
+        if (resp.token) {
+          localStorage.setItem("aeqi_token", resp.token);
+          localStorage.setItem("aeqi_pending_email", email);
+          set({ token: resp.token, user: resp.user || null, loading: false, pendingEmail: email });
+        } else {
+          set({ loading: false, pendingEmail: email });
+        }
         return "pending";
       }
       if (resp.ok && resp.token) {
