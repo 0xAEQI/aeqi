@@ -1,5 +1,5 @@
-import { useState, lazy, Suspense } from "react";
-import { motion } from "framer-motion";
+import { useState, lazy, Suspense, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 
 const ParticleLogo = lazy(() => import("./ParticleLogo"));
 
@@ -56,6 +56,12 @@ function Nav() {
 /* ─── Hero ─── */
 function Hero() {
   const [copied, setCopied] = useState(false);
+  const [showParticles, setShowParticles] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowParticles(true), 1200);
+    return () => clearTimeout(timer);
+  }, []);
 
   const copy = () => {
     navigator.clipboard.writeText("cargo install aeqi");
@@ -66,12 +72,31 @@ function Hero() {
   return (
     <section className="flex-1 flex items-center justify-center px-6">
       <div className="max-w-3xl mx-auto text-center py-32">
-        <motion.div {...fade(0.1)} className="flex justify-center">
-          <Suspense fallback={
-            <span className="text-[120px] md:text-[180px] font-bold tracking-tighter leading-none text-black/60 select-none">æ</span>
-          }>
-            <ParticleLogo size={300} />
-          </Suspense>
+        <motion.div {...fade(0.1)} className="flex justify-center" style={{ height: 300 }}>
+          <AnimatePresence mode="wait">
+            {!showParticles ? (
+              <motion.span
+                key="solid"
+                className="text-[180px] md:text-[220px] font-bold tracking-tighter leading-none text-black/60 select-none"
+                style={{ lineHeight: "300px" }}
+                exit={{ opacity: 0, scale: 1.05 }}
+                transition={{ duration: 0.3 }}
+              >
+                æ
+              </motion.span>
+            ) : (
+              <motion.div
+                key="particles"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.1 }}
+              >
+                <Suspense fallback={null}>
+                  <ParticleLogo size={300} />
+                </Suspense>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
 
         <motion.p

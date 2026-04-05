@@ -142,10 +142,10 @@ export default function ParticleLogo({
     }
     (geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
 
-    // After a brief pause, burst particles outward
+    // Burst immediately — the solid text already held
     let hasBurst = false;
-    const BURST_FRAME = 50; // ~0.8s at 60fps
-    const BURST_FORCE = 12;
+    const BURST_FRAME = 3; // Almost instant
+    const BURST_FORCE = 10;
 
     let frame = 0;
     let animId: number;
