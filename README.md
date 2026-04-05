@@ -1,7 +1,7 @@
 # AEQI
 
 [![CI](https://github.com/0xAEQI/aeqi/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/0xAEQI/aeqi/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: BSL 1.1](https://img.shields.io/badge/license-BSL%201.1-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-2024-black)](Cargo.toml)
 [![Tests](https://img.shields.io/badge/tests-634%2B-brightgreen)](Cargo.toml)
 
