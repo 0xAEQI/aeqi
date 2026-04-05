@@ -59,6 +59,23 @@ function Pricing() {
           </h1>
         </motion.div>
 
+        {/* Free trial banner */}
+        <motion.div
+          className="mb-8 rounded-2xl border border-black/[0.06] bg-white px-8 py-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+          {...fade(0.15)}
+        >
+          <div>
+            <p className="text-[15px] font-semibold text-black/70">3-day free trial</p>
+            <p className="text-[13px] text-black/40 mt-1">1 company. 3 agents. 3M tokens. No credit card required.</p>
+          </div>
+          <a
+            href="https://app.aeqi.ai/signup?plan=trial"
+            className="shrink-0 bg-black text-white rounded-xl px-5 py-2 text-[13px] font-medium hover:bg-black/85 transition-all hover:shadow-md hover:shadow-black/10 active:scale-[0.97]"
+          >
+            Start Free Trial
+          </a>
+        </motion.div>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Starter */}
           <motion.div
