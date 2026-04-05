@@ -17,7 +17,7 @@ function Nav() {
     >
       <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
         <a href="/" className="text-[20px] font-bold tracking-tight text-black">
-          aeqi.ai
+          aeqi
         </a>
         <div className="flex items-center gap-5">
           <a
@@ -98,47 +98,39 @@ const fadeView = (delay = 0) => ({
   transition: { duration: 0.5, ease: "easeOut" as const, delay },
 });
 
-/* ─── Primitives ─── */
-const primitives = [
-  { letter: "a", word: "gent", desc: "Nodes in a tree. Teams, specialists, departments." },
-  { letter: "e", word: "vent", desc: "One stream. Audit log, cost report, transcript." },
-  { letter: "q", word: "uest", desc: "Work decomposed from intent. Claimed. Resolved." },
-  { letter: "i", word: "nsight", desc: "Knowledge that walks the tree. Scoped. Inherited." },
-];
-
 /* ─── Footer ─── */
 function Footer() {
   return (
-    <footer className="border-t border-black/[0.03] bg-black/[0.015]">
-      <div className="max-w-5xl mx-auto px-6 py-20">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-16">
-          {/* Left: Primitives */}
-          <div>
-            <motion.p
-              className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-10"
-              {...fadeView()}
-            >
-              four primitives
-            </motion.p>
-            <div className="space-y-6">
-              {primitives.map((p, i) => (
-                <motion.div key={p.letter} className="flex items-baseline gap-3" {...fadeView(0.06 * i)}>
-                  <span className="text-[28px] font-bold tracking-tighter text-black leading-none">
-                    {p.letter}
-                  </span>
-                  <div>
-                    <span className="text-[15px] font-medium text-black/60">
-                      {p.letter}{p.word}
-                    </span>
-                    <p className="text-[13px] text-black/30 mt-0.5">{p.desc}</p>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
+    <footer className="bg-black/[0.02]">
+      {/* Brand story — the name reveal */}
+      <div className="max-w-5xl mx-auto px-6 pt-24 pb-16">
+        <motion.div className="max-w-2xl" {...fadeView()}>
+          <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-8">
+            why aeqi
+          </p>
+          <div className="flex items-baseline gap-1 text-[48px] md:text-[64px] font-bold tracking-tighter leading-none text-black/10">
+            <motion.span className="text-black" {...fadeView(0.05)}>a</motion.span>
+            <motion.span {...fadeView(0.05)}>gent</motion.span>
+            <motion.span className="mx-3 text-black/10" {...fadeView(0.1)}>&middot;</motion.span>
+            <motion.span className="text-black" {...fadeView(0.1)}>e</motion.span>
+            <motion.span {...fadeView(0.1)}>conomy</motion.span>
           </div>
+          <motion.p className="mt-6 text-[15px] text-black/35 leading-relaxed max-w-md" {...fadeView(0.15)}>
+            Four primitives power the runtime. Agents organize into trees. Events stream. Quests decompose intent. Insights compound knowledge.
+          </motion.p>
+          <motion.div className="mt-6 flex items-center gap-6 text-[13px] font-mono text-black/25" {...fadeView(0.2)}>
+            <span><span className="font-bold text-black/50">a</span>gent</span>
+            <span><span className="font-bold text-black/50">e</span>vent</span>
+            <span><span className="font-bold text-black/50">q</span>uest</span>
+            <span><span className="font-bold text-black/50">i</span>nsight</span>
+          </motion.div>
+        </motion.div>
+      </div>
 
-          {/* Right: Link groups */}
-          <div className="grid grid-cols-3 gap-8">
+      {/* Links + brand */}
+      <div className="border-t border-black/5">
+        <div className="max-w-5xl mx-auto px-6 py-12">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
             <motion.div {...fadeView(0.05)}>
               <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Product</p>
               <div className="space-y-2.5 text-[13px]">
@@ -163,21 +155,26 @@ function Footer() {
                 <a href="https://aeqi.ai/privacy" className="block text-black/40 hover:text-black transition-colors">Privacy</a>
               </div>
             </motion.div>
-          </div>
-        </div>
 
-        {/* Bottom bar */}
-        <motion.div
-          className="mt-16 pt-8 border-t border-black/5 flex items-center justify-between"
-          {...fadeView(0.2)}
-        >
-          <span className="text-[14px] font-bold tracking-tight text-black">
-            aeqi.ai&ensp;/&ensp;æ
-          </span>
-          <span className="text-[12px] text-black/20">
-            &copy; {new Date().getFullYear()} aeqi
-          </span>
-        </motion.div>
+            <motion.div className="flex flex-col justify-between" {...fadeView(0.2)}>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.25em] text-black/20 mb-4">Brand</p>
+                <span className="text-[32px] font-bold tracking-tighter text-black leading-none">æ</span>
+              </div>
+            </motion.div>
+          </div>
+
+          {/* Bottom */}
+          <motion.div
+            className="mt-12 pt-6 border-t border-black/5 flex items-center justify-between"
+            {...fadeView(0.25)}
+          >
+            <span className="text-[13px] font-bold tracking-tight text-black">aeqi</span>
+            <span className="text-[12px] text-black/20">
+              &copy; {new Date().getFullYear()} aeqi
+            </span>
+          </motion.div>
+        </div>
       </div>
     </footer>
   );
