@@ -7,7 +7,7 @@
 //!
 //! Two kinds of sessions:
 //! - **Permanent**: one per agent, always alive, IS the agent's identity
-//! - **Spawned**: created by triggers, skills, or users — persistent until closed
+//! - **Spawned**: created by triggers, prompts, or users — persistent until closed
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -328,12 +328,9 @@ impl SessionManager {
 
         // 2. Assemble prompts from ancestor chain + extra session prompts.
         let mut system_prompt = if let Some(ref id) = agent_uuid {
-            let assembled = crate::prompt_assembly::assemble_prompts(
-                agent_registry,
-                id,
-                &opts.extra_prompts,
-            )
-            .await;
+            let assembled =
+                crate::prompt_assembly::assemble_prompts(agent_registry, id, &opts.extra_prompts)
+                    .await;
             assembled.full_system_prompt()
         } else {
             // Fallback for unknown agents — use raw system_prompt + primers.
@@ -437,47 +434,47 @@ impl SessionManager {
             .and_then(|p| p.parent())
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
-        let mut all_skills: Vec<aeqi_tools::Prompt> = Vec::new();
+        let mut all_prompts: Vec<aeqi_tools::Prompt> = Vec::new();
         if let Ok(shared) = aeqi_tools::Prompt::discover(&base_dir.join("projects/shared/skills")) {
-            all_skills.extend(shared);
+            all_prompts.extend(shared);
         }
         if !self.default_project.is_empty()
-            && let Ok(proj_skills) = aeqi_tools::Prompt::discover(
+            && let Ok(proj_prompts) = aeqi_tools::Prompt::discover(
                 &base_dir
                     .join("projects")
                     .join(&self.default_project)
                     .join("skills"),
             )
         {
-            all_skills.extend(proj_skills);
+            all_prompts.extend(proj_prompts);
         }
 
         // 5c. Apply session prompts — load into system prompt and filter tools.
-        let mut skill_prompt_parts: Vec<String> = Vec::new();
-        for skill_name in &opts.skills {
-            if let Some(skill) = all_skills.iter().find(|s| s.name == *skill_name) {
-                skill_prompt_parts.push(skill.system_prompt(""));
-                tools.retain(|t| skill.is_tool_allowed(t.name()));
-                debug!(skill = %skill_name, "session prompt applied");
+        let mut session_prompt_parts: Vec<String> = Vec::new();
+        for prompt_name in &opts.skills {
+            if let Some(p) = all_prompts.iter().find(|s| s.name == *prompt_name) {
+                session_prompt_parts.push(p.system_prompt(""));
+                tools.retain(|t| p.is_tool_allowed(t.name()));
+                debug!(prompt = %prompt_name, "session prompt applied");
             } else {
-                warn!(skill = %skill_name, "session prompt not found — skipping");
+                warn!(prompt = %prompt_name, "session prompt not found — skipping");
             }
         }
-        if !skill_prompt_parts.is_empty() {
-            let skill_context = skill_prompt_parts.join("\n\n---\n\n");
-            system_prompt = format!("{system_prompt}\n\n---\n\n{skill_context}");
+        if !session_prompt_parts.is_empty() {
+            let prompt_context = session_prompt_parts.join("\n\n---\n\n");
+            system_prompt = format!("{system_prompt}\n\n---\n\n{prompt_context}");
         }
 
-        // 5d. Resolve turn prompts from skills.
+        // 5d. Resolve turn prompts.
         let turn_prompt_names: &[String] = &opts.skills;
         let mut turn_prompt_specs: Vec<aeqi_core::TurnPromptSpec> = Vec::new();
         for name in turn_prompt_names {
-            if let Some(skill) = all_skills.iter().find(|s| s.name == *name) {
-                if let Some(ref path) = skill.source_path {
+            if let Some(p) = all_prompts.iter().find(|s| s.name == *name) {
+                if let Some(ref path) = p.source_path {
                     turn_prompt_specs.push(aeqi_core::TurnPromptSpec {
                         path: path.clone(),
-                        allow_shell: skill.allow_shell,
-                        name: skill.name.clone(),
+                        allow_shell: p.allow_shell,
+                        name: p.name.clone(),
                     });
                     debug!(turn_prompt = %name, "turn prompt resolved");
                 }

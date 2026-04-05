@@ -40,6 +40,12 @@ pub struct Prompt {
     /// Prefix prepended to user messages when invoking this prompt.
     #[serde(default)]
     pub user_prefix: String,
+    /// Other prompts to load into the session (composed at session start).
+    #[serde(default)]
+    pub session_prompts: Vec<String>,
+    /// Other prompts to re-read each turn (composed as turn context).
+    #[serde(default)]
+    pub turn_prompts: Vec<String>,
     /// Path to the source `.md` file on disk.
     #[serde(skip)]
     pub source_path: Option<PathBuf>,
@@ -50,47 +56,47 @@ impl Prompt {
     pub fn load(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read prompt: {}", path.display()))?;
-        let mut skill = Self::parse(&content)
+        let mut prompt_file = Self::parse(&content)
             .with_context(|| format!("failed to parse prompt: {}", path.display()))?;
-        if skill.name.is_empty()
+        if prompt_file.name.is_empty()
             && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
         {
-            skill.name = stem.to_string();
+            prompt_file.name = stem.to_string();
         }
-        skill.source_path = Some(path.to_path_buf());
-        Ok(skill)
+        prompt_file.source_path = Some(path.to_path_buf());
+        Ok(prompt_file)
     }
 
-    /// Parse an MD string with YAML frontmatter into a Skill.
+    /// Parse an MD string with YAML frontmatter into a Prompt.
     pub fn parse(content: &str) -> Result<Self> {
-        let (mut skill, body): (Self, String) = frontmatter::load_frontmatter(content)?;
-        skill.body = body;
-        Ok(skill)
+        let (mut parsed, body): (Self, String) = frontmatter::load_frontmatter(content)?;
+        parsed.body = body;
+        Ok(parsed)
     }
 
     /// Discover all prompts (`.md` files) in a directory.
     pub fn discover(dir: &Path) -> Result<Vec<Self>> {
-        let mut skills = Vec::new();
+        let mut prompts = Vec::new();
         if !dir.exists() {
-            return Ok(skills);
+            return Ok(prompts);
         }
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "md") {
                 match Self::load(&path) {
-                    Ok(skill) => skills.push(skill),
+                    Ok(p) => prompts.push(p),
                     Err(e) => {
                         tracing::warn!(path = %path.display(), error = %e, "skipping invalid prompt");
                     }
                 }
             }
         }
-        skills.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(skills)
+        prompts.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(prompts)
     }
 
-    /// Build the full system prompt for this skill.
+    /// Build the full system prompt for this prompt.
     pub fn system_prompt(&self, base_identity: &str) -> String {
         let mut prompt = self.body.clone();
 
@@ -108,7 +114,7 @@ impl Prompt {
         }
     }
 
-    /// Whether this skill has auto-invocation criteria.
+    /// Whether this prompt has auto-invocation criteria.
     pub fn has_auto_trigger(&self) -> bool {
         self.when_to_use.is_some()
     }
@@ -152,16 +158,16 @@ tools: [shell, read_file]
 
 Deploy $service to $env"#;
 
-        let skill = Prompt::parse(md).unwrap();
-        assert_eq!(skill.name, "deploy");
-        assert_eq!(skill.tags, vec!["workflow", "implement"]);
+        let p = Prompt::parse(md).unwrap();
+        assert_eq!(p.name, "deploy");
+        assert_eq!(p.tags, vec!["workflow", "implement"]);
         assert_eq!(
-            skill.when_to_use.as_deref(),
+            p.when_to_use.as_deref(),
             Some("Use when the user wants to deploy to production")
         );
-        assert!(skill.has_auto_trigger());
-        assert_eq!(skill.arguments, vec!["service", "env"]);
-        assert_eq!(skill.argument_hint.as_deref(), Some("<service> <env>"));
+        assert!(p.has_auto_trigger());
+        assert_eq!(p.arguments, vec!["service", "env"]);
+        assert_eq!(p.argument_hint.as_deref(), Some("<service> <env>"));
     }
 
     #[test]
@@ -175,11 +181,11 @@ tools: [shell]
 
 Check health"#;
 
-        let skill = Prompt::parse(md).unwrap();
-        assert_eq!(skill.name, "health-check");
-        assert_eq!(skill.tags, vec!["autonomous"]);
-        assert!(!skill.has_auto_trigger());
-        assert!(skill.arguments.is_empty());
+        let p = Prompt::parse(md).unwrap();
+        assert_eq!(p.name, "health-check");
+        assert_eq!(p.tags, vec!["autonomous"]);
+        assert!(!p.has_auto_trigger());
+        assert!(p.arguments.is_empty());
     }
 
     #[test]
@@ -192,12 +198,12 @@ arguments: [name, target]
 
 Deploy $name to $target environment"#;
 
-        let skill = Prompt::parse(md).unwrap();
+        let p = Prompt::parse(md).unwrap();
         let mut args = std::collections::HashMap::new();
         args.insert("name".to_string(), "myapp".to_string());
         args.insert("target".to_string(), "production".to_string());
 
-        let result = skill.substitute_args(&args);
+        let result = p.substitute_args(&args);
         assert_eq!(result, "Deploy myapp to production environment");
     }
 
@@ -211,8 +217,8 @@ allow_shell: true
 
 Date: !`echo 2026-04-01` and host: !`echo testhost`"#;
 
-        let skill = Prompt::parse(md).unwrap();
-        let prompt = skill.system_prompt("");
+        let p = Prompt::parse(md).unwrap();
+        let prompt = p.system_prompt("");
         assert!(prompt.contains("2026-04-01"), "got: {prompt}");
         assert!(prompt.contains("testhost"), "got: {prompt}");
         assert!(!prompt.contains("!`"), "shell markers should be replaced");
@@ -227,8 +233,8 @@ description: test
 
 Should not expand: !`echo danger`"#;
 
-        let skill = Prompt::parse(md).unwrap();
-        let prompt = skill.system_prompt("");
+        let p = Prompt::parse(md).unwrap();
+        let prompt = p.system_prompt("");
         assert!(prompt.contains("!`echo danger`"));
     }
 
@@ -243,11 +249,11 @@ deny: [write_file]
 
 test"#;
 
-        let skill = Prompt::parse(md).unwrap();
-        assert!(skill.is_tool_allowed("shell"));
-        assert!(skill.is_tool_allowed("read_file"));
-        assert!(!skill.is_tool_allowed("write_file"));
-        assert!(!skill.is_tool_allowed("edit_file"));
+        let p = Prompt::parse(md).unwrap();
+        assert!(p.is_tool_allowed("shell"));
+        assert!(p.is_tool_allowed("read_file"));
+        assert!(!p.is_tool_allowed("write_file"));
+        assert!(!p.is_tool_allowed("edit_file"));
     }
 
     #[test]
@@ -260,9 +266,9 @@ tags: [workflow, implement, rust]
 
 body"#;
 
-        let skill = Prompt::parse(md).unwrap();
-        assert!(skill.tags.contains(&"workflow".to_string()));
-        assert!(skill.tags.contains(&"implement".to_string()));
-        assert!(skill.tags.contains(&"rust".to_string()));
+        let p = Prompt::parse(md).unwrap();
+        assert!(p.tags.contains(&"workflow".to_string()));
+        assert!(p.tags.contains(&"implement".to_string()));
+        assert!(p.tags.contains(&"rust".to_string()));
     }
 }

@@ -6,9 +6,9 @@ pub mod glob;
 pub mod grep;
 pub mod html_utils;
 pub mod porkbun;
+pub mod prompt;
 pub mod secrets;
 pub mod shell;
-pub mod prompt;
 pub mod tasks;
 pub mod web_fetch;
 pub mod web_search;
@@ -20,9 +20,9 @@ pub use git::GitWorktreeTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
 pub use porkbun::PorkbunTool;
+pub use prompt::Prompt;
 pub use secrets::SecretsTool;
 pub use shell::ShellTool;
-pub use prompt::Prompt;
 pub use tasks::{
     QuestCloseTool, QuestCreateTool, QuestDepTool, QuestReadyTool, QuestShowTool, QuestUpdateTool,
 };

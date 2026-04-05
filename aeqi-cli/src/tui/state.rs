@@ -293,7 +293,7 @@ fn tool_emoji(name: &str) -> &'static str {
         "memory_store" | "aeqi_remember" => "💾",
         "notes" | "aeqi_notes" => "📌",
         "aeqi_graph" => "🔗",
-        "aeqi_skills" => "⚡",
+        "aeqi_prompts" => "⚡",
         _ => "⚙️",
     }
 }

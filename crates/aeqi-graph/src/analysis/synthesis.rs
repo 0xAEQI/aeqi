@@ -3,22 +3,22 @@ use std::collections::HashMap;
 use crate::analysis::community::Community;
 use crate::schema::{CodeEdge, CodeNode, EdgeType, NodeLabel};
 
-/// A synthesized skill document generated from community analysis.
+/// A synthesized prompt document generated from community analysis.
 #[derive(Debug, Clone)]
-pub struct SynthesizedSkill {
+pub struct SynthesizedPrompt {
     pub name: String,
     pub description: String,
     pub content: String,
 }
 
-/// Synthesize a skill document from a community's structure.
+/// Synthesize a prompt document from a community's structure.
 /// Analyzes the community's symbols, call patterns, file distribution,
 /// and generates a structured knowledge document.
-pub fn synthesize_skill(
+pub fn synthesize_prompt(
     community: &Community,
     all_nodes: &[CodeNode],
     all_edges: &[CodeEdge],
-) -> SynthesizedSkill {
+) -> SynthesizedPrompt {
     let member_set: std::collections::HashSet<&str> =
         community.members.iter().map(|s| s.as_str()).collect();
 
@@ -81,7 +81,7 @@ pub fn synthesize_skill(
         .into_iter()
         .collect();
 
-    // Build the skill document
+    // Build the prompt document
     let name = slugify(&community.label);
     let description = format!(
         "Auto-generated knowledge for the {} domain ({} symbols across {} files)",
@@ -181,7 +181,7 @@ pub fn synthesize_skill(
         content.push_str(&format!("- `{file}`\n"));
     }
 
-    SynthesizedSkill {
+    SynthesizedPrompt {
         name,
         description,
         content,
@@ -257,10 +257,10 @@ mod tests {
             keywords: vec!["Observer".to_string()],
         };
 
-        let skill = synthesize_skill(&community, &nodes, &edges);
-        assert_eq!(skill.name, "observer-system");
-        assert!(skill.content.contains("Observer"));
-        assert!(skill.content.contains("LogObserver"));
-        assert!(skill.content.contains("Key Types"));
+        let p = synthesize_prompt(&community, &nodes, &edges);
+        assert_eq!(p.name, "observer-system");
+        assert!(p.content.contains("Observer"));
+        assert!(p.content.contains("LogObserver"));
+        assert!(p.content.contains("Key Types"));
     }
 }

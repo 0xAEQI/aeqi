@@ -749,9 +749,6 @@ pub struct AgentSpawnConfig {
     /// This is the company/project brief that all agents receive.
     #[serde(default)]
     pub primer: Option<String>,
-    /// Turn-level prompt names. Re-read from disk before each API call for fresh context.
-    #[serde(default)]
-    pub turn_prompts: Vec<String>,
 }
 
 /// Domain keyword → file mapping for automatic context injection.

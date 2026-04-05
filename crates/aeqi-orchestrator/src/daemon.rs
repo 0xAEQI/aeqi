@@ -2764,7 +2764,7 @@ impl Daemon {
                                     continue;
                                 }
                                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                                if ext == "toml" || ext == "md" {
+                                if ext == "md" {
                                     let name = path
                                         .file_stem()
                                         .unwrap_or_default()
@@ -2772,11 +2772,10 @@ impl Daemon {
                                         .to_string();
                                     let content =
                                         std::fs::read_to_string(&path).unwrap_or_default();
-                                    let kind = if ext == "toml" { "skill" } else { "doc" };
                                     out.push(serde_json::json!({
                                         "name": name,
                                         "source": source,
-                                        "kind": kind,
+                                        "kind": "prompt",
                                         "path": path.display().to_string(),
                                         "content": content,
                                     }));
@@ -3130,14 +3129,21 @@ impl Daemon {
                         match agent_registry.get_active_by_name(name).await {
                             Ok(Some(agent)) => {
                                 // Collect prompts from all ancestors + self
-                                let ancestors = agent_registry.get_ancestors(&agent.id).await.unwrap_or_default();
-                                let prompt_chain: Vec<serde_json::Value> = ancestors.iter().rev().map(|a| {
-                                    serde_json::json!({
-                                        "agent_name": a.name,
-                                        "agent_id": a.id,
-                                        "prompts": a.prompts,
+                                let ancestors = agent_registry
+                                    .get_ancestors(&agent.id)
+                                    .await
+                                    .unwrap_or_default();
+                                let prompt_chain: Vec<serde_json::Value> = ancestors
+                                    .iter()
+                                    .rev()
+                                    .map(|a| {
+                                        serde_json::json!({
+                                            "agent_name": a.name,
+                                            "agent_id": a.id,
+                                            "prompts": a.prompts,
+                                        })
                                     })
-                                }).collect();
+                                    .collect();
 
                                 serde_json::json!({
                                     "ok": true,
@@ -3659,7 +3665,8 @@ impl Daemon {
                                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                                 .unwrap_or_default();
 
-                            let mut spawn_opts = crate::session_manager::SpawnOptions::interactive();
+                            let mut spawn_opts =
+                                crate::session_manager::SpawnOptions::interactive();
                             spawn_opts.extra_prompts = extra_prompts;
 
                             match session_manager

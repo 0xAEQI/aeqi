@@ -472,7 +472,7 @@ pub(crate) async fn cmd_daemon(config_path: &Option<PathBuf>, action: DaemonActi
                     .first()
                     .and_then(|c| c.max_budget_usd)
                     .unwrap_or(5.0),
-                skills_dirs: {
+                prompt_dirs: {
                     let mut dirs = Vec::new();
                     for project_cfg in &config.agent_spawns {
                         if let Ok(d) = find_project_dir(&project_cfg.name) {

@@ -113,7 +113,7 @@ async fn main() -> Result<()> {
             cmd::pipeline::cmd_pipeline(&cli.config, action).await
         }
         Some(Commands::Trigger { action }) => cmd::trigger::cmd_trigger(&cli.config, action).await,
-        Some(Commands::Skill { action }) => cmd::skill::cmd_skill(&cli.config, action).await,
+        Some(Commands::Prompt { action }) => cmd::prompt::cmd_prompt(&cli.config, action).await,
         Some(Commands::Operation { action }) => {
             cmd::operation::cmd_operation(&cli.config, action).await
         }

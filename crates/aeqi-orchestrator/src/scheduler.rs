@@ -58,8 +58,8 @@ pub struct SchedulerConfig {
     pub worker_max_budget_usd: f64,
     /// Global daily budget cap (replaces CostLedger daily budget).
     pub daily_budget_usd: f64,
-    /// Directories to search for skill TOML files.
-    pub skills_dirs: Vec<PathBuf>,
+    /// Directories to search for prompt files.
+    pub prompt_dirs: Vec<PathBuf>,
     /// Shared primer injected into ALL agents.
     pub shared_primer: Option<String>,
     /// Model for post-execution reflection.
@@ -79,7 +79,7 @@ impl Default for SchedulerConfig {
             default_timeout_secs: 3600,
             worker_max_budget_usd: 5.0,
             daily_budget_usd: 50.0,
-            skills_dirs: Vec::new(),
+            prompt_dirs: Vec::new(),
             shared_primer: None,
             reflect_model: String::new(),
             adaptive_retry: false,
@@ -444,7 +444,7 @@ impl Scheduler {
             .skill
             .as_ref()
             .and_then(|skill_name| {
-                load_skill_prompt(skill_name, &self.config.skills_dirs)
+                load_prompt(skill_name, &self.config.prompt_dirs)
                     .map(|prompt| vec![aeqi_core::PromptEntry::task_prepend(prompt)])
             })
             .unwrap_or_default();
@@ -514,7 +514,7 @@ impl Scheduler {
             worker = worker.with_project_dir(PathBuf::from(wd));
         }
 
-        // Skill prompt is now assembled via assemble_prompts() above.
+        // Prompt is now assembled via assemble_prompts() above.
 
         // Inject tools for persistent agents.
         if let crate::agent_worker::WorkerExecution::Agent { ref mut tools, .. } = worker.execution
@@ -761,56 +761,25 @@ impl Scheduler {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Load a skill prompt from skills directories.
-fn load_skill_prompt(skill_name: &str, skills_dirs: &[PathBuf]) -> Option<String> {
-    for dir in skills_dirs {
-        let path = dir.join(format!("{skill_name}.toml"));
-        if path.exists()
-            && let Ok(content) = std::fs::read_to_string(&path)
-            && let Ok(value) = content.parse::<toml::Value>()
-            && let Some(system) = value
-                .get("prompt")
-                .and_then(|p| p.get("system"))
-                .and_then(|s| s.as_str())
-        {
-            let mut prompt = system.to_string();
-
-            // Extract tool restrictions.
-            let allow: Vec<String> = value
-                .get("tools")
-                .and_then(|t| t.get("allow"))
-                .and_then(|a| a.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let deny: Vec<String> = value
-                .get("tools")
-                .and_then(|t| t.get("deny"))
-                .and_then(|a| a.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            if !allow.is_empty() || !deny.is_empty() {
-                prompt.push_str("\n\n## Tool Restrictions");
-                if !allow.is_empty() {
-                    prompt.push_str(&format!(
+/// Load a prompt from prompt directories.
+fn load_prompt(prompt_name: &str, prompt_dirs: &[PathBuf]) -> Option<String> {
+    for dir in prompt_dirs {
+        let path = dir.join(format!("{prompt_name}.md"));
+        if let Ok(prompt) = aeqi_tools::Prompt::load(&path) {
+            let mut text = prompt.body;
+            if !prompt.tools.is_empty() || !prompt.deny.is_empty() {
+                text.push_str("\n\n## Tool Restrictions");
+                if !prompt.tools.is_empty() {
+                    text.push_str(&format!(
                         "\nYou may ONLY use these tools: {}",
-                        allow.join(", ")
+                        prompt.tools.join(", ")
                     ));
                 }
-                if !deny.is_empty() {
-                    prompt.push_str(&format!("\nYou must NOT use: {}", deny.join(", ")));
+                if !prompt.deny.is_empty() {
+                    text.push_str(&format!("\nYou must NOT use: {}", prompt.deny.join(", ")));
                 }
             }
-
-            return Some(prompt);
+            return Some(text);
         }
     }
     None

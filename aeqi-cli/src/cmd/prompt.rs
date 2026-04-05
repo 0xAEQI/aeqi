@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::cli::SkillAction;
+use crate::cli::PromptAction;
 use crate::helpers::{
     augment_prompt_with_org_context, build_project_tools, build_provider_for_project,
     find_agent_dir, find_project_dir, load_config, load_system_prompt, load_system_prompt_from_dir,
@@ -22,19 +22,19 @@ fn discover_project_prompts(project_dir: &Path) -> Result<Vec<Prompt>> {
     dirs.push(project_dir.join("skills"));
 
     for dir in dirs {
-        for skill in Prompt::discover(&dir)? {
-            merged.insert(skill.name.clone(), skill);
+        for p in Prompt::discover(&dir)? {
+            merged.insert(p.name.clone(), p);
         }
     }
 
     Ok(merged.into_values().collect())
 }
 
-pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction) -> Result<()> {
+pub(crate) async fn cmd_prompt(config_path: &Option<PathBuf>, action: PromptAction) -> Result<()> {
     let (config, _) = load_config(config_path)?;
 
     match action {
-        SkillAction::List { company } => {
+        PromptAction::List { company } => {
             let projects: Vec<&str> = if let Some(ref name) = company {
                 vec![name.as_str()]
             } else {
@@ -47,23 +47,23 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
 
             for name in projects {
                 if let Ok(project_dir) = find_project_dir(name) {
-                    let skills = discover_project_prompts(&project_dir)?;
-                    if !skills.is_empty() {
+                    let prompts = discover_project_prompts(&project_dir)?;
+                    if !prompts.is_empty() {
                         println!("=== {} ===", name);
-                        for skill in &skills {
-                            let triggers = if skill.triggers.is_empty() {
+                        for p in &prompts {
+                            let triggers = if p.triggers.is_empty() {
                                 String::new()
                             } else {
-                                format!(" (triggers: {})", skill.triggers.join(", "))
+                                format!(" (triggers: {})", p.triggers.join(", "))
                             };
-                            let tools = if skill.tools.is_empty() {
+                            let tools = if p.tools.is_empty() {
                                 "all".to_string()
                             } else {
-                                skill.tools.join(", ")
+                                p.tools.join(", ")
                             };
                             println!(
                                 "  {} — {} [tools: {}]{}",
-                                skill.name, skill.description, tools, triggers
+                                p.name, p.description, tools, triggers
                             );
                         }
                     }
@@ -71,7 +71,7 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
             }
         }
 
-        SkillAction::Run {
+        PromptAction::Run {
             name,
             company,
             prompt,
@@ -80,12 +80,12 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
                 .company(&company)
                 .context(format!("company not found: {company}"))?;
             let project_dir = find_project_dir(&company)?;
-            let skills = discover_project_prompts(&project_dir)?;
+            let prompts = discover_project_prompts(&project_dir)?;
 
-            let skill = skills
+            let matched = prompts
                 .iter()
                 .find(|s| s.name == name)
-                .context(format!("skill not found: {name}"))?;
+                .context(format!("prompt not found: {name}"))?;
 
             // Build provider.
             let provider = build_provider_for_project(&config, &company)?;
@@ -99,25 +99,25 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
                 worktree_root.as_ref(),
             );
 
-            // Filter tools by skill policy.
+            // Filter tools by prompt policy.
             let filtered_tools: Vec<Arc<dyn Tool>> = all_tools
                 .into_iter()
-                .filter(|t| skill.is_tool_allowed(t.name()))
+                .filter(|t| matched.is_tool_allowed(t.name()))
                 .collect();
 
-            // Build system prompt with skill overlay.
+            // Build system prompt with prompt overlay.
             let execution_agent = one_shot_agent_name(&config, Some(&company));
             let base_prompt = find_agent_dir(&execution_agent)
                 .ok()
                 .map(|agent_dir| load_system_prompt(&agent_dir, Some(&project_dir)))
                 .unwrap_or_else(|| load_system_prompt_from_dir(&project_dir));
             let base_prompt = augment_prompt_with_org_context(&config, &base_prompt);
-            let final_prompt = skill.system_prompt(&base_prompt);
+            let final_prompt = matched.system_prompt(&base_prompt);
 
             let user_prompt = if let Some(ref p) = prompt {
-                format!("{}{}", skill.user_prefix, p)
+                format!("{}{}", matched.user_prefix, p)
             } else {
-                skill.user_prefix.clone()
+                matched.user_prefix.clone()
             };
 
             let observer: Arc<dyn Observer> = Arc::new(LogObserver);
@@ -126,7 +126,7 @@ pub(crate) async fn cmd_skill(config_path: &Option<PathBuf>, action: SkillAction
             let agent_config = AgentConfig {
                 model,
                 max_iterations: 10,
-                name: format!("{}-skill-{}", company, name),
+                name: format!("{}-prompt-{}", company, name),
                 ..Default::default()
             };
 

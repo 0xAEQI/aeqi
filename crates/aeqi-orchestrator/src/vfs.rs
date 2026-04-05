@@ -339,11 +339,11 @@ impl VfsTree {
         if let Ok(mut entries) = tokio::fs::read_dir(&skills_dir).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
                 let fname = entry.file_name().to_string_lossy().to_string();
-                if fname.ends_with(".toml") {
+                if fname.ends_with(".md") {
                     nodes.push(file_node(
                         &fname,
                         &format!("/skills/{fname}"),
-                        "text/toml",
+                        "text/markdown",
                         Some("⚡"),
                     ));
                 }

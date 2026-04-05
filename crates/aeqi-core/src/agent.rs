@@ -1186,7 +1186,10 @@ impl Agent {
                                         );
                                     }
                                     if !input.turn_prompts.is_empty() {
-                                        self.turn_prompts.lock().await.extend(input.turn_prompts.clone());
+                                        self.turn_prompts
+                                            .lock()
+                                            .await
+                                            .extend(input.turn_prompts.clone());
                                     }
 
                                     messages.push(Message {
@@ -2905,7 +2908,7 @@ impl Agent {
     }
 
     /// Extract skill content from tool results in compacted messages.
-    /// Skills are identified by ToolUse blocks calling "aeqi_skills" with action="get",
+    /// Skills are identified by ToolUse blocks calling "aeqi_prompts" with action="get",
     /// followed by their ToolResult. The result content (the skill text) is preserved.
     fn extract_skill_messages(messages: &[Message]) -> Vec<String> {
         let mut skill_tool_ids: std::collections::HashSet<String> =
@@ -2919,7 +2922,7 @@ impl Agent {
                     if let ContentPart::ToolUse {
                         id, name, input, ..
                     } = part
-                        && name == "aeqi_skills"
+                        && name == "aeqi_prompts"
                         && input
                             .get("action")
                             .and_then(|v| v.as_str())

@@ -51,19 +51,34 @@ function formatDuration(startMs: number, endMs: number): string {
 }
 
 function formatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(ts).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 // ── Sub-components ──
 
-function ExpandableOutput({ text, limit = 100 }: { text: string; limit?: number }) {
+function ExpandableOutput({
+  text,
+  limit = 100,
+}: {
+  text: string;
+  limit?: number;
+}) {
   const [expanded, setExpanded] = useState(false);
   const needsExpand = text.length > limit;
   return (
     <div className="session-tool-output">
       {expanded || !needsExpand ? text : text.slice(0, limit) + "..."}
       {needsExpand && (
-        <span className="session-tool-expand" onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}>
+        <span
+          className="session-tool-expand"
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded(!expanded);
+          }}
+        >
           {expanded ? "show less" : "show more"}
         </span>
       )}
@@ -79,13 +94,35 @@ function CopyButton({ text }: { text: string }) {
     setTimeout(() => setCopied(false), 1500);
   };
   return (
-    <button className="session-msg-copy" onClick={handleCopy} title={copied ? "Copied" : "Copy"}>
+    <button
+      className="session-msg-copy"
+      onClick={handleCopy}
+      title={copied ? "Copied" : "Copy"}
+    >
       {copied ? (
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <path d="M3 8.5l3 3 7-7" />
         </svg>
       ) : (
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <rect x="5" y="5" width="9" height="9" rx="2" />
           <path d="M5 11H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h5a2 2 0 0 1 2 2v1" />
         </svg>
@@ -95,19 +132,35 @@ function CopyButton({ text }: { text: string }) {
 }
 
 const THINKING_WORDS = [
-  "thinking", "reasoning", "analyzing", "considering", "processing",
-  "pondering", "evaluating", "working", "exploring", "planning",
+  "thinking",
+  "reasoning",
+  "analyzing",
+  "considering",
+  "processing",
+  "pondering",
+  "evaluating",
+  "working",
+  "exploring",
+  "planning",
 ];
 
 function ThinkingStatus({ toolName }: { toolName?: string }) {
-  const [wordIdx, setWordIdx] = useState(() => Math.floor(Math.random() * THINKING_WORDS.length));
+  const [wordIdx, setWordIdx] = useState(() =>
+    Math.floor(Math.random() * THINKING_WORDS.length),
+  );
   useEffect(() => {
     if (toolName) return;
-    const interval = setInterval(() => setWordIdx(prev => (prev + 1) % THINKING_WORDS.length), 2000);
+    const interval = setInterval(
+      () => setWordIdx((prev) => (prev + 1) % THINKING_WORDS.length),
+      2000,
+    );
     return () => clearInterval(interval);
   }, [toolName]);
-  if (toolName) return <div className="session-msg-thinking">using {toolName}...</div>;
-  return <div className="session-msg-thinking">{THINKING_WORDS[wordIdx]}...</div>;
+  if (toolName)
+    return <div className="session-msg-thinking">using {toolName}...</div>;
+  return (
+    <div className="session-msg-thinking">{THINKING_WORDS[wordIdx]}...</div>
+  );
 }
 
 function ThinkingTimer({ start }: { start: number }) {
@@ -116,7 +169,11 @@ function ThinkingTimer({ start }: { start: number }) {
     const interval = setInterval(() => setElapsed(Date.now() - start), 100);
     return () => clearInterval(interval);
   }, [start]);
-  return <span className="session-msg-duration">{formatDuration(start, start + elapsed)}</span>;
+  return (
+    <span className="session-msg-duration">
+      {formatDuration(start, start + elapsed)}
+    </span>
+  );
 }
 
 // ── Main Component ──
@@ -137,14 +194,19 @@ interface AgentSessionProps {
   sessionId: string | null;
 }
 
-export default function AgentSessionView({ agentId, sessionId: urlSessionId }: AgentSessionProps) {
+export default function AgentSessionView({
+  agentId,
+  sessionId: urlSessionId,
+}: AgentSessionProps) {
   const navigate = useNavigate();
   const token = useAuthStore((s) => s.token);
   const wsConnected = useDaemonStore((s) => s.wsConnected);
   const agents = useDaemonStore((s) => s.agents);
 
   // Resolve agent info from the store
-  const agentInfo = agents.find((a: any) => a.id === agentId || a.name === agentId);
+  const agentInfo = agents.find(
+    (a: any) => a.id === agentId || a.name === agentId,
+  );
   const agentName = agentInfo?.name || agentId;
   const displayName = agentInfo?.display_name || agentName;
 
@@ -155,18 +217,36 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
   const activeSessionId = urlSessionId;
 
   // Navigate helpers
-  const setSession = useCallback((sid: string | null) => {
-    if (sid) {
-      navigate(`/?agent=${encodeURIComponent(agentId)}&session=${encodeURIComponent(sid)}`, { replace: true });
-    } else {
-      navigate(`/?agent=${encodeURIComponent(agentId)}`, { replace: true });
-    }
-  }, [agentId, navigate]);
+  const setSession = useCallback(
+    (sid: string | null) => {
+      if (sid) {
+        navigate(
+          `/?agent=${encodeURIComponent(agentId)}&session=${encodeURIComponent(sid)}`,
+          { replace: true },
+        );
+      } else {
+        navigate(`/?agent=${encodeURIComponent(agentId)}`, { replace: true });
+      }
+    },
+    [agentId, navigate],
+  );
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sessionPrompts, setSessionPrompts] = useState<string[]>([]);
-  const [showPromptInput, setShowPromptInput] = useState(false);
-  const [promptDraft, setPromptDraft] = useState("");
+  const [sessionTask, setSessionTask] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [showAttachPicker, setShowAttachPicker] = useState<
+    "prompt" | "task" | null
+  >(null);
+  const [attachSearch, setAttachSearch] = useState("");
+  const [availablePrompts, setAvailablePrompts] = useState<
+    { name: string; description: string; tags: string[] }[]
+  >([]);
+  const [availableTasks, setAvailableTasks] = useState<
+    { id: string; name: string; status: string }[]
+  >([]);
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [liveToolEvents, setLiveToolEvents] = useState<ToolEvent[]>([]);
@@ -175,10 +255,45 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
+  // Fetch available prompts and tasks when picker opens
+  useEffect(() => {
+    if (showAttachPicker === "prompt" && availablePrompts.length === 0) {
+      api
+        .getSkills()
+        .then((data: any) => {
+          const items = data?.skills || data?.prompts || [];
+          setAvailablePrompts(
+            items.map((s: any) => ({
+              name: s.name || "",
+              description: s.description || "",
+              tags: s.tags || [],
+            })),
+          );
+        })
+        .catch(() => {});
+    }
+    if (showAttachPicker === "task" && availableTasks.length === 0) {
+      api
+        .getTasks({ status: "open" })
+        .then((data: any) => {
+          const items = data?.tasks || data?.quests || [];
+          setAvailableTasks(
+            items.map((t: any) => ({
+              id: t.id || "",
+              name: t.name || t.subject || "",
+              status: t.status || "open",
+            })),
+          );
+        })
+        .catch(() => {});
+    }
+  }, [showAttachPicker]);
+
   // Load sessions for this agent
   useEffect(() => {
     if (!agentId) return;
-    api.getSessions(agentId)
+    api
+      .getSessions(agentId)
       .then((d: any) => {
         const list: SessionInfo[] = d.sessions || [];
         setSessions(list);
@@ -197,12 +312,15 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
   }, [setSession]);
 
   // Switch to an existing session — force reload
-  const handleSelectSession = useCallback((sid: string) => {
-    prevSessionRef.current = null; // Force reload on next effect
-    setMessages([]);
-    setSession(sid);
-    setShowSessionList(false);
-  }, [setSession]);
+  const handleSelectSession = useCallback(
+    (sid: string) => {
+      prevSessionRef.current = null; // Force reload on next effect
+      setMessages([]);
+      setSession(sid);
+      setShowSessionList(false);
+    },
+    [setSession],
+  );
 
   // Process raw messages from API into our format
   const processRawMessages = useCallback((rawMessages: any[]): Message[] => {
@@ -222,7 +340,9 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
             input_preview: meta.input_preview,
             output_preview: meta.output_preview,
             duration_ms: meta.duration_ms,
-            timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+            timestamp: m.created_at
+              ? new Date(m.created_at).getTime()
+              : Date.now(),
           },
         });
       } else if (m.role === "assistant") {
@@ -234,13 +354,19 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
         processed.push({
           ...m,
           segments,
-          timestamp: m.created_at ? new Date(m.created_at).getTime() : undefined,
+          timestamp: m.created_at
+            ? new Date(m.created_at).getTime()
+            : undefined,
         });
       } else {
         pendingToolSegments = [];
         processed.push({
           ...m,
-          timestamp: m.created_at ? new Date(m.created_at).getTime() : (m.timestamp ? new Date(m.timestamp).getTime() : undefined),
+          timestamp: m.created_at
+            ? new Date(m.created_at).getTime()
+            : m.timestamp
+              ? new Date(m.timestamp).getTime()
+              : undefined,
         });
       }
     }
@@ -267,7 +393,8 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
     setStreamText("");
     setLiveToolEvents([]);
 
-    api.getSessionMessages({ session_id: activeSessionId, limit: 50 })
+    api
+      .getSessionMessages({ session_id: activeSessionId, limit: 50 })
       .then((d: any) => {
         const loaded = processRawMessages(d.messages || []);
         // Only replace if we got messages — preserve local state if API returns empty
@@ -296,7 +423,11 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
 
     const messageText = input;
     const startTime = Date.now();
-    const userMsg: Message = { role: "user", content: messageText, timestamp: startTime };
+    const userMsg: Message = {
+      role: "user",
+      content: messageText,
+      timestamp: startTime,
+    };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setStreaming(true);
@@ -314,14 +445,17 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
           // Update URL to include the new session
           setSession(sessionId);
           // Add to session list
-          setSessions((prev) => [{
-            id: d.session_id,
-            agent_id: agentId,
-            agent_name: agentName,
-            status: "active",
-            created_at: new Date().toISOString(),
-            first_message: messageText.slice(0, 60),
-          }, ...prev]);
+          setSessions((prev) => [
+            {
+              id: d.session_id,
+              agent_id: agentId,
+              agent_name: agentName,
+              status: "active",
+              created_at: new Date().toISOString(),
+              first_message: messageText.slice(0, 60),
+            },
+            ...prev,
+          ]);
         }
       } catch {
         // If session creation fails, still try to send
@@ -330,7 +464,7 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(
-      `${protocol}//${window.location.host}/api/chat/stream?token=${token}`
+      `${protocol}//${window.location.host}/api/chat/stream?token=${token}`,
     );
     wsRef.current = ws;
 
@@ -340,13 +474,14 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
         agent_id: agentId || undefined,
         session_id: sessionId || undefined,
       };
-      // Include extra prompts only on first message (session creation)
-      if (!activeSessionId && sessionPrompts.length > 0) {
-        payload.extra_prompts = sessionPrompts.map((content) => ({
-          content,
-          position: "append",
-          scope: "self",
-        }));
+      // Include prompts and task on first message (session creation)
+      if (!activeSessionId) {
+        if (sessionPrompts.length > 0) {
+          payload.session_prompts = sessionPrompts;
+        }
+        if (sessionTask) {
+          payload.task_id = sessionTask.id;
+        }
       }
       ws.send(JSON.stringify(payload));
     };
@@ -377,8 +512,13 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
           }
           case "ToolCall":
           case "ToolStart": {
-            const name = event.name || event.tool_name || event.tool_use_id || "tool";
-            const ev: ToolEvent = { type: "start", name, timestamp: Date.now() };
+            const name =
+              event.name || event.tool_name || event.tool_use_id || "tool";
+            const ev: ToolEvent = {
+              type: "start",
+              name,
+              timestamp: Date.now(),
+            };
             toolEvents.push(ev);
             segments.push({ kind: "tool", event: ev });
             setLiveToolEvents([...toolEvents]);
@@ -386,7 +526,8 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
           }
           case "ToolResult":
           case "ToolComplete": {
-            const name = event.name || event.tool_name || event.tool_use_id || "tool";
+            const name =
+              event.name || event.tool_name || event.tool_use_id || "tool";
             const completed: ToolEvent = {
               type: "complete",
               name,
@@ -396,56 +537,98 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
               duration_ms: event.duration_ms,
               timestamp: Date.now(),
             };
-            const startIdx = toolEvents.findIndex(e => e.type === "start" && e.name === name);
+            const startIdx = toolEvents.findIndex(
+              (e) => e.type === "start" && e.name === name,
+            );
             if (startIdx >= 0) toolEvents[startIdx] = completed;
             else toolEvents.push(completed);
-            const segIdx = segments.findIndex(s => s.kind === "tool" && s.event.type === "start" && s.event.name === name);
-            if (segIdx >= 0) segments[segIdx] = { kind: "tool", event: completed };
+            const segIdx = segments.findIndex(
+              (s) =>
+                s.kind === "tool" &&
+                s.event.type === "start" &&
+                s.event.name === name,
+            );
+            if (segIdx >= 0)
+              segments[segIdx] = { kind: "tool", event: completed };
             else segments.push({ kind: "tool", event: completed });
             setLiveToolEvents([...toolEvents]);
             break;
           }
           case "TurnStart": {
             const turnNum = event.turn || 0;
-            toolEvents.push({ type: "turn", name: `Turn ${turnNum}`, timestamp: Date.now() });
+            toolEvents.push({
+              type: "turn",
+              name: `Turn ${turnNum}`,
+              timestamp: Date.now(),
+            });
             segments.push({ kind: "status", text: `Turn ${turnNum}` });
             setLiveToolEvents([...toolEvents]);
             break;
           }
           case "Status": {
             const statusMsg = event.message || "";
-            toolEvents.push({ type: "status", name: statusMsg, timestamp: Date.now() });
+            toolEvents.push({
+              type: "status",
+              name: statusMsg,
+              timestamp: Date.now(),
+            });
             segments.push({ kind: "status", text: statusMsg });
             setLiveToolEvents([...toolEvents]);
             break;
           }
           case "Compacted": {
-            toolEvents.push({ type: "status", name: `Context compacted (${event.original_messages}\u2192${event.remaining_messages} msgs)`, timestamp: Date.now() });
+            toolEvents.push({
+              type: "status",
+              name: `Context compacted (${event.original_messages}\u2192${event.remaining_messages} msgs)`,
+              timestamp: Date.now(),
+            });
             setLiveToolEvents([...toolEvents]);
             break;
           }
           case "MemoryActivity": {
             const desc = `${event.action}: ${event.key}`;
-            toolEvents.push({ type: "status", name: desc, timestamp: Date.now() });
+            toolEvents.push({
+              type: "status",
+              name: desc,
+              timestamp: Date.now(),
+            });
             setLiveToolEvents([...toolEvents]);
             break;
           }
           case "DelegateStart": {
             const workerName = event.worker_name || "subagent";
             const subject = event.task_subject || "delegated task";
-            toolEvents.push({ type: "start", name: `delegate: ${workerName}`, timestamp: Date.now() });
-            segments.push({ kind: "status", text: `Delegating to ${workerName}: ${subject}` });
+            toolEvents.push({
+              type: "start",
+              name: `delegate: ${workerName}`,
+              timestamp: Date.now(),
+            });
+            segments.push({
+              kind: "status",
+              text: `Delegating to ${workerName}: ${subject}`,
+            });
             setLiveToolEvents([...toolEvents]);
             break;
           }
           case "DelegateComplete": {
             const doneWorker = event.worker_name || "subagent";
-            const delegateStartIdx = toolEvents.findIndex(e => e.type === "start" && e.name === `delegate: ${doneWorker}`);
+            const delegateStartIdx = toolEvents.findIndex(
+              (e) => e.type === "start" && e.name === `delegate: ${doneWorker}`,
+            );
             if (delegateStartIdx >= 0) {
-              toolEvents[delegateStartIdx] = { type: "complete", name: `delegate: ${doneWorker}`, success: true, output_preview: event.outcome, timestamp: Date.now() };
+              toolEvents[delegateStartIdx] = {
+                type: "complete",
+                name: `delegate: ${doneWorker}`,
+                success: true,
+                output_preview: event.outcome,
+                timestamp: Date.now(),
+              };
             }
             const outcomePreview = (event.outcome || "").slice(0, 200);
-            segments.push({ kind: "status", text: `${doneWorker} completed: ${outcomePreview}` });
+            segments.push({
+              kind: "status",
+              text: `${doneWorker} completed: ${outcomePreview}`,
+            });
             setLiveToolEvents([...toolEvents]);
             break;
           }
@@ -455,20 +638,27 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
             done = true;
             const endTime = Date.now();
             const duration = formatDuration(startTime, endTime);
-            const hasContent = fullText || (toolEvents.length > 0);
+            const hasContent = fullText || toolEvents.length > 0;
             if (hasContent) {
               const promptTok = event.prompt_tokens || 0;
               const completionTok = event.completion_tokens || 0;
-              setMessages((prev) => [...prev, {
-                role: "assistant",
-                content: fullText || "(no text output)",
-                segments: segments.length > 0 ? [...segments] : undefined,
-                timestamp: endTime,
-                duration,
-                toolEvents: toolEvents.length > 0 ? [...toolEvents] : undefined,
-                costUsd: event.cost_usd || undefined,
-                tokenUsage: (promptTok || completionTok) ? { prompt: promptTok, completion: completionTok } : undefined,
-              }]);
+              setMessages((prev) => [
+                ...prev,
+                {
+                  role: "assistant",
+                  content: fullText || "(no text output)",
+                  segments: segments.length > 0 ? [...segments] : undefined,
+                  timestamp: endTime,
+                  duration,
+                  toolEvents:
+                    toolEvents.length > 0 ? [...toolEvents] : undefined,
+                  costUsd: event.cost_usd || undefined,
+                  tokenUsage:
+                    promptTok || completionTok
+                      ? { prompt: promptTok, completion: completionTok }
+                      : undefined,
+                },
+              ]);
             }
             setStreamText("");
             setStreaming(false);
@@ -479,31 +669,42 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
           }
           case "Error":
             done = true;
-            setMessages((prev) => [...prev, {
-              role: "error",
-              content: event.message || "Unknown error",
-              timestamp: Date.now(),
-              duration: formatDuration(startTime, Date.now()),
-            }]);
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "error",
+                content: event.message || "Unknown error",
+                timestamp: Date.now(),
+                duration: formatDuration(startTime, Date.now()),
+              },
+            ]);
             setStreaming(false);
             setThinkingStart(null);
             ws.close();
             break;
         }
-      } catch { /* ignore malformed */ }
+      } catch {
+        /* ignore malformed */
+      }
     };
 
-    ws.onerror = () => { setStreaming(false); setThinkingStart(null); };
+    ws.onerror = () => {
+      setStreaming(false);
+      setThinkingStart(null);
+    };
     ws.onclose = () => {
       if (!done && fullText) {
         const endTime = Date.now();
-        setMessages((prev) => [...prev, {
-          role: "assistant",
-          content: fullText,
-          timestamp: endTime,
-          duration: formatDuration(startTime, endTime),
-          toolEvents: toolEvents.length > 0 ? [...toolEvents] : undefined,
-        }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: fullText,
+            timestamp: endTime,
+            duration: formatDuration(startTime, endTime),
+            toolEvents: toolEvents.length > 0 ? [...toolEvents] : undefined,
+          },
+        ]);
         setStreamText("");
       }
       setStreaming(false);
@@ -533,7 +734,9 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
       <div className="asv-header">
         <div className="asv-header-info">
           <span className="asv-header-name">{displayName}</span>
-          {agentInfo?.model && <span className="asv-header-model">{agentInfo.model}</span>}
+          {agentInfo?.model && (
+            <span className="asv-header-model">{agentInfo.model}</span>
+          )}
           <span className={`asv-header-dot ${wsConnected ? "live" : ""}`} />
         </div>
         <div className="asv-header-actions">
@@ -543,12 +746,36 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
             title="Sessions"
           >
             {sessions.length > 0 ? `${sessions.length} sessions` : "sessions"}
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <path d={showSessionList ? "M3 7.5L6 4.5L9 7.5" : "M3 4.5L6 7.5L9 4.5"} />
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            >
+              <path
+                d={
+                  showSessionList ? "M3 7.5L6 4.5L9 7.5" : "M3 4.5L6 7.5L9 4.5"
+                }
+              />
             </svg>
           </button>
-          <button className="asv-new-session" onClick={handleNewConversation} title="New conversation">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+          <button
+            className="asv-new-session"
+            onClick={handleNewConversation}
+            title="New conversation"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            >
               <path d="M7 3v8M3 7h8" />
             </svg>
           </button>
@@ -559,7 +786,9 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
       {showSessionList && (
         <div className="asv-session-list">
           {sessions.length === 0 ? (
-            <div className="asv-session-empty">No sessions yet. Start a conversation below.</div>
+            <div className="asv-session-empty">
+              No sessions yet. Start a conversation below.
+            </div>
           ) : (
             sessions.map((s) => (
               <div
@@ -572,13 +801,20 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
                     {s.first_message || `Session ${s.id.slice(0, 8)}`}
                   </span>
                   <span className="asv-session-item-date">
-                    {new Date(s.created_at).toLocaleDateString([], { month: "short", day: "numeric" })}
+                    {new Date(s.created_at).toLocaleDateString([], {
+                      month: "short",
+                      day: "numeric",
+                    })}
                   </span>
                 </div>
                 <div className="asv-session-item-meta">
-                  <span className={`asv-session-status ${s.status}`}>{s.status}</span>
+                  <span className={`asv-session-status ${s.status}`}>
+                    {s.status}
+                  </span>
                   {s.message_count != null && (
-                    <span className="asv-session-item-count">{s.message_count} msgs</span>
+                    <span className="asv-session-item-count">
+                      {s.message_count} msgs
+                    </span>
                   )}
                 </div>
               </div>
@@ -595,7 +831,11 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
               <BlockAvatar name={agentName} size={48} />
             </div>
             <div className="asv-empty-title">Message {displayName}</div>
-            <div className="asv-empty-hint">{activeSessionId ? "Continue this conversation." : "Your message starts a new session."}</div>
+            <div className="asv-empty-hint">
+              {activeSessionId
+                ? "Continue this conversation."
+                : "Your message starts a new session."}
+            </div>
           </div>
         )}
 
@@ -604,10 +844,21 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
             return (
               <div key={i} className="asv-task-event">
                 <span className="asv-task-event-icon">
-                  {(msg.eventType || "").includes("create") ? "+" : (msg.eventType || "").includes("complete") || (msg.eventType || "").includes("close") ? "\u2713" : (msg.eventType || "").includes("block") ? "!" : "\u2192"}
+                  {(msg.eventType || "").includes("create")
+                    ? "+"
+                    : (msg.eventType || "").includes("complete") ||
+                        (msg.eventType || "").includes("close")
+                      ? "\u2713"
+                      : (msg.eventType || "").includes("block")
+                        ? "!"
+                        : "\u2192"}
                 </span>
                 <span className="asv-task-event-text">{msg.content}</span>
-                {msg.timestamp && <span className="asv-task-event-time">{formatTime(msg.timestamp)}</span>}
+                {msg.timestamp && (
+                  <span className="asv-task-event-time">
+                    {formatTime(msg.timestamp)}
+                  </span>
+                )}
               </div>
             );
           }
@@ -616,7 +867,9 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
               <div key={i} className="asv-msg asv-msg-error">
                 <div className="asv-msg-header">
                   <span className="asv-msg-role">error</span>
-                  {msg.duration && <span className="asv-msg-duration">{msg.duration}</span>}
+                  {msg.duration && (
+                    <span className="asv-msg-duration">{msg.duration}</span>
+                  )}
                 </div>
                 <div className="asv-msg-content">{msg.content}</div>
               </div>
@@ -626,52 +879,96 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
           return (
             <div key={i} className={`asv-msg asv-msg-${msg.role}`}>
               <div className="asv-msg-avatar">
-                <BlockAvatar name={msg.role === "assistant" ? agentName : userName} size={24} />
+                <BlockAvatar
+                  name={msg.role === "assistant" ? agentName : userName}
+                  size={24}
+                />
               </div>
               <div className="asv-msg-body">
-              <div className="asv-msg-header">
-                <span className="asv-msg-role">{msg.role === "assistant" ? displayName : "you"}</span>
-                {msg.timestamp && <span className="asv-msg-time">{formatTime(msg.timestamp)}</span>}
-                {msg.duration && <span className="asv-msg-duration">{msg.duration}</span>}
-                {msg.costUsd != null && msg.costUsd > 0 && (
-                  <span className="asv-msg-cost">${msg.costUsd.toFixed(4)}</span>
-                )}
-                {msg.tokenUsage && (msg.tokenUsage.prompt > 0 || msg.tokenUsage.completion > 0) && (
-                  <span className="asv-msg-tokens">{msg.tokenUsage.prompt}\u2192{msg.tokenUsage.completion} tok</span>
-                )}
-              </div>
-
-              {msg.segments && msg.segments.length > 0 ? (
-                <>
-                  {msg.segments.map((seg, si) =>
-                    seg.kind === "text" ? (
-                      <div key={si} className="asv-msg-content">
-                        <Markdown>{seg.text}</Markdown>
-                      </div>
-                    ) : seg.kind === "tool" ? (
-                      <div key={si} className="asv-tool-inline">
-                        <span className="asv-tool-icon">
-                          {seg.event.type === "start" ? "\u27F3" : seg.event.success ? "\u2713" : "\u2717"}
-                        </span>
-                        <span className="asv-tool-name">{seg.event.name}</span>
-                        {seg.event.input_preview && <span className="asv-tool-input">{seg.event.input_preview}</span>}
-                        {seg.event.duration_ms != null && <span className="asv-tool-ms">{formatMs(seg.event.duration_ms)}</span>}
-                        {seg.event.output_preview && <ExpandableOutput text={seg.event.output_preview} />}
-                      </div>
-                    ) : seg.kind === "status" ? (
-                      <div key={si} className="asv-status-item">{seg.text}</div>
-                    ) : null
+                <div className="asv-msg-header">
+                  <span className="asv-msg-role">
+                    {msg.role === "assistant" ? displayName : "you"}
+                  </span>
+                  {msg.timestamp && (
+                    <span className="asv-msg-time">
+                      {formatTime(msg.timestamp)}
+                    </span>
                   )}
-                  {msg.role === "assistant" && <CopyButton text={msg.content} />}
-                </>
-              ) : (
-                <>
-                  <div className="asv-msg-content">
-                    {msg.role === "assistant" ? <Markdown>{msg.content}</Markdown> : <span>{msg.content}</span>}
-                  </div>
-                  {msg.role === "assistant" && <CopyButton text={msg.content} />}
-                </>
-              )}
+                  {msg.duration && (
+                    <span className="asv-msg-duration">{msg.duration}</span>
+                  )}
+                  {msg.costUsd != null && msg.costUsd > 0 && (
+                    <span className="asv-msg-cost">
+                      ${msg.costUsd.toFixed(4)}
+                    </span>
+                  )}
+                  {msg.tokenUsage &&
+                    (msg.tokenUsage.prompt > 0 ||
+                      msg.tokenUsage.completion > 0) && (
+                      <span className="asv-msg-tokens">
+                        {msg.tokenUsage.prompt}\u2192{msg.tokenUsage.completion}{" "}
+                        tok
+                      </span>
+                    )}
+                </div>
+
+                {msg.segments && msg.segments.length > 0 ? (
+                  <>
+                    {msg.segments.map((seg, si) =>
+                      seg.kind === "text" ? (
+                        <div key={si} className="asv-msg-content">
+                          <Markdown>{seg.text}</Markdown>
+                        </div>
+                      ) : seg.kind === "tool" ? (
+                        <div key={si} className="asv-tool-inline">
+                          <span className="asv-tool-icon">
+                            {seg.event.type === "start"
+                              ? "\u27F3"
+                              : seg.event.success
+                                ? "\u2713"
+                                : "\u2717"}
+                          </span>
+                          <span className="asv-tool-name">
+                            {seg.event.name}
+                          </span>
+                          {seg.event.input_preview && (
+                            <span className="asv-tool-input">
+                              {seg.event.input_preview}
+                            </span>
+                          )}
+                          {seg.event.duration_ms != null && (
+                            <span className="asv-tool-ms">
+                              {formatMs(seg.event.duration_ms)}
+                            </span>
+                          )}
+                          {seg.event.output_preview && (
+                            <ExpandableOutput text={seg.event.output_preview} />
+                          )}
+                        </div>
+                      ) : seg.kind === "status" ? (
+                        <div key={si} className="asv-status-item">
+                          {seg.text}
+                        </div>
+                      ) : null,
+                    )}
+                    {msg.role === "assistant" && (
+                      <CopyButton text={msg.content} />
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="asv-msg-content">
+                      {msg.role === "assistant" ? (
+                        <Markdown>{msg.content}</Markdown>
+                      ) : (
+                        <span>{msg.content}</span>
+                      )}
+                    </div>
+                    {msg.role === "assistant" && (
+                      <CopyButton text={msg.content} />
+                    )}
+                  </>
+                )}
               </div>
             </div>
           );
@@ -685,12 +982,16 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
               {thinkingStart && <ThinkingTimer start={thinkingStart} />}
             </div>
             {streamText && (
-              <div className="asv-msg-content"><Markdown>{streamText}</Markdown></div>
+              <div className="asv-msg-content">
+                <Markdown>{streamText}</Markdown>
+              </div>
             )}
             {liveToolEvents.length > 0 && (
               <div className="asv-tool-live">
                 <div className="asv-tool-live-header">
-                  {liveToolEvents.some(e => e.type === "start") ? "working..." : `${liveToolEvents.filter(e => e.type === "complete").length} tool calls`}
+                  {liveToolEvents.some((e) => e.type === "start")
+                    ? "working..."
+                    : `${liveToolEvents.filter((e) => e.type === "complete").length} tool calls`}
                 </div>
                 {liveToolEvents.map((ev, i) =>
                   ev.type === "turn" ? (
@@ -703,18 +1004,34 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
                     </div>
                   ) : (
                     <div key={i} className={`asv-tool-live-item ${ev.type}`}>
-                      <span className="asv-tool-icon">{ev.type === "start" ? "\u27F3" : ev.success ? "\u2713" : "\u2717"}</span>
+                      <span className="asv-tool-icon">
+                        {ev.type === "start"
+                          ? "\u27F3"
+                          : ev.success
+                            ? "\u2713"
+                            : "\u2717"}
+                      </span>
                       <span className="asv-tool-live-name">{ev.name}</span>
-                      {ev.duration_ms != null && <span className="asv-tool-ms">{formatMs(ev.duration_ms)}</span>}
-                      {ev.type === "complete" && ev.output_preview && <ExpandableOutput text={ev.output_preview} />}
+                      {ev.duration_ms != null && (
+                        <span className="asv-tool-ms">
+                          {formatMs(ev.duration_ms)}
+                        </span>
+                      )}
+                      {ev.type === "complete" && ev.output_preview && (
+                        <ExpandableOutput text={ev.output_preview} />
+                      )}
                     </div>
-                  )
+                  ),
                 )}
               </div>
             )}
             {!streamText && !liveToolEvents.length && <ThinkingStatus />}
-            {liveToolEvents.some(e => e.type === "start") && (
-              <ThinkingStatus toolName={liveToolEvents.filter(e => e.type === "start").pop()?.name} />
+            {liveToolEvents.some((e) => e.type === "start") && (
+              <ThinkingStatus
+                toolName={
+                  liveToolEvents.filter((e) => e.type === "start").pop()?.name
+                }
+              />
             )}
           </div>
         )}
@@ -722,55 +1039,195 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
         <div ref={messagesEnd} />
       </div>
 
-      {/* Session prompts (only visible before first message) */}
+      {/* Session attachments — prompts and task (only visible before first message) */}
       {!activeSessionId && (
-        <div className="asv-prompts-bar">
-          {sessionPrompts.length > 0 && (
-            <div className="asv-prompts-list">
+        <div className="asv-attach-bar">
+          {/* Attached chips */}
+          {(sessionPrompts.length > 0 || sessionTask) && (
+            <div className="asv-attach-chips">
               {sessionPrompts.map((p, i) => (
-                <div key={i} className="asv-prompt-chip">
-                  <span className="asv-prompt-chip-text">{p.length > 60 ? p.slice(0, 60) + "..." : p}</span>
-                  <span className="asv-prompt-chip-x" onClick={() => setSessionPrompts((prev) => prev.filter((_, j) => j !== i))}>×</span>
+                <div
+                  key={`p-${i}`}
+                  className="asv-attach-chip asv-attach-chip--prompt"
+                >
+                  <span className="asv-attach-chip-icon">⚡</span>
+                  <span className="asv-attach-chip-text">{p}</span>
+                  <span
+                    className="asv-attach-chip-x"
+                    onClick={() =>
+                      setSessionPrompts((prev) =>
+                        prev.filter((_, j) => j !== i),
+                      )
+                    }
+                  >
+                    ×
+                  </span>
                 </div>
               ))}
+              {sessionTask && (
+                <div className="asv-attach-chip asv-attach-chip--task">
+                  <span className="asv-attach-chip-icon">◆</span>
+                  <span className="asv-attach-chip-text">
+                    {sessionTask.name}
+                  </span>
+                  <span
+                    className="asv-attach-chip-x"
+                    onClick={() => setSessionTask(null)}
+                  >
+                    ×
+                  </span>
+                </div>
+              )}
             </div>
           )}
-          {showPromptInput ? (
-            <div className="asv-prompt-add">
-              <textarea
-                className="asv-prompt-input"
-                placeholder="Add a prompt for this session..."
-                value={promptDraft}
-                onChange={(e) => setPromptDraft(e.target.value)}
-                rows={2}
-                autoFocus
-              />
-              <div className="asv-prompt-add-actions">
-                <button className="asv-prompt-add-btn" onClick={() => {
-                  if (promptDraft.trim()) {
-                    setSessionPrompts((prev) => [...prev, promptDraft.trim()]);
-                    setPromptDraft("");
-                    setShowPromptInput(false);
+
+          {/* Picker dropdown */}
+          {showAttachPicker && (
+            <div className="asv-attach-picker">
+              <div className="asv-attach-picker-header">
+                <input
+                  className="asv-attach-picker-search"
+                  placeholder={
+                    showAttachPicker === "prompt"
+                      ? "Search prompts..."
+                      : "Search tasks..."
                   }
-                }}>Add</button>
-                <button className="asv-prompt-cancel-btn" onClick={() => { setShowPromptInput(false); setPromptDraft(""); }}>Cancel</button>
+                  value={attachSearch}
+                  onChange={(e) => setAttachSearch(e.target.value)}
+                  autoFocus
+                />
+                <button
+                  className="asv-attach-picker-close"
+                  onClick={() => {
+                    setShowAttachPicker(null);
+                    setAttachSearch("");
+                  }}
+                >
+                  ×
+                </button>
               </div>
+              <div className="asv-attach-picker-list">
+                {showAttachPicker === "prompt" && (
+                  <>
+                    {availablePrompts
+                      .filter((p) => {
+                        const q = attachSearch.toLowerCase();
+                        return (
+                          !q ||
+                          p.name.toLowerCase().includes(q) ||
+                          p.description.toLowerCase().includes(q) ||
+                          p.tags.some((t) => t.includes(q))
+                        );
+                      })
+                      .filter((p) => !sessionPrompts.includes(p.name))
+                      .map((p) => (
+                        <div
+                          key={p.name}
+                          className="asv-attach-picker-item"
+                          onClick={() => {
+                            setSessionPrompts((prev) => [...prev, p.name]);
+                            setAttachSearch("");
+                            setShowAttachPicker(null);
+                          }}
+                        >
+                          <span className="asv-attach-picker-item-name">
+                            {p.name}
+                          </span>
+                          <span className="asv-attach-picker-item-desc">
+                            {p.description}
+                          </span>
+                          {p.tags.length > 0 && (
+                            <span className="asv-attach-picker-item-tags">
+                              {p.tags.join(", ")}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    {availablePrompts.length === 0 && (
+                      <div className="asv-attach-picker-empty">
+                        No prompts found
+                      </div>
+                    )}
+                  </>
+                )}
+                {showAttachPicker === "task" && (
+                  <>
+                    {availableTasks
+                      .filter(
+                        (t) =>
+                          !attachSearch ||
+                          t.name
+                            .toLowerCase()
+                            .includes(attachSearch.toLowerCase()),
+                      )
+                      .map((t) => (
+                        <div
+                          key={t.id}
+                          className="asv-attach-picker-item"
+                          onClick={() => {
+                            setSessionTask({ id: t.id, name: t.name });
+                            setAttachSearch("");
+                            setShowAttachPicker(null);
+                          }}
+                        >
+                          <span className="asv-attach-picker-item-name">
+                            {t.name}
+                          </span>
+                          <span className="asv-attach-picker-item-desc">
+                            {t.id}
+                          </span>
+                        </div>
+                      ))}
+                    {availableTasks.length === 0 && (
+                      <div className="asv-attach-picker-empty">
+                        No open tasks
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+              <a
+                className="asv-attach-picker-create"
+                href={showAttachPicker === "prompt" ? "/prompts" : "/quests"}
+                target="_blank"
+                rel="noreferrer"
+              >
+                + create new {showAttachPicker}
+              </a>
             </div>
-          ) : (
-            <button className="asv-prompt-toggle" onClick={() => setShowPromptInput(true)}>
-              + add prompt
-            </button>
+          )}
+
+          {/* Toggle buttons */}
+          {!showAttachPicker && (
+            <div className="asv-attach-toggles">
+              <button
+                className="asv-attach-toggle"
+                onClick={() => setShowAttachPicker("prompt")}
+              >
+                + prompt
+              </button>
+              <button
+                className="asv-attach-toggle"
+                onClick={() => setShowAttachPicker("task")}
+              >
+                + task
+              </button>
+            </div>
           )}
         </div>
       )}
 
       {/* Input box */}
       <div className="asv-composer">
-        <div className={`asv-composer-inner ${streaming ? "asv-composer-busy" : ""}`}>
+        <div
+          className={`asv-composer-inner ${streaming ? "asv-composer-busy" : ""}`}
+        >
           <textarea
             ref={inputRef}
             className="asv-textarea"
-            placeholder={streaming ? "Responding..." : `Message ${displayName}...`}
+            placeholder={
+              streaming ? "Responding..." : `Message ${displayName}...`
+            }
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
@@ -783,12 +1240,38 @@ export default function AgentSessionView({ agentId, sessionId: urlSessionId }: A
             disabled={!input.trim() || streaming}
           >
             {streaming ? (
-              <svg className="asv-send-spinner" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="8" cy="8" r="6" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" />
+              <svg
+                className="asv-send-spinner"
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <circle
+                  cx="8"
+                  cy="8"
+                  r="6"
+                  strokeDasharray="28"
+                  strokeDashoffset="8"
+                  strokeLinecap="round"
+                />
               </svg>
             ) : (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M2 8h12M10 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path
+                  d="M2 8h12M10 4l4 4-4 4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
             )}
           </button>

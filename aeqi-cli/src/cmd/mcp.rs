@@ -950,14 +950,14 @@ pub fn cmd_mcp(config_path: &Option<PathBuf>) -> Result<()> {
 
                                 match community {
                                     Some(comm) => {
-                                        let skill = aeqi_graph::synthesize_skill(
+                                        let synthesized = aeqi_graph::synthesize_prompt(
                                             comm, &all_nodes, &all_edges,
                                         );
                                         Ok(serde_json::json!({
                                             "ok": true,
-                                            "skill_name": skill.name,
-                                            "description": skill.description,
-                                            "content": skill.content,
+                                            "prompt_name": synthesized.name,
+                                            "description": synthesized.description,
+                                            "content": synthesized.content,
                                         }))
                                     }
                                     None => {

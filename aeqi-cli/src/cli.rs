@@ -126,11 +126,11 @@ pub enum Commands {
         action: TriggerAction,
     },
 
-    // --- Phase 7: Skills ---
-    /// List or run skills.
-    Skill {
+    // --- Phase 7: Prompts ---
+    /// List or run prompts.
+    Prompt {
         #[command(subcommand)]
-        action: SkillAction,
+        action: PromptAction,
     },
 
     // --- Missions ---
@@ -461,18 +461,18 @@ pub enum TriggerAction {
 }
 
 #[derive(Subcommand)]
-pub enum SkillAction {
-    /// List available skills for a company.
+pub enum PromptAction {
+    /// List available prompts for a company.
     List {
         #[arg(short = 'r', long = "company", alias = "project")]
         company: Option<String>,
     },
-    /// Run a skill by name.
+    /// Run a prompt by name.
     Run {
         name: String,
         #[arg(short = 'r', long = "company", alias = "project")]
         company: String,
-        /// Additional user prompt appended after the skill's user_prefix.
+        /// Additional user prompt appended after the prompt's user_prefix.
         prompt: Option<String>,
     },
 }
