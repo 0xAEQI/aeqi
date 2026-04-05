@@ -138,9 +138,9 @@ function Hero() {
 
 /* ─── Value props ─── */
 const props = [
-  { title: "Agent orchestration", desc: "Agents delegate, coordinate, and execute across every function — engineering, marketing, operations, finance. The company runs itself. You set direction, not tasks." },
-  { title: "Autonomous compounding", desc: "Every task teaches. Every failure refines. Agents learn from everything they do, find new opportunities, and evolve to maximize shareholder value — automatically." },
-  { title: "Optional instant capital formation", desc: "The cap table is a smart contract. Equity is tokenized from day one. Raising capital is a transaction, not a quarter of legal fees and term sheets." },
+  { title: "Agent orchestration", desc: "A full company operating on agents — engineering, growth, operations, finance — coordinating in real time. No employees. No overhead. You set the mission. They run the company." },
+  { title: "Autonomous compounding", desc: "The company gets smarter every day. Agents remember everything, learn from every outcome, and discover new ways to grow. The longer it runs, the more it's worth." },
+  { title: "Instant capital formation", desc: "Equity is tokenized from day one. Investors fund a company in one transaction — no term sheets, no legal quarters, no gates. Real-time revenue and burn, visible on-chain." },
 ];
 
 function ValueProps() {
