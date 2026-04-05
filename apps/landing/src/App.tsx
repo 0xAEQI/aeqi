@@ -77,7 +77,16 @@ function Hero() {
           Companies run by agents. Ownership is programmable.
         </motion.p>
 
-        <motion.div className="mt-10" {...fade(0.5)}>
+        <motion.div className="mt-8" {...fade(0.45)}>
+          <a
+            href="https://app.aeqi.ai"
+            className="inline-block bg-black text-white rounded-full px-7 py-2.5 text-[15px] font-medium hover:bg-black/85 transition-colors"
+          >
+            Create a Company
+          </a>
+        </motion.div>
+
+        <motion.div className="mt-6" {...fade(0.5)}>
           <button
             onClick={copy}
             className="group inline-flex items-center gap-3 bg-black/[0.03] hover:bg-black/[0.06] rounded-lg px-5 py-3 transition-colors cursor-pointer"
