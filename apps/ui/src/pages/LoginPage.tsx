@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuthStore } from "@/store/auth";
+import { api } from "@/lib/api";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -36,7 +37,17 @@ export default function LoginPage() {
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const ok = await loginWithEmail(email, password);
-    if (ok) navigate("/");
+    if (ok) {
+      // Fetch user to check if onboarding needed.
+      try {
+        const me = await api.getMe();
+        if (!me.companies || me.companies.length === 0) {
+          navigate("/onboarding");
+          return;
+        }
+      } catch { /* proceed to dashboard */ }
+      navigate("/");
+    }
   };
 
   const handleGoogle = () => {

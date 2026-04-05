@@ -8,6 +8,7 @@ interface User {
   email: string;
   name: string;
   avatar_url?: string;
+  companies?: string[];
 }
 
 interface AuthState {
@@ -17,15 +18,19 @@ interface AuthState {
   user: User | null;
   loading: boolean;
   error: string | null;
+  pendingEmail: string | null; // email awaiting verification
 
   fetchAuthMode: () => Promise<void>;
   login: (secret: string) => Promise<boolean>;
   loginWithEmail: (email: string, password: string) => Promise<boolean>;
-  signup: (email: string, password: string, name: string) => Promise<boolean>;
+  signup: (email: string, password: string, name: string) => Promise<"verified" | "pending" | "error">;
+  verifyEmail: (email: string, code: string) => Promise<boolean>;
+  resendCode: (email: string) => Promise<boolean>;
   handleOAuthCallback: (token: string) => void;
   fetchMe: () => Promise<void>;
   logout: () => void;
   isAuthenticated: () => boolean;
+  needsOnboarding: () => boolean;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -35,6 +40,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   loading: false,
   error: null,
+  pendingEmail: null,
 
   fetchAuthMode: async () => {
     try {
@@ -43,7 +49,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       localStorage.setItem("aeqi_auth_mode", mode || "secret");
       set({ authMode: mode, googleOAuth: resp.google_oauth });
 
-      // In none mode, auto-generate a token if needed.
       if (mode === "none" && !get().token) {
         try {
           const loginResp = await api.login("");
@@ -52,12 +57,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             set({ token: loginResp.token });
           }
         } catch {
-          // In none mode, this is fine — routes don't require auth.
           set({ token: "none" });
         }
       }
     } catch {
-      // If endpoint not available, assume secret mode (backward compat).
       set({ authMode: "secret" });
     }
   },
@@ -85,11 +88,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const resp = await api.loginWithEmail(email, password);
       if (resp.ok && resp.token) {
         localStorage.setItem("aeqi_token", resp.token);
-        set({
-          token: resp.token,
-          user: resp.user || null,
-          loading: false,
-        });
+        set({ token: resp.token, user: resp.user || null, loading: false });
         return true;
       }
       set({ loading: false, error: "Invalid email or password" });
@@ -104,19 +103,45 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const resp = await api.signup(email, password, name);
+      if (resp.ok && (resp as any).pending_verification) {
+        set({ loading: false, pendingEmail: email });
+        return "pending";
+      }
       if (resp.ok && resp.token) {
         localStorage.setItem("aeqi_token", resp.token);
-        set({
-          token: resp.token,
-          user: resp.user || null,
-          loading: false,
-        });
-        return true;
+        set({ token: resp.token, user: resp.user || null, loading: false });
+        return "verified";
       }
       set({ loading: false, error: "Signup failed" });
-      return false;
+      return "error";
     } catch (e: any) {
       set({ loading: false, error: e?.message || "Signup failed" });
+      return "error";
+    }
+  },
+
+  verifyEmail: async (email: string, code: string) => {
+    set({ loading: true, error: null });
+    try {
+      const resp = await api.verifyEmail(email, code);
+      if (resp.ok && resp.token) {
+        localStorage.setItem("aeqi_token", resp.token);
+        set({ token: resp.token, user: resp.user || null, loading: false, pendingEmail: null });
+        return true;
+      }
+      set({ loading: false, error: "Invalid or expired code" });
+      return false;
+    } catch (e: any) {
+      set({ loading: false, error: e?.message || "Verification failed" });
+      return false;
+    }
+  },
+
+  resendCode: async (email: string) => {
+    try {
+      await api.resendCode(email);
+      return true;
+    } catch {
       return false;
     }
   },
@@ -137,12 +162,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: () => {
     localStorage.removeItem("aeqi_token");
-    set({ token: null, user: null });
+    set({ token: null, user: null, pendingEmail: null });
   },
 
   isAuthenticated: () => {
     const { authMode, token } = get();
     if (authMode === "none") return true;
     return !!token;
+  },
+
+  needsOnboarding: () => {
+    const { user } = get();
+    if (!user) return false;
+    return !user.companies || user.companies.length === 0;
   },
 }));

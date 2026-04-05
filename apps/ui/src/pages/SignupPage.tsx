@@ -12,8 +12,9 @@ export default function SignupPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const ok = await signup(email, password, name);
-    if (ok) navigate("/");
+    const result = await signup(email, password, name);
+    if (result === "pending") navigate("/verify");
+    else if (result === "verified") navigate("/onboarding");
   };
 
   const handleGoogle = () => {

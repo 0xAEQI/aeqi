@@ -640,9 +640,15 @@ pub struct AuthConfig {
     pub google_client_id: Option<String>,
     #[serde(default)]
     pub google_client_secret: Option<String>,
-    /// Base URL for OAuth redirects (e.g. "https://app.aeqi.ai").
+    /// Base URL for OAuth redirects and email links.
     #[serde(default)]
     pub base_url: Option<String>,
+    /// Resend API key for transactional emails.
+    #[serde(default)]
+    pub resend_api_key: Option<String>,
+    /// From address for emails (default: "aeqi <hello@aeqi.ai>").
+    #[serde(default)]
+    pub from_email: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

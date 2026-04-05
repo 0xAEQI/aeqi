@@ -50,8 +50,27 @@ impl UserStore {
             CREATE TABLE IF NOT EXISTS oauth_states (
                 state TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS email_verifications (
+                email TEXT PRIMARY KEY,
+                code TEXT NOT NULL,
+                user_id TEXT,
+                created_at TEXT NOT NULL
             );",
         )?;
+
+        // Idempotent migration: add email_verified column.
+        let has_verified: bool = conn
+            .prepare("PRAGMA table_info(users)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(|r| r.ok())
+            .any(|col| col == "email_verified");
+        if !has_verified {
+            conn.execute_batch(
+                "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1;",
+            )?;
+        }
 
         Ok(Self {
             db: Mutex::new(conn),
@@ -239,5 +258,120 @@ impl UserStore {
             )
             .unwrap_or(0);
         deleted > 0
+    }
+
+    // -- Email verification ---------------------------------------------------
+
+    /// Create user with email_verified = false (for email verification flow).
+    pub fn create_user_unverified(&self, email: &str, password: &str, name: &str) -> Result<User> {
+        use argon2::{Argon2, PasswordHasher, password_hash::SaltString, password_hash::rand_core::OsRng};
+
+        let salt = SaltString::generate(&mut OsRng);
+        let hash = Argon2::default()
+            .hash_password(password.as_bytes(), &salt)
+            .map_err(|e| anyhow::anyhow!("password hash failed: {e}"))?
+            .to_string();
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let db = self.db.lock().unwrap();
+        db.execute(
+            "INSERT INTO users (id, email, password_hash, name, provider, email_verified, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'local', 0, ?5, ?5)",
+            rusqlite::params![id, email, hash, name, now],
+        )?;
+
+        Ok(User {
+            id,
+            email: email.to_string(),
+            password_hash: Some(hash),
+            name: name.to_string(),
+            avatar_url: None,
+            provider: "local".to_string(),
+            provider_id: None,
+            created_at: now,
+        })
+    }
+
+    /// Generate and store a 6-digit verification code.
+    pub fn create_verification_code(&self, email: &str, user_id: &str) -> String {
+        use argon2::password_hash::rand_core::{OsRng, RngCore};
+        let code = format!("{:06}", OsRng.next_u32() % 1_000_000);
+        let now = chrono::Utc::now().to_rfc3339();
+        let db = self.db.lock().unwrap();
+        let _ = db.execute(
+            "INSERT OR REPLACE INTO email_verifications (email, code, user_id, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![email, code, user_id, now],
+        );
+        // Clean up expired codes (> 10 min).
+        let _ = db.execute(
+            "DELETE FROM email_verifications WHERE created_at < datetime('now', '-10 minutes')",
+            [],
+        );
+        code
+    }
+
+    /// Verify code and mark user as verified. Returns user if valid.
+    pub fn verify_email(&self, email: &str, code: &str) -> Option<User> {
+        let db = self.db.lock().unwrap();
+        // Check code matches.
+        let stored: Option<(String, String)> = db
+            .query_row(
+                "SELECT code, user_id FROM email_verifications WHERE email = ?1",
+                rusqlite::params![email],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+
+        let Some((stored_code, user_id)) = stored else {
+            return None;
+        };
+
+        if stored_code != code {
+            return None;
+        }
+
+        // Mark verified and clean up.
+        let _ = db.execute(
+            "UPDATE users SET email_verified = 1, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![chrono::Utc::now().to_rfc3339(), user_id],
+        );
+        let _ = db.execute(
+            "DELETE FROM email_verifications WHERE email = ?1",
+            rusqlite::params![email],
+        );
+
+        // Return the user.
+        drop(db);
+        self.find_by_email(email)
+    }
+
+    /// Check if a resend is allowed (rate limit: 1 per 60s).
+    pub fn can_resend_code(&self, email: &str) -> bool {
+        let db = self.db.lock().unwrap();
+        let recent: bool = db
+            .query_row(
+                "SELECT COUNT(*) FROM email_verifications
+                 WHERE email = ?1 AND created_at > datetime('now', '-60 seconds')",
+                rusqlite::params![email],
+                |row| row.get::<_, i32>(0),
+            )
+            .map(|c| c > 0)
+            .unwrap_or(false);
+        !recent
+    }
+
+    /// Check if user's email is verified.
+    pub fn is_email_verified(&self, user_id: &str) -> bool {
+        let db = self.db.lock().unwrap();
+        db.query_row(
+            "SELECT email_verified FROM users WHERE id = ?1",
+            rusqlite::params![user_id],
+            |row| row.get::<_, i32>(0),
+        )
+        .map(|v| v == 1)
+        .unwrap_or(false)
     }
 }

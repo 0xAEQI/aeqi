@@ -87,6 +87,18 @@ export const api = {
 
   getMe: () => request<any>("/auth/me"),
 
+  verifyEmail: (email: string, code: string) =>
+    request<{ ok: boolean; token: string; user?: any }>("/auth/verify", {
+      method: "POST",
+      body: JSON.stringify({ email, code }),
+    }),
+
+  resendCode: (email: string) =>
+    request<{ ok: boolean }>("/auth/resend-code", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
   // Dashboard
   getDashboard: () => request<any>("/dashboard"),
 

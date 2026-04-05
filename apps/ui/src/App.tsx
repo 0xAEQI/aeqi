@@ -4,6 +4,8 @@ import { useAuthStore } from "@/store/auth";
 import AppLayout from "@/components/AppLayout";
 import LoginPage from "@/pages/LoginPage";
 import SignupPage from "@/pages/SignupPage";
+import VerifyEmailPage from "@/pages/VerifyEmailPage";
+import OnboardingPage from "@/pages/OnboardingPage";
 import AuthCallbackPage from "@/pages/AuthCallbackPage";
 import WelcomePage from "@/pages/WelcomePage";
 import NewWorkspacePage from "@/pages/NewWorkspacePage";
@@ -21,13 +23,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     fetchAuthMode();
   }, [fetchAuthMode]);
 
-  // Still loading mode — show nothing briefly.
   if (!authMode) return null;
-
-  // None mode — always pass through.
   if (authMode === "none") return <>{children}</>;
-
-  // Secret or accounts mode — require token.
   if (!token) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
@@ -37,6 +34,8 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      <Route path="/verify" element={<VerifyEmailPage />} />
+      <Route path="/onboarding" element={<OnboardingPage />} />
       <Route path="/auth/callback" element={<AuthCallbackPage />} />
       <Route
         path="/*"

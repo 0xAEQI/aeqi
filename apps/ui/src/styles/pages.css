@@ -196,6 +196,31 @@
   color: rgba(0, 0, 0, 0.5);
 }
 
+/* Verification code inputs */
+.verify-code-inputs {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+.verify-code-digit {
+  width: 48px;
+  height: 56px;
+  text-align: center;
+  font-family: var(--font-sans);
+  font-size: 24px;
+  font-weight: 600;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  outline: none;
+  color: rgba(0, 0, 0, 0.85);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.verify-code-digit:focus {
+  border-color: rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
+}
+
 .content-panel {
   flex: 1;
   min-height: 0;

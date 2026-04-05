@@ -32,6 +32,7 @@ pub struct AppState {
     pub agents_config: Vec<PeerAgentConfig>,
     pub ui_dist_dir: Option<PathBuf>,
     pub user_store: Option<Arc<crate::users::UserStore>>,
+    pub email_service: Option<Arc<crate::email::EmailService>>,
 }
 
 /// Start the web server using settings from AEQIConfig.
@@ -51,6 +52,18 @@ pub async fn start(config: &AEQIConfig) -> Result<()> {
         None
     };
 
+    // Create email service if Resend API key is configured.
+    let email_service = web.auth.resend_api_key.as_deref()
+        .filter(|k| !k.is_empty())
+        .map(|key| {
+            info!("email service initialized (Resend)");
+            Arc::new(crate::email::EmailService::new(
+                key,
+                web.auth.from_email.as_deref(),
+                web.auth.base_url.as_deref(),
+            ))
+        });
+
     let state = AppState {
         ipc: ipc.clone(),
         auth_secret: web.auth_secret.clone(),
@@ -59,6 +72,7 @@ pub async fn start(config: &AEQIConfig) -> Result<()> {
         agents_config: config.agents.clone(),
         ui_dist_dir: web.ui_dist_dir.as_ref().map(PathBuf::from),
         user_store,
+        email_service,
     };
     let ui_dist_dir = state.ui_dist_dir.clone();
     let serve_ui = ui_dist_dir.is_some();
@@ -93,6 +107,8 @@ pub async fn start(config: &AEQIConfig) -> Result<()> {
         .route("/api/auth/mode", axum::routing::get(auth_mode_handler))
         .route("/api/auth/login", axum::routing::post(login_handler))
         .route("/api/auth/signup", axum::routing::post(signup_handler))
+        .route("/api/auth/verify", axum::routing::post(verify_handler))
+        .route("/api/auth/resend-code", axum::routing::post(resend_code_handler))
         .route("/api/auth/google", axum::routing::get(google_redirect_handler))
         .route(
             "/api/auth/google/callback",
@@ -249,6 +265,17 @@ async fn login_handler(
                     .into_response();
             }
 
+            // Send login notification email (fire-and-forget).
+            if let Some(ref es) = state.email_service {
+                let es = es.clone();
+                let to = user.email.clone();
+                let n = user.name.clone();
+                let time = chrono::Utc::now().format("%a, %d %b %Y %H:%M:%S (UTC)").to_string();
+                tokio::spawn(async move {
+                    es.send_login_notification(&to, &n, "Web browser", "—", &time).await;
+                });
+            }
+
             let signing_key = auth::signing_secret(&state);
             match auth::create_token(signing_key, 24, Some(&user.id), Some(&user.email)) {
                 Ok(token) => axum::Json(serde_json::json!({
@@ -310,6 +337,39 @@ async fn signup_handler(
             .into_response();
     }
 
+    // If email service is configured, use verification flow.
+    if state.email_service.is_some() {
+        let user = match store.create_user_unverified(email, password, name) {
+            Ok(u) => u,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    axum::Json(serde_json::json!({"ok": false, "error": e.to_string()})),
+                )
+                    .into_response();
+            }
+        };
+
+        let code = store.create_verification_code(email, &user.id);
+
+        // Send verification email (fire-and-forget).
+        if let Some(ref es) = state.email_service {
+            let es = es.clone();
+            let to = email.to_string();
+            let n = name.to_string();
+            let c = code.clone();
+            tokio::spawn(async move { es.send_verification(&to, &n, &c).await });
+        }
+
+        return axum::Json(serde_json::json!({
+            "ok": true,
+            "pending_verification": true,
+            "email": email,
+        }))
+        .into_response();
+    }
+
+    // No email service — create verified user immediately (self-hosted).
     let user = match store.create_user(email, password, name) {
         Ok(u) => u,
         Err(e) => {
@@ -338,6 +398,102 @@ async fn signup_handler(
         .into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
+}
+
+async fn verify_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::Json(body): axum::Json<serde_json::Value>,
+) -> axum::response::Response {
+    let email = body.get("email").and_then(|s| s.as_str()).unwrap_or("");
+    let code = body.get("code").and_then(|s| s.as_str()).unwrap_or("");
+
+    if email.is_empty() || code.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"ok": false, "error": "email and code required"})),
+        )
+            .into_response();
+    }
+
+    let Some(ref store) = state.user_store else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "user store not available").into_response();
+    };
+
+    let Some(user) = store.verify_email(email, code) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(serde_json::json!({"ok": false, "error": "invalid or expired code"})),
+        )
+            .into_response();
+    };
+
+    // Send welcome email (fire-and-forget).
+    if let Some(ref es) = state.email_service {
+        let es = es.clone();
+        let to = user.email.clone();
+        let n = user.name.clone();
+        tokio::spawn(async move { es.send_welcome(&to, &n).await });
+    }
+
+    let signing_key = auth::signing_secret(&state);
+    match auth::create_token(signing_key, 24, Some(&user.id), Some(&user.email)) {
+        Ok(token) => axum::Json(serde_json::json!({
+            "ok": true,
+            "token": token,
+            "token_type": "Bearer",
+            "expires_in": 86400,
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "name": user.name,
+                "avatar_url": user.avatar_url,
+            },
+        }))
+        .into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn resend_code_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::Json(body): axum::Json<serde_json::Value>,
+) -> axum::response::Response {
+    let email = body.get("email").and_then(|s| s.as_str()).unwrap_or("");
+
+    if email.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"ok": false, "error": "email required"})),
+        )
+            .into_response();
+    }
+
+    let Some(ref store) = state.user_store else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "user store not available").into_response();
+    };
+
+    if !store.can_resend_code(email) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            axum::Json(serde_json::json!({"ok": false, "error": "please wait 60 seconds before resending"})),
+        )
+            .into_response();
+    }
+
+    let Some(user) = store.find_by_email(email) else {
+        return axum::Json(serde_json::json!({"ok": true})).into_response();
+    };
+
+    let code = store.create_verification_code(email, &user.id);
+
+    if let Some(ref es) = state.email_service {
+        let es = es.clone();
+        let to = email.to_string();
+        let n = user.name.clone();
+        tokio::spawn(async move { es.send_verification(&to, &n, &code).await });
+    }
+
+    axum::Json(serde_json::json!({"ok": true})).into_response()
 }
 
 async fn google_redirect_handler(
