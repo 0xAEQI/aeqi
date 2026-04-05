@@ -14,7 +14,7 @@ export default function Footer() {
         <div className="grid grid-cols-2 md:grid-cols-3 gap-10 md:gap-14">
           <motion.div {...fadeView(0.05)}>
             <p className="text-[11px] uppercase tracking-[0.2em] text-black/50 mb-4">Product</p>
-            <div className="space-y-2.5 text-[13px]">
+            <div className="space-y-2.5 text-[14px]">
               <a href="https://app.aeqi.ai/signup" className="block text-black/60 hover:text-black/80 transition-colors">Launch a Company</a>
               <a href="/pricing" className="block text-black/60 hover:text-black/80 transition-colors">Pricing</a>
               <a href="https://github.com/0xAEQI/aeqi/blob/main/docs/architecture.md" className="block text-black/60 hover:text-black/80 transition-colors">Docs</a>
@@ -23,7 +23,7 @@ export default function Footer() {
 
           <motion.div {...fadeView(0.1)}>
             <p className="text-[11px] uppercase tracking-[0.2em] text-black/50 mb-4">Community</p>
-            <div className="space-y-2.5 text-[13px]">
+            <div className="space-y-2.5 text-[14px]">
               <a href="https://github.com/0xAEQI/aeqi" className="block text-black/60 hover:text-black/80 transition-colors">GitHub</a>
               <a href="https://x.com/0xAEQI" className="block text-black/60 hover:text-black/80 transition-colors">X</a>
             </div>
@@ -31,7 +31,7 @@ export default function Footer() {
 
           <motion.div {...fadeView(0.15)}>
             <p className="text-[11px] uppercase tracking-[0.2em] text-black/50 mb-4">Legal</p>
-            <div className="space-y-2.5 text-[13px]">
+            <div className="space-y-2.5 text-[14px]">
               <a href="/terms" className="block text-black/60 hover:text-black/80 transition-colors">Terms</a>
               <a href="/privacy" className="block text-black/60 hover:text-black/80 transition-colors">Privacy</a>
             </div>

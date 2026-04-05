@@ -35,11 +35,11 @@ function Pricing() {
         >
           <div>
             <p className="text-[15px] font-semibold text-black/70">3-day free trial</p>
-            <p className="text-[13px] text-black/50 mt-1">1 company. 3 agents. 3M tokens. No credit card required.</p>
+            <p className="text-[14px] text-black/50 mt-1">1 company. 3 agents. 3M tokens. No credit card required.</p>
           </div>
           <a
             href="https://app.aeqi.ai/signup?plan=trial"
-            className="shrink-0 bg-black text-white rounded-xl px-5 py-2 text-[13px] font-medium hover:bg-black/85 transition-all hover:shadow-md hover:shadow-black/10 active:scale-[0.97]"
+            className="shrink-0 bg-black text-white rounded-xl px-5 py-2 text-[14px] font-medium hover:bg-black/85 transition-all hover:shadow-md hover:shadow-black/10 active:scale-[0.97]"
           >
             Start Free Trial
           </a>
@@ -57,7 +57,7 @@ function Pricing() {
               <span className="text-[15px] text-black/30 ml-1">/mo</span>
             </div>
             <p className="text-[13px] text-black/45 mb-8">Ship your first autonomous company.</p>
-            <div className="space-y-3.5 text-[14px] text-black/60 mb-10">
+            <div className="space-y-3.5 text-[15px] text-black/60 mb-10">
               <div className="flex items-center gap-2.5">
                 <span className="text-black/30">+</span>
                 <span>Up to 2 companies</span>
@@ -96,14 +96,14 @@ function Pricing() {
             className="rounded-2xl border-2 border-black/20 bg-white p-8 flex flex-col relative"
             {...fade(0.3)}
           >
-            <span className="absolute -top-3 left-6 bg-black text-white text-[11px] font-medium tracking-wide uppercase px-3 py-0.5 rounded-full">Most popular</span>
+            <span className="absolute -top-3 left-6 bg-black text-white text-[11px] font-semibold tracking-wide uppercase px-3 py-0.5 rounded-full">Most popular</span>
             <p className="text-[11px] uppercase tracking-[0.2em] text-black/45 mb-6">Growth</p>
             <div className="mb-1">
               <span className="text-[36px] font-semibold tracking-tight text-black/80">$100</span>
               <span className="text-[15px] text-black/30 ml-1">/mo</span>
             </div>
             <p className="text-[13px] text-black/45 mb-8">Run a portfolio. No limits.</p>
-            <div className="space-y-3.5 text-[14px] text-black/60 mb-10">
+            <div className="space-y-3.5 text-[15px] text-black/60 mb-10">
               <div className="flex items-center gap-2.5">
                 <span className="text-black/30">+</span>
                 <span>Everything in Starter</span>
@@ -143,7 +143,7 @@ function Pricing() {
               <span className="text-[36px] font-semibold tracking-tight text-black/80">Custom</span>
             </div>
             <p className="text-[13px] text-black/45 mb-8">Your infrastructure. Your terms.</p>
-            <div className="space-y-3.5 text-[14px] text-black/60 mb-10">
+            <div className="space-y-3.5 text-[15px] text-black/60 mb-10">
               <div className="flex items-center gap-2.5">
                 <span className="text-black/30">+</span>
                 <span>Dedicated infrastructure</span>
@@ -180,7 +180,7 @@ function Pricing() {
 
         {/* Token note */}
         <motion.div className="mt-16 max-w-2xl mx-auto text-center" {...fadeView(0.1)}>
-          <h3 className="text-[14px] font-semibold tracking-wide uppercase text-black/60 mb-4">Need more tokens?</h3>
+          <h3 className="text-[14px] font-semibold tracking-[0.2em] uppercase text-black/60 mb-4">Need more tokens?</h3>
           <p className="text-[15px] leading-[1.7] text-black/50">
             Buy additional tokens from us at bulk-sourced provider rates, or bring your own OpenRouter or Xiaomi API key.
           </p>

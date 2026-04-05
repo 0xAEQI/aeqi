@@ -13,16 +13,16 @@ export default function Nav() {
           æqi
         </a>
         <div className="flex items-center gap-1">
-          <a href="/pricing" className="text-[13px] text-black/55 hover:text-black/80 hover:bg-black/[0.04] rounded-lg px-3 py-1.5 transition-all hidden sm:block">
+          <a href="/pricing" className="text-[14px] text-black/55 hover:text-black/80 hover:bg-black/[0.04] rounded-lg px-3 py-1.5 transition-all hidden sm:block">
             Pricing
           </a>
           <div className="w-px h-5 bg-black/[0.08] mx-1.5 hidden sm:block" />
-          <a href="https://app.aeqi.ai/login" className="text-[13px] text-black/55 hover:text-black/80 hover:bg-black/[0.04] rounded-lg px-3 py-1.5 transition-all">
+          <a href="https://app.aeqi.ai/login" className="text-[14px] text-black/55 hover:text-black/80 hover:bg-black/[0.04] rounded-lg px-3 py-1.5 transition-all">
             Log in
           </a>
           <a
             href="https://app.aeqi.ai/signup"
-            className="bg-black text-white rounded-xl px-4 py-1.5 text-[13px] font-medium hover:bg-black/85 transition-all hover:shadow-md hover:shadow-black/10 active:scale-[0.97]"
+            className="bg-black text-white rounded-xl px-4 py-1.5 text-[14px] font-medium hover:bg-black/85 transition-all hover:shadow-md hover:shadow-black/10 active:scale-[0.97]"
           >
             Sign up
           </a>
