@@ -249,7 +249,7 @@ async fn login_handler(
                     .into_response();
             }
 
-            let signing_key = state.auth_secret.as_deref().unwrap_or("aeqi-dev");
+            let signing_key = auth::signing_secret(&state);
             match auth::create_token(signing_key, 24, Some(&user.id), Some(&user.email)) {
                 Ok(token) => axum::Json(serde_json::json!({
                     "ok": true,
@@ -321,7 +321,7 @@ async fn signup_handler(
         }
     };
 
-    let signing_key = state.auth_secret.as_deref().unwrap_or("aeqi-dev");
+    let signing_key = auth::signing_secret(&state);
     match auth::create_token(signing_key, 24, Some(&user.id), Some(&user.email)) {
         Ok(token) => axum::Json(serde_json::json!({
             "ok": true,
@@ -480,7 +480,7 @@ async fn google_callback_handler(
 
     let user = store.find_or_create_oauth(email, name, avatar, "google", sub);
 
-    let signing_key = state.auth_secret.as_deref().unwrap_or("aeqi-dev");
+    let signing_key = auth::signing_secret(&state);
     match auth::create_token(signing_key, 24, Some(&user.id), Some(&user.email)) {
         Ok(token) => {
             let redirect_url = format!("{}/#/auth/callback?token={}", base, token);
@@ -495,7 +495,7 @@ async fn me_handler(
     req: Request,
 ) -> axum::response::Response {
     // Extract claims from the validated token.
-    let secret = state.auth_secret.as_deref().unwrap_or("aeqi-dev");
+    let secret = auth::signing_secret(&state);
     let token = req
         .headers()
         .get("authorization")

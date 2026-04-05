@@ -62,7 +62,7 @@ fn extract_bearer(req: &Request) -> Option<&str> {
         .strip_prefix("Bearer ")
 }
 
-fn signing_secret(state: &AppState) -> &str {
+pub fn signing_secret(state: &AppState) -> &str {
     match state.auth_secret.as_deref() {
         Some(s) if !s.is_empty() => s,
         _ => "aeqi-dev",
