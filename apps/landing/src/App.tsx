@@ -241,7 +241,7 @@ function SectionHeading() {
       <div className="mt-6">
         <a
           href="/pricing"
-          className="text-[14px] text-black/40 hover:text-black/60 transition-colors"
+          className="text-[14px] text-black/40 hover:text-black/60 transition-colors underline underline-offset-4 decoration-black/15 hover:decoration-black/30"
         >
           View pricing →
         </a>
