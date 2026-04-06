@@ -295,34 +295,39 @@ function BuiltInTheOpen() {
           </p>
         </motion.div>
 
-        <motion.div {...fadeView(0.1)} className="flex flex-col items-center gap-4 mb-10">
+        <motion.div {...fadeView(0.1)} className="flex flex-col items-center gap-0 mb-10 w-full max-w-md mx-auto">
           <a
             href="https://github.com/0xAEQI/aeqi"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-4 bg-[#fafafa] rounded-2xl border border-black/[0.06] px-6 py-4 hover:border-black/15 transition-all group w-full max-w-sm"
+            className="flex items-center gap-4 bg-[#fafafa] border border-black/[0.06] rounded-t-2xl px-6 py-4 hover:bg-black/[0.03] transition-all group w-full"
           >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" className="text-black/70 flex-shrink-0">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="text-black/60 flex-shrink-0">
               <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
             </svg>
-            <div className="flex-1 text-left">
-              <span className="text-[14px] font-medium text-black/80 group-hover:text-black transition-colors">0xAEQI/aeqi</span>
-              <p className="text-[12px] text-black/35 mt-0.5">Star on GitHub</p>
-            </div>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="text-black/20 group-hover:text-black/50 transition-colors">
+            <span className="flex-1 text-[14px] font-medium text-black/70 group-hover:text-black/90 transition-colors text-left">Star on GitHub</span>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="text-black/15 group-hover:text-black/40 transition-colors">
               <path d="M6 3l5 5-5 5" />
             </svg>
           </a>
 
+          <div className="flex items-center gap-3 w-full px-6 py-2">
+            <div className="flex-1 h-px bg-black/[0.06]" />
+            <span className="text-[11px] text-black/20 uppercase tracking-widest">or</span>
+            <div className="flex-1 h-px bg-black/[0.06]" />
+          </div>
+
           <button
             onClick={() => { navigator.clipboard.writeText("curl -fsSL https://raw.githubusercontent.com/0xAEQI/aeqi/main/scripts/install.sh | sh"); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-            className="group inline-flex items-center gap-3 bg-[#fafafa] border border-black/[0.08] hover:border-black/15 rounded-xl px-5 py-3 text-[13px] text-black/50 hover:text-black/70 transition-all cursor-pointer"
+            className="group flex items-center gap-4 bg-[#fafafa] border border-black/[0.06] rounded-b-2xl px-6 py-4 hover:bg-black/[0.03] transition-all cursor-pointer w-full"
           >
-            <code className="font-mono font-medium">
-              <span className="select-none text-black/20">$ </span>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="text-black/40 flex-shrink-0">
+              <path d="M4 17l6-6-6-6M12 19h8" />
+            </svg>
+            <code className="flex-1 font-mono text-[13px] font-medium text-black/50 group-hover:text-black/70 transition-colors text-left">
               curl -fsSL https://aeqi.ai/install.sh | sh
             </code>
-            <span className="text-[11px] text-black/25 group-hover:text-black/40 transition-colors">
+            <span className="text-[11px] text-black/20 group-hover:text-black/40 transition-colors">
               {copied ? "✓" : "copy"}
             </span>
           </button>
