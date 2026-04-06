@@ -108,19 +108,6 @@ function Hero() {
 
         <p className="mt-4 text-[12px] text-black/25">7-day free trial · No credit card · Plans from $29/mo</p>
 
-        {/* Credibility strip */}
-        <div className="mt-10 flex items-center justify-center gap-6 text-[11px] text-black/25 font-medium">
-          <span>Rust</span>
-          <span className="w-px h-3 bg-black/10" />
-          <span>10 crates</span>
-          <span className="w-px h-3 bg-black/10" />
-          <span>600+ tests</span>
-          <span className="w-px h-3 bg-black/10" />
-          <span>Single binary</span>
-          <span className="w-px h-3 bg-black/10" />
-          <span>Zero infra</span>
-        </div>
-
         {/* Scroll arrow */}
         <motion.div
           className="mt-12"
