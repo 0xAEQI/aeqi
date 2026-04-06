@@ -40,6 +40,8 @@ resend_api_key = "${RESEND_API_KEY}"
 from_email = "aeqi <hello@aeqi.ai>"
 # google_client_id = ""
 # google_client_secret = ""
+# stripe_secret_key = "${STRIPE_SECRET_KEY}"
+# stripe_webhook_secret = "${STRIPE_WEBHOOK_SECRET}"
 
 [providers.openrouter]
 api_key = "${OPENROUTER_API_KEY}"

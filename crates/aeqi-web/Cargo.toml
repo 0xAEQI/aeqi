@@ -33,6 +33,11 @@ rusqlite = { workspace = true }
 argon2 = "0.5"
 urlencoding = "2"
 
+# Stripe webhook verification
+hmac = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
 # Optional: embedded UI assets
 rust-embed = { workspace = true, optional = true }
 mime_guess = { workspace = true, optional = true }

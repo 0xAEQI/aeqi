@@ -3541,3 +3541,212 @@
   opacity: 0.3;
   cursor: not-allowed;
 }
+
+/* ── Billing Page ───────────────────────── */
+
+.billing-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  gap: 12px;
+  animation: auth-fade-in 0.5s ease;
+}
+
+.billing-success-title {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.85);
+  margin: 0;
+}
+
+.billing-success-sub {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.4);
+  margin: 0;
+}
+
+.billing-status-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  background: var(--bg-base);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  margin-bottom: 24px;
+}
+
+.billing-status-card.billing-trial {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.billing-status-card.billing-warning {
+  background: #fff8f0;
+  border-color: rgba(200, 100, 0, 0.15);
+}
+
+.billing-status-content {
+  flex: 1;
+}
+
+.billing-status-title {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.85);
+  margin: 0 0 4px;
+}
+
+.billing-status-sub {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.45);
+  margin: 0;
+}
+
+.billing-manage-btn {
+  padding: 8px 20px;
+  background: #000;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.billing-manage-btn:hover {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.billing-manage-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.billing-plans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.billing-plan-card {
+  background: var(--bg-base);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.billing-plan-card:hover {
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+.billing-plan-card.highlighted {
+  border-color: rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+.billing-plan-card.current {
+  border-color: rgba(0, 0, 0, 0.15);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.billing-plan-header {
+  margin-bottom: 20px;
+}
+
+.billing-plan-name {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.85);
+  margin: 0 0 8px;
+}
+
+.billing-plan-price {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.billing-plan-amount {
+  font-family: var(--font-sans);
+  font-size: 32px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.85);
+  letter-spacing: -0.02em;
+}
+
+.billing-plan-period {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.4);
+  font-weight: 400;
+}
+
+.billing-plan-features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.billing-plan-features li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.billing-plan-features li svg {
+  color: rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
+}
+
+.billing-plan-btn {
+  width: 100%;
+  padding: 10px 20px;
+  background: #000;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.billing-plan-btn:hover {
+  background: rgba(0, 0, 0, 0.8);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.billing-plan-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.billing-plan-btn.current {
+  background: rgba(0, 0, 0, 0.06);
+  color: rgba(0, 0, 0, 0.4);
+}

@@ -113,6 +113,21 @@ async fn projects(State(state): State<AppState>, req: Request) -> Response {
 async fn create_company(State(state): State<AppState>, req: Request) -> Response {
     let user_id = crate::auth::extract_user_id(&state, &req);
 
+    // Subscription gating: require active subscription or trial.
+    if let Some(ref uid) = user_id
+        && let Some(ref store) = state.user_store
+        && !store.is_subscription_active(uid)
+    {
+        return (
+            StatusCode::PAYMENT_REQUIRED,
+            Json(serde_json::json!({
+                "error": "subscription_required",
+                "message": "Active subscription or trial required"
+            })),
+        )
+            .into_response();
+    }
+
     // Extract body.
     let body_bytes = axum::body::to_bytes(req.into_body(), 1024 * 64)
         .await

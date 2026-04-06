@@ -9,12 +9,6 @@ function formatUsd(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-function formatTokens(usd: number): string {
-  const tokens = usd * 1_000_000;
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(0)}K`;
-  return `${Math.round(tokens)}`;
-}
 
 function statusColor(status: string): string {
   const s = status.toLowerCase();
@@ -115,8 +109,8 @@ export default function DashboardHome() {
           <span className="dash-stat-label">Blocked</span>
         </div>
         <div className="dash-stat">
-          <span className="dash-stat-value">{formatTokens(spent)} tok</span>
-          <span className="dash-stat-label">Tokens Today</span>
+          <span className="dash-stat-value">{formatUsd(spent)}</span>
+          <span className="dash-stat-label">Usage Today</span>
         </div>
       </div>
 
@@ -124,8 +118,8 @@ export default function DashboardHome() {
       {budget > 0 && (
         <div className="dash-home-budget">
           <div className="dash-home-budget-header">
-            <span>Token budget</span>
-            <span>{formatTokens(spent)} / {formatTokens(budget)}</span>
+            <span>Daily limit</span>
+            <span>{formatUsd(spent)} / {formatUsd(budget)}</span>
           </div>
           <div className="dash-home-budget-track">
             <div className="dash-home-budget-fill" style={{ width: `${pct}%` }} />

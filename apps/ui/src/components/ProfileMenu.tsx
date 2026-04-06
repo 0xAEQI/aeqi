@@ -4,13 +4,11 @@ import { useAuthStore } from "@/store/auth";
 import { useDaemonStore } from "@/store/daemon";
 import BlockAvatar from "./BlockAvatar";
 
-function formatTokens(usd: number): string {
-  // Rough estimate: $1 ≈ 1M tokens at typical rates.
-  // Show in K for readability.
-  const tokens = usd * 1_000_000;
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(0)}K`;
-  return `${Math.round(tokens)}`;
+function formatUsage(usd: number): string {
+  if (usd >= 1) return `$${usd.toFixed(2)}`;
+  if (usd >= 0.01) return `$${usd.toFixed(2)}`;
+  if (usd > 0) return `<$0.01`;
+  return "$0.00";
 }
 
 export default function ProfileMenu() {
@@ -65,10 +63,10 @@ export default function ProfileMenu() {
           <div className="pm-credits">
             <span className="pm-credits-label">Today's usage</span>
             <span className="pm-credits-value">
-              {formatTokens(spentToday)} tokens
+              {formatUsage(spentToday)}
               {budget > 0 && (
                 <span style={{ color: "rgba(0,0,0,0.3)", fontWeight: 400 }}>
-                  {" "}/ {formatTokens(budget)}
+                  {" "}/ {formatUsage(budget)}
                 </span>
               )}
             </span>
@@ -77,9 +75,9 @@ export default function ProfileMenu() {
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"><path d="M2 10V4l3 2 2-4 2 4 3-2v6" /></svg>
             View usage
           </button>
-          <button className="pm-item" onClick={() => { setOpen(false); navigate("/settings?tab=billing"); }}>
+          <button className="pm-item" onClick={() => { setOpen(false); navigate("/billing"); }}>
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"><rect x="2" y="3.5" width="10" height="7" rx="1" /><path d="M2 6h10" /></svg>
-            Manage plan
+            Billing
           </button>
           <div className="pm-divider" />
           <button className="pm-item" onClick={() => { setOpen(false); navigate("/settings"); }}>
@@ -112,7 +110,13 @@ export default function ProfileMenu() {
           <div className="pm-trigger-text">
             <span className="pm-trigger-name">{userName}</span>
             <span className="pm-trigger-plan">
-              {authMode === "none" ? "local" : "free plan"}
+              {authMode === "none"
+                ? "local"
+                : user?.subscription_plan
+                  ? `${user.subscription_plan} plan`
+                  : user?.subscription_status === "trialing"
+                    ? "free trial"
+                    : "free plan"}
             </span>
           </div>
         </div>

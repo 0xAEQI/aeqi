@@ -364,6 +364,19 @@ export const api = {
 
   // Triggers
   getTriggers: () => request<any>("/triggers"),
+
+  // Billing
+  createCheckoutSession: (plan: "starter" | "growth") =>
+    request<{ url: string }>("/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ plan }),
+    }),
+
+  getSubscription: () =>
+    request<{ status: string; plan: string | null; trial_ends_at: string | null }>("/billing/subscription"),
+
+  createPortalSession: () =>
+    request<{ url: string }>("/billing/portal", { method: "POST" }),
 };
 
 export { ApiError };

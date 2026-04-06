@@ -649,6 +649,12 @@ pub struct AuthConfig {
     /// From address for emails (default: "aeqi <hello@aeqi.ai>").
     #[serde(default)]
     pub from_email: Option<String>,
+    /// Stripe secret key for payment integration.
+    #[serde(default)]
+    pub stripe_secret_key: Option<String>,
+    /// Stripe webhook signing secret.
+    #[serde(default)]
+    pub stripe_webhook_secret: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

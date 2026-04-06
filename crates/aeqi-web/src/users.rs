@@ -13,6 +13,11 @@ pub struct User {
     pub provider: String,
     pub provider_id: Option<String>,
     pub created_at: String,
+    pub stripe_customer_id: Option<String>,
+    pub subscription_status: String,
+    pub subscription_plan: Option<String>,
+    pub stripe_subscription_id: Option<String>,
+    pub trial_ends_at: Option<String>,
 }
 
 pub struct UserStore {
@@ -72,6 +77,32 @@ impl UserStore {
             )?;
         }
 
+        // Idempotent migration: add Stripe/subscription columns.
+        {
+            let cols: Vec<String> = conn
+                .prepare("PRAGMA table_info(users)")?
+                .query_map([], |row| row.get::<_, String>(1))?
+                .filter_map(|r| r.ok())
+                .collect();
+            if !cols.iter().any(|c| c == "stripe_customer_id") {
+                conn.execute_batch("ALTER TABLE users ADD COLUMN stripe_customer_id TEXT;")?;
+            }
+            if !cols.iter().any(|c| c == "subscription_status") {
+                conn.execute_batch(
+                    "ALTER TABLE users ADD COLUMN subscription_status TEXT NOT NULL DEFAULT 'trialing';",
+                )?;
+            }
+            if !cols.iter().any(|c| c == "subscription_plan") {
+                conn.execute_batch("ALTER TABLE users ADD COLUMN subscription_plan TEXT;")?;
+            }
+            if !cols.iter().any(|c| c == "stripe_subscription_id") {
+                conn.execute_batch("ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT;")?;
+            }
+            if !cols.iter().any(|c| c == "trial_ends_at") {
+                conn.execute_batch("ALTER TABLE users ADD COLUMN trial_ends_at TEXT;")?;
+            }
+        }
+
         Ok(Self {
             db: Mutex::new(conn),
         })
@@ -90,12 +121,13 @@ impl UserStore {
 
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
+        let trial_ends = (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339();
 
         let db = self.db.lock().unwrap();
         db.execute(
-            "INSERT INTO users (id, email, password_hash, name, provider, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, 'local', ?5, ?5)",
-            rusqlite::params![id, email, hash, name, now],
+            "INSERT INTO users (id, email, password_hash, name, provider, subscription_status, trial_ends_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'local', 'trialing', ?5, ?6, ?6)",
+            rusqlite::params![id, email, hash, name, trial_ends, now],
         )?;
 
         Ok(User {
@@ -107,13 +139,19 @@ impl UserStore {
             provider: "local".to_string(),
             provider_id: None,
             created_at: now,
+            stripe_customer_id: None,
+            subscription_status: "trialing".to_string(),
+            subscription_plan: None,
+            stripe_subscription_id: None,
+            trial_ends_at: Some(trial_ends),
         })
     }
 
     pub fn find_by_email(&self, email: &str) -> Option<User> {
         let db = self.db.lock().unwrap();
         db.query_row(
-            "SELECT id, email, password_hash, name, avatar_url, provider, provider_id, created_at
+            "SELECT id, email, password_hash, name, avatar_url, provider, provider_id, created_at,
+                    stripe_customer_id, subscription_status, subscription_plan, stripe_subscription_id, trial_ends_at
              FROM users WHERE email = ?1",
             rusqlite::params![email],
             |row| {
@@ -126,6 +164,11 @@ impl UserStore {
                     provider: row.get(5)?,
                     provider_id: row.get(6)?,
                     created_at: row.get(7)?,
+                    stripe_customer_id: row.get(8)?,
+                    subscription_status: row.get::<_, Option<String>>(9)?.unwrap_or_else(|| "trialing".to_string()),
+                    subscription_plan: row.get(10)?,
+                    stripe_subscription_id: row.get(11)?,
+                    trial_ends_at: row.get(12)?,
                 })
             },
         )
@@ -135,7 +178,8 @@ impl UserStore {
     pub fn find_by_id(&self, id: &str) -> Option<User> {
         let db = self.db.lock().unwrap();
         db.query_row(
-            "SELECT id, email, password_hash, name, avatar_url, provider, provider_id, created_at
+            "SELECT id, email, password_hash, name, avatar_url, provider, provider_id, created_at,
+                    stripe_customer_id, subscription_status, subscription_plan, stripe_subscription_id, trial_ends_at
              FROM users WHERE id = ?1",
             rusqlite::params![id],
             |row| {
@@ -148,6 +192,11 @@ impl UserStore {
                     provider: row.get(5)?,
                     provider_id: row.get(6)?,
                     created_at: row.get(7)?,
+                    stripe_customer_id: row.get(8)?,
+                    subscription_status: row.get::<_, Option<String>>(9)?.unwrap_or_else(|| "trialing".to_string()),
+                    subscription_plan: row.get(10)?,
+                    stripe_subscription_id: row.get(11)?,
+                    trial_ends_at: row.get(12)?,
                 })
             },
         )
@@ -192,6 +241,7 @@ impl UserStore {
 
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
+        let trial_ends = (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339();
         let avatar_opt = if avatar.is_empty() {
             None
         } else {
@@ -200,9 +250,9 @@ impl UserStore {
 
         let db = self.db.lock().unwrap();
         let _ = db.execute(
-            "INSERT INTO users (id, email, name, avatar_url, provider, provider_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
-            rusqlite::params![id, email, name, avatar_opt, provider, provider_id, now],
+            "INSERT INTO users (id, email, name, avatar_url, provider, provider_id, subscription_status, trial_ends_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'trialing', ?7, ?8, ?8)",
+            rusqlite::params![id, email, name, avatar_opt, provider, provider_id, trial_ends, now],
         );
 
         User {
@@ -214,6 +264,11 @@ impl UserStore {
             provider: provider.to_string(),
             provider_id: Some(provider_id.to_string()),
             created_at: now,
+            stripe_customer_id: None,
+            subscription_status: "trialing".to_string(),
+            subscription_plan: None,
+            stripe_subscription_id: None,
+            trial_ends_at: Some(trial_ends),
         }
     }
 
@@ -293,12 +348,13 @@ impl UserStore {
 
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
+        let trial_ends = (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339();
 
         let db = self.db.lock().unwrap();
         db.execute(
-            "INSERT INTO users (id, email, password_hash, name, provider, email_verified, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, 'local', 0, ?5, ?5)",
-            rusqlite::params![id, email, hash, name, now],
+            "INSERT INTO users (id, email, password_hash, name, provider, email_verified, subscription_status, trial_ends_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'local', 0, 'trialing', ?5, ?6, ?6)",
+            rusqlite::params![id, email, hash, name, trial_ends, now],
         )?;
 
         Ok(User {
@@ -310,6 +366,11 @@ impl UserStore {
             provider: "local".to_string(),
             provider_id: None,
             created_at: now,
+            stripe_customer_id: None,
+            subscription_status: "trialing".to_string(),
+            subscription_plan: None,
+            stripe_subscription_id: None,
+            trial_ends_at: Some(trial_ends),
         })
     }
 
@@ -412,5 +473,101 @@ impl UserStore {
         )
         .map(|v| v == 1)
         .unwrap_or(false)
+    }
+
+    // -- Stripe / Subscription ---------------------------------------------------
+
+    pub fn set_stripe_customer(&self, user_id: &str, customer_id: &str) {
+        let db = self.db.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let _ = db.execute(
+            "UPDATE users SET stripe_customer_id = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![customer_id, now, user_id],
+        );
+    }
+
+    pub fn set_subscription(
+        &self,
+        user_id: &str,
+        status: &str,
+        plan: Option<&str>,
+        subscription_id: Option<&str>,
+    ) {
+        let db = self.db.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let _ = db.execute(
+            "UPDATE users SET subscription_status = ?1, subscription_plan = ?2, stripe_subscription_id = ?3, updated_at = ?4 WHERE id = ?5",
+            rusqlite::params![status, plan, subscription_id, now, user_id],
+        );
+    }
+
+    /// Returns (status, plan, trial_ends_at).
+    pub fn get_subscription_status(
+        &self,
+        user_id: &str,
+    ) -> Option<(String, Option<String>, Option<String>)> {
+        let db = self.db.lock().unwrap();
+        db.query_row(
+            "SELECT subscription_status, subscription_plan, trial_ends_at FROM users WHERE id = ?1",
+            rusqlite::params![user_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?
+                        .unwrap_or_else(|| "trialing".to_string()),
+                    row.get(1)?,
+                    row.get(2)?,
+                ))
+            },
+        )
+        .ok()
+    }
+
+    pub fn find_by_stripe_customer(&self, customer_id: &str) -> Option<User> {
+        let db = self.db.lock().unwrap();
+        db.query_row(
+            "SELECT id, email, password_hash, name, avatar_url, provider, provider_id, created_at,
+                    stripe_customer_id, subscription_status, subscription_plan, stripe_subscription_id, trial_ends_at
+             FROM users WHERE stripe_customer_id = ?1",
+            rusqlite::params![customer_id],
+            |row| {
+                Ok(User {
+                    id: row.get(0)?,
+                    email: row.get(1)?,
+                    password_hash: row.get(2)?,
+                    name: row.get(3)?,
+                    avatar_url: row.get(4)?,
+                    provider: row.get(5)?,
+                    provider_id: row.get(6)?,
+                    created_at: row.get(7)?,
+                    stripe_customer_id: row.get(8)?,
+                    subscription_status: row.get::<_, Option<String>>(9)?
+                        .unwrap_or_else(|| "trialing".to_string()),
+                    subscription_plan: row.get(10)?,
+                    stripe_subscription_id: row.get(11)?,
+                    trial_ends_at: row.get(12)?,
+                })
+            },
+        )
+        .ok()
+    }
+
+    /// Returns true if status is "active" or "trialing" with trial_ends_at in the future.
+    pub fn is_subscription_active(&self, user_id: &str) -> bool {
+        let Some((status, _, trial_ends)) = self.get_subscription_status(user_id) else {
+            return false;
+        };
+        match status.as_str() {
+            "active" => true,
+            "trialing" => {
+                if let Some(ends) = trial_ends {
+                    chrono::DateTime::parse_from_rfc3339(&ends)
+                        .map(|dt| dt > chrono::Utc::now())
+                        .unwrap_or(false)
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
     }
 }

@@ -9,6 +9,9 @@ interface User {
   name: string;
   avatar_url?: string;
   companies?: string[];
+  subscription_status: "trialing" | "active" | "canceled" | "past_due" | "none";
+  subscription_plan: "starter" | "growth" | null;
+  trial_ends_at: string | null;
 }
 
 interface AuthState {
@@ -32,6 +35,9 @@ interface AuthState {
   logout: () => void;
   isAuthenticated: () => boolean;
   needsOnboarding: () => boolean;
+  isTrialing: () => boolean;
+  isSubscribed: () => boolean;
+  trialDaysLeft: () => number;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -190,5 +196,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { user } = get();
     if (!user) return false;
     return !user.companies || user.companies.length === 0;
+  },
+
+  isTrialing: () => get().user?.subscription_status === "trialing",
+
+  isSubscribed: () =>
+    ["active", "trialing"].includes(get().user?.subscription_status ?? ""),
+
+  trialDaysLeft: () => {
+    const ends = get().user?.trial_ends_at;
+    if (!ends) return 0;
+    const diff = new Date(ends).getTime() - Date.now();
+    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
   },
 }));

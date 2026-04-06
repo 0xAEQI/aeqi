@@ -33,6 +33,7 @@ pub struct AppState {
     pub ui_dist_dir: Option<PathBuf>,
     pub user_store: Option<Arc<crate::users::UserStore>>,
     pub email_service: Option<Arc<crate::email::EmailService>>,
+    pub stripe_client: Option<Arc<crate::stripe::StripeClient>>,
     pub login_attempts:
         Arc<std::sync::Mutex<std::collections::HashMap<String, (u32, std::time::Instant)>>>,
 }
@@ -79,6 +80,30 @@ pub async fn start(config: &AEQIConfig) -> Result<()> {
         ))
     });
 
+    // Resolve Stripe keys from env var pattern.
+    let resolve_env = |val: Option<&str>| -> Option<String> {
+        val.map(|k| {
+            let trimmed = k.trim();
+            if trimmed.starts_with("${") && trimmed.ends_with('}') {
+                let var_name = &trimmed[2..trimmed.len() - 1];
+                std::env::var(var_name).unwrap_or_default()
+            } else {
+                trimmed.to_string()
+            }
+        })
+        .filter(|k| !k.is_empty())
+    };
+
+    let stripe_secret = resolve_env(web.auth.stripe_secret_key.as_deref());
+    let stripe_webhook = resolve_env(web.auth.stripe_webhook_secret.as_deref());
+    let stripe_client = match (stripe_secret, stripe_webhook) {
+        (Some(sk), Some(wh)) => {
+            info!("Stripe payment integration initialized");
+            Some(Arc::new(crate::stripe::StripeClient::new(sk, wh)))
+        }
+        _ => None,
+    };
+
     let state = AppState {
         ipc: ipc.clone(),
         auth_secret: web.auth_secret.clone(),
@@ -88,6 +113,7 @@ pub async fn start(config: &AEQIConfig) -> Result<()> {
         ui_dist_dir: web.ui_dist_dir.as_ref().map(PathBuf::from),
         user_store,
         email_service,
+        stripe_client,
         login_attempts: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
@@ -152,11 +178,24 @@ pub async fn start(config: &AEQIConfig) -> Result<()> {
             "/api/chat/stream",
             axum::routing::get(crate::session_ws::handler),
         )
+        .route(
+            "/api/webhooks/stripe",
+            axum::routing::post(stripe_webhook_handler),
+        )
         .nest("/api", webhook_routes());
 
-    // Protected /api/auth/me route.
+    // Protected /api/auth/me and billing routes.
     let auth_me = Router::new()
         .route("/api/auth/me", axum::routing::get(me_handler))
+        .route(
+            "/api/billing/checkout",
+            axum::routing::post(checkout_handler),
+        )
+        .route(
+            "/api/billing/subscription",
+            axum::routing::get(subscription_handler),
+        )
+        .route("/api/billing/portal", axum::routing::post(portal_handler))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_auth,
@@ -855,6 +894,9 @@ async fn me_handler(
                     "avatar_url": user.avatar_url,
                     "provider": user.provider,
                     "companies": companies,
+                    "subscription_status": user.subscription_status,
+                    "subscription_plan": user.subscription_plan,
+                    "trial_ends_at": user.trial_ends_at,
                 }))
                 .into_response();
             }
@@ -869,6 +911,366 @@ async fn me_handler(
         }
         Err(_) => (StatusCode::UNAUTHORIZED, "invalid token").into_response(),
     }
+}
+
+// ── Billing Handlers ────────────────────────────────────
+
+async fn checkout_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    req: Request,
+) -> axum::response::Response {
+    let secret = auth::signing_secret(&state);
+    let token = req
+        .headers()
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "));
+
+    let Some(token) = token else {
+        return (StatusCode::UNAUTHORIZED, "no token").into_response();
+    };
+
+    let claims = match auth::validate_token(token, secret) {
+        Ok(c) => c,
+        Err(_) => return (StatusCode::UNAUTHORIZED, "invalid token").into_response(),
+    };
+
+    let Some(ref uid) = claims.user_id else {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"error": "user_id required"})),
+        )
+            .into_response();
+    };
+
+    let Some(ref stripe) = state.stripe_client else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({"error": "payments not configured"})),
+        )
+            .into_response();
+    };
+
+    let Some(ref store) = state.user_store else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "user store not available",
+        )
+            .into_response();
+    };
+
+    // Read body from the already-consumed request. We need to extract it before this point.
+    // Since axum already parsed headers, read remaining body.
+    let body_bytes = axum::body::to_bytes(req.into_body(), 1024 * 64)
+        .await
+        .unwrap_or_default();
+    let body: serde_json::Value =
+        serde_json::from_slice(&body_bytes).unwrap_or(serde_json::Value::Null);
+
+    let plan = body
+        .get("plan")
+        .and_then(|p| p.as_str())
+        .unwrap_or_default();
+
+    if plan != "starter" && plan != "growth" {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"error": "plan must be 'starter' or 'growth'"})),
+        )
+            .into_response();
+    }
+
+    let Some(user) = store.find_by_id(uid) else {
+        return (StatusCode::NOT_FOUND, "user not found").into_response();
+    };
+
+    // Ensure user has a Stripe customer ID.
+    let customer_id = if let Some(cid) = user.stripe_customer_id {
+        cid
+    } else {
+        match stripe.create_customer(&user.email, &user.name).await {
+            Ok(cid) => {
+                store.set_stripe_customer(uid, &cid);
+                cid
+            }
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    axum::Json(serde_json::json!({"error": e.to_string()})),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    let base = state
+        .auth_config
+        .base_url
+        .as_deref()
+        .unwrap_or("http://localhost:8400");
+
+    let success_url = format!("{}/billing?success=true", base);
+    let cancel_url = format!("{}/billing", base);
+
+    match stripe
+        .create_checkout_session(&customer_id, plan, &success_url, &cancel_url)
+        .await
+    {
+        Ok(url) => axum::Json(serde_json::json!({"url": url})).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+async fn subscription_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    req: Request,
+) -> axum::response::Response {
+    let secret = auth::signing_secret(&state);
+    let token = req
+        .headers()
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "));
+
+    let Some(token) = token else {
+        return (StatusCode::UNAUTHORIZED, "no token").into_response();
+    };
+
+    let claims = match auth::validate_token(token, secret) {
+        Ok(c) => c,
+        Err(_) => return (StatusCode::UNAUTHORIZED, "invalid token").into_response(),
+    };
+
+    let Some(ref uid) = claims.user_id else {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"error": "user_id required"})),
+        )
+            .into_response();
+    };
+
+    let Some(ref store) = state.user_store else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "user store not available",
+        )
+            .into_response();
+    };
+
+    match store.get_subscription_status(uid) {
+        Some((status, plan, trial_ends_at)) => axum::Json(serde_json::json!({
+            "status": status,
+            "plan": plan,
+            "trial_ends_at": trial_ends_at,
+        }))
+        .into_response(),
+        None => (StatusCode::NOT_FOUND, "user not found").into_response(),
+    }
+}
+
+async fn portal_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    req: Request,
+) -> axum::response::Response {
+    let secret = auth::signing_secret(&state);
+    let token = req
+        .headers()
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "));
+
+    let Some(token) = token else {
+        return (StatusCode::UNAUTHORIZED, "no token").into_response();
+    };
+
+    let claims = match auth::validate_token(token, secret) {
+        Ok(c) => c,
+        Err(_) => return (StatusCode::UNAUTHORIZED, "invalid token").into_response(),
+    };
+
+    let Some(ref uid) = claims.user_id else {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"error": "user_id required"})),
+        )
+            .into_response();
+    };
+
+    let Some(ref stripe) = state.stripe_client else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({"error": "payments not configured"})),
+        )
+            .into_response();
+    };
+
+    let Some(ref store) = state.user_store else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "user store not available",
+        )
+            .into_response();
+    };
+
+    let Some(user) = store.find_by_id(uid) else {
+        return (StatusCode::NOT_FOUND, "user not found").into_response();
+    };
+
+    let Some(customer_id) = user.stripe_customer_id else {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"error": "no Stripe customer — subscribe first"})),
+        )
+            .into_response();
+    };
+
+    let base = state
+        .auth_config
+        .base_url
+        .as_deref()
+        .unwrap_or("http://localhost:8400");
+    let return_url = format!("{}/billing", base);
+
+    match stripe
+        .create_portal_session(&customer_id, &return_url)
+        .await
+    {
+        Ok(url) => axum::Json(serde_json::json!({"url": url})).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+async fn stripe_webhook_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let Some(ref stripe) = state.stripe_client else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({"error": "payments not configured"})),
+        )
+            .into_response();
+    };
+
+    let signature = match headers
+        .get("stripe-signature")
+        .and_then(|v| v.to_str().ok())
+    {
+        Some(s) => s,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                axum::Json(serde_json::json!({"error": "missing Stripe-Signature header"})),
+            )
+                .into_response();
+        }
+    };
+
+    let event = match stripe.verify_webhook(&body, signature) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!("Stripe webhook verification failed: {e}");
+            return (
+                StatusCode::UNAUTHORIZED,
+                axum::Json(serde_json::json!({"error": "signature verification failed"})),
+            )
+                .into_response();
+        }
+    };
+
+    let event_type = event
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or_default();
+
+    let Some(ref store) = state.user_store else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "user store not available",
+        )
+            .into_response();
+    };
+
+    match event_type {
+        "checkout.session.completed" => {
+            let data = event.get("data").and_then(|d| d.get("object"));
+            if let Some(obj) = data {
+                let customer_id = obj.get("customer").and_then(|c| c.as_str());
+                let subscription_id = obj.get("subscription").and_then(|s| s.as_str());
+
+                if let Some(cid) = customer_id
+                    && let Some(user) = store.find_by_stripe_customer(cid)
+                {
+                    // Determine plan from metadata or default.
+                    let plan = obj
+                        .get("metadata")
+                        .and_then(|m| m.get("plan"))
+                        .and_then(|p| p.as_str());
+                    store.set_subscription(&user.id, "active", plan, subscription_id);
+                    tracing::info!(
+                        "Stripe: checkout completed for user={} customer={}",
+                        user.id,
+                        cid
+                    );
+                }
+            }
+        }
+        "customer.subscription.updated" => {
+            let data = event.get("data").and_then(|d| d.get("object"));
+            if let Some(obj) = data {
+                let customer_id = obj.get("customer").and_then(|c| c.as_str());
+                let status = obj.get("status").and_then(|s| s.as_str());
+                let sub_id = obj.get("id").and_then(|s| s.as_str());
+
+                if let (Some(cid), Some(status)) = (customer_id, status)
+                    && let Some(user) = store.find_by_stripe_customer(cid)
+                {
+                    store.set_subscription(
+                        &user.id,
+                        status,
+                        user.subscription_plan.as_deref(),
+                        sub_id,
+                    );
+                    tracing::info!(
+                        "Stripe: subscription updated for user={} status={}",
+                        user.id,
+                        status
+                    );
+                }
+            }
+        }
+        "customer.subscription.deleted" => {
+            let data = event.get("data").and_then(|d| d.get("object"));
+            if let Some(obj) = data {
+                let customer_id = obj.get("customer").and_then(|c| c.as_str());
+
+                if let Some(cid) = customer_id
+                    && let Some(user) = store.find_by_stripe_customer(cid)
+                {
+                    store.set_subscription(&user.id, "canceled", None, None);
+                    tracing::info!(
+                        "Stripe: subscription deleted for user={} customer={}",
+                        user.id,
+                        cid
+                    );
+                }
+            }
+        }
+        _ => {
+            tracing::debug!("Stripe webhook: unhandled event type '{}'", event_type);
+        }
+    }
+
+    axum::Json(serde_json::json!({"received": true})).into_response()
 }
 
 // ── SPA Handlers ────────────────────────────────────────
