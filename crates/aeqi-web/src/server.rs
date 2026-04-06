@@ -117,12 +117,12 @@ pub async fn start(config: &AEQIConfig) -> Result<()> {
         login_attempts: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
-    // Warn if auth mode requires a secret but signing_secret resolves to the default.
+    // Error if auth mode requires a secret but signing_secret resolves to the default.
     if matches!(state.auth_mode, AuthMode::Secret | AuthMode::Accounts)
         && auth::signing_secret(&state) == "aeqi-dev"
     {
-        tracing::warn!(
-            "WARNING: auth_mode is {:?} but no auth_secret is configured — using insecure default 'aeqi-dev'. Set [web] auth_secret in your config!",
+        tracing::error!(
+            "SECURITY: auth_mode is {:?} but no auth_secret configured — using insecure default. Set [web] auth_secret in aeqi.toml",
             state.auth_mode
         );
     }
@@ -206,7 +206,20 @@ pub async fn start(config: &AEQIConfig) -> Result<()> {
         .merge(auth_me)
         .merge(public)
         .layer(cors)
-        .layer(TraceLayer::new_for_http());
+        .layer(TraceLayer::new_for_http())
+        .layer(axum::middleware::from_fn(
+            |req: Request, next: middleware::Next| async move {
+                let mut resp = next.run(req).await;
+                let hdrs = resp.headers_mut();
+                hdrs.insert("x-content-type-options", "nosniff".parse().unwrap());
+                hdrs.insert("x-frame-options", "DENY".parse().unwrap());
+                hdrs.insert(
+                    "referrer-policy",
+                    "strict-origin-when-cross-origin".parse().unwrap(),
+                );
+                resp
+            },
+        ));
 
     if serve_ui {
         if let Some(ui_dist_dir) = ui_dist_dir.as_ref() {

@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import Nav from "./Nav";
 import Footer from "./Footer";
+import { PLANS, TRIAL } from "../../shared/pricing";
 
 const fade = (delay = 0) => ({
   initial: { opacity: 0, y: 8 } as const,
@@ -15,7 +16,10 @@ const fadeView = (delay = 0) => ({
   transition: { duration: 0.7, ease: [0.25, 0.1, 0.25, 1] as const, delay },
 });
 
-/* ─── Pricing ─── */
+const starter = PLANS[0];
+const growth = PLANS[1];
+
+/* --- Pricing --- */
 function Pricing() {
   return (
     <section className="flex-1 flex items-center justify-center px-6 pt-32 pb-20">
@@ -34,8 +38,8 @@ function Pricing() {
           {...fade(0.15)}
         >
           <div>
-            <p className="text-[15px] font-semibold text-black/70">3-day free trial</p>
-            <p className="text-[14px] text-black/50 mt-1">1 company. 3 agents. 3M tokens. No credit card required.</p>
+            <p className="text-[15px] font-semibold text-black/70">{TRIAL.days}-day free trial</p>
+            <p className="text-[14px] text-black/50 mt-1">{TRIAL.companies} company. {TRIAL.agents} agents. {TRIAL.tokens} tokens. No credit card required.</p>
           </div>
           <a
             href="https://app.aeqi.ai/signup?plan=trial"
@@ -51,37 +55,19 @@ function Pricing() {
             className="rounded-2xl border border-black/[0.06] bg-white p-8 flex flex-col"
             {...fade(0.2)}
           >
-            <p className="text-[12px] uppercase tracking-[0.15em] text-black/50 font-medium mb-6">Starter</p>
+            <p className="text-[12px] uppercase tracking-[0.15em] text-black/50 font-medium mb-6">{starter.name}</p>
             <div className="mb-1">
-              <span className="text-[36px] font-semibold tracking-tight text-black/80">$20</span>
+              <span className="text-[36px] font-semibold tracking-tight text-black/80">${starter.price}</span>
               <span className="text-[14px] text-black/40 ml-1">/mo</span>
             </div>
-            <p className="text-[14px] text-black/50 mb-8">Ship your first autonomous company.</p>
+            <p className="text-[14px] text-black/50 mb-8">{starter.tagline}</p>
             <div className="space-y-3.5 text-[15px] text-black/60 mb-10">
-              <div className="flex items-center gap-2.5">
-                <span className="text-black/40">+</span>
-                <span>Up to 2 companies</span>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <span className="text-black/40">+</span>
-                <span>Up to 10 agents</span>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <span className="text-black/40">+</span>
-                <span>50M LLM tokens included</span>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <span className="text-black/40">+</span>
-                <span>On-chain cap table</span>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <span className="text-black/40">+</span>
-                <span>Economy listing</span>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <span className="text-black/40">+</span>
-                <span>Bring your own LLM key</span>
-              </div>
+              {starter.features.map((f) => (
+                <div key={f} className="flex items-center gap-2.5">
+                  <span className="text-black/40">+</span>
+                  <span>{f}</span>
+                </div>
+              ))}
             </div>
             <a
               href="https://app.aeqi.ai/signup"
@@ -97,33 +83,19 @@ function Pricing() {
             {...fade(0.3)}
           >
             <span className="absolute -top-3 left-6 bg-black text-white text-[11px] font-semibold tracking-wide uppercase px-3 py-0.5 rounded-full">Most popular</span>
-            <p className="text-[12px] uppercase tracking-[0.15em] text-black/50 font-medium mb-6">Growth</p>
+            <p className="text-[12px] uppercase tracking-[0.15em] text-black/50 font-medium mb-6">{growth.name}</p>
             <div className="mb-1">
-              <span className="text-[36px] font-semibold tracking-tight text-black/80">$100</span>
+              <span className="text-[36px] font-semibold tracking-tight text-black/80">${growth.price}</span>
               <span className="text-[14px] text-black/40 ml-1">/mo</span>
             </div>
-            <p className="text-[14px] text-black/50 mb-8">Run a portfolio. No limits.</p>
+            <p className="text-[14px] text-black/50 mb-8">{growth.tagline}</p>
             <div className="space-y-3.5 text-[15px] text-black/60 mb-10">
-              <div className="flex items-center gap-2.5">
-                <span className="text-black/40">+</span>
-                <span>Everything in Starter</span>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <span className="text-black/40">+</span>
-                <span>Unlimited companies</span>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <span className="text-black/40">+</span>
-                <span>Unlimited agents</span>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <span className="text-black/40">+</span>
-                <span>500M LLM tokens included</span>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <span className="text-black/40">+</span>
-                <span>Priority support</span>
-              </div>
+              {growth.features.map((f) => (
+                <div key={f} className="flex items-center gap-2.5">
+                  <span className="text-black/40">+</span>
+                  <span>{f}</span>
+                </div>
+              ))}
             </div>
             <a
               href="https://app.aeqi.ai/signup"

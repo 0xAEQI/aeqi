@@ -119,6 +119,50 @@
   color: var(--text-secondary);
 }
 
+/* Secondary nav — compact 4-column grid */
+.welcome-grid-secondary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  margin-top: 8px;
+}
+
+.welcome-card-sm {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 8px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.welcome-card-sm:hover {
+  background: var(--bg-elevated);
+}
+
+.welcome-card-icon-sm {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+.welcome-card-sm:hover .welcome-card-icon-sm {
+  color: var(--text-secondary);
+}
+
+.welcome-card-label-sm {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.welcome-card-sm:hover .welcome-card-label-sm {
+  color: var(--text-secondary);
+}
+
 .welcome-new-ws {
   margin-top: 8px;
   padding: 10px 12px;

@@ -619,7 +619,17 @@ export default function SessionsPage() {
   if (!agentName && !agentId) {
     return (
       <div className="sessions-page">
-        <div className="sessions-empty">Select an agent to view sessions</div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", padding: 48 }}>
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="rgba(0,0,0,0.12)" strokeWidth="1.5" strokeLinecap="round">
+            <rect x="6" y="10" width="36" height="28" rx="4" />
+            <path d="M6 18h36" />
+            <path d="M16 26h16M16 32h10" />
+          </svg>
+          <h3 style={{ fontSize: 16, fontWeight: 600, color: "rgba(0,0,0,0.7)", margin: "16px 0 4px" }}>No session selected</h3>
+          <p style={{ fontSize: 13, color: "rgba(0,0,0,0.3)", margin: 0, maxWidth: 280, textAlign: "center" }}>
+            Select an agent from the sidebar to view their sessions and chat history.
+          </p>
+        </div>
       </div>
     );
   }

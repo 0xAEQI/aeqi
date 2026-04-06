@@ -253,11 +253,30 @@ export default function OnboardingPage() {
         {/* Step 4: Done */}
         {step === 4 && (
           <>
-            <div style={{ fontSize: 48, textAlign: "center", marginBottom: 24 }}>&#x2713;</div>
-            <h1 className="auth-heading">You're ready</h1>
-            <p className="auth-subheading">
-              {companyName || "Your company"} is live. Assign quests, chat with agents, and watch them work.
-            </p>
+            <svg width="64" height="64" viewBox="0 0 64 64" style={{ margin: "0 auto 24px", display: "block" }}>
+              <circle cx="32" cy="32" r="28" fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth="2" />
+              <circle cx="32" cy="32" r="28" fill="none" stroke="rgba(34,197,94,0.8)" strokeWidth="2.5"
+                strokeDasharray="176" strokeDashoffset="176" strokeLinecap="round"
+                style={{ animation: "draw-circle 0.6s ease-out 0.2s forwards" }} />
+              <path d="M22 33l6 6 14-14" fill="none" stroke="rgba(34,197,94,0.9)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                strokeDasharray="40" strokeDashoffset="40"
+                style={{ animation: "draw-check 0.4s ease-out 0.7s forwards" }} />
+            </svg>
+            <h1 className="auth-heading">{companyName || "Your company"} is live</h1>
+            <div style={{ display: "flex", justifyContent: "center", gap: 32, margin: "20px 0 28px" }}>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 20, fontWeight: 600, color: "rgba(0,0,0,0.85)" }}>{selectedAgent ? "1" : "0"}</div>
+                <div style={{ fontSize: 11, color: "rgba(0,0,0,0.3)", marginTop: 2 }}>agents</div>
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 20, fontWeight: 600, color: "rgba(0,0,0,0.85)" }}>0</div>
+                <div style={{ fontSize: 11, color: "rgba(0,0,0,0.3)", marginTop: 2 }}>quests</div>
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 20, fontWeight: 600, color: "rgba(0,0,0,0.85)" }}>ready</div>
+                <div style={{ fontSize: 11, color: "rgba(0,0,0,0.3)", marginTop: 2 }}>status</div>
+              </div>
+            </div>
             <button className="auth-btn-primary" onClick={handleFinish}>
               Get started
             </button>

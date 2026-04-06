@@ -2,35 +2,7 @@ import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/store/auth";
 import { api } from "@/lib/api";
-
-const PLANS = [
-  {
-    id: "starter" as const,
-    name: "Starter",
-    price: 39,
-    desc: "For individuals and small teams getting started with autonomous agents.",
-    features: [
-      "2 companies",
-      "10 agents per company",
-      "50M tokens / month",
-      "Email support",
-    ],
-  },
-  {
-    id: "growth" as const,
-    name: "Growth",
-    price: 129,
-    popular: true,
-    desc: "For teams that need full autonomy at scale with priority support.",
-    features: [
-      "Unlimited companies",
-      "Unlimited agents",
-      "500M tokens / month",
-      "Priority support",
-      "Custom agent templates",
-    ],
-  },
-];
+import { PLANS } from "../../../shared/pricing";
 
 export default function BillingPage() {
   const navigate = useNavigate();
@@ -130,7 +102,7 @@ export default function BillingPage() {
             <span className="bill-banner-badge active">{plan === "starter" ? "Starter" : "Growth"}</span>
             <span className="bill-banner-text">Your subscription is active</span>
           </div>
-          <span className="bill-banner-price">${plan === "starter" ? "39" : "129"}/mo</span>
+          <span className="bill-banner-price">${PLANS.find((p) => p.id === plan)?.price ?? "?"}/mo</span>
         </div>
       )}
 
@@ -164,7 +136,7 @@ export default function BillingPage() {
               <div className="bill-card-divider" />
               <span className="bill-card-includes">What's included</span>
               <ul className="bill-card-features">
-                {p.features.map((f) => (
+                {p.short.map((f) => (
                   <li key={f}>
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                       <path d="M4 8.5l3 3 5-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />

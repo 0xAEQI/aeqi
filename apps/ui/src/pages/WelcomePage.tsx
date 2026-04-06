@@ -15,14 +15,17 @@ const ICONS: Record<string, React.ReactNode> = {
   apps: <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"><rect x="2" y="2" width="4" height="4" rx="0.5" /><rect x="8" y="2" width="4" height="4" rx="0.5" /><rect x="2" y="8" width="4" height="4" rx="0.5" /><rect x="8" y="8" width="4" height="4" rx="0.5" /></svg>,
 };
 
-const ITEMS = [
+const PRIMARY_ITEMS = [
   { key: "agents", name: "Agents", desc: "Autonomous entities that research, plan, implement, and verify.", route: "/agents" },
-  { key: "events", name: "Events", desc: "Real-time activity stream. Decisions, messages, and approvals.", route: "/events" },
   { key: "quests", name: "Quests", desc: "Units of work tracked through your agent pipeline.", route: "/quests" },
-  { key: "insights", name: "Insights", desc: "Knowledge your agents accumulate and share across sessions.", route: "/insights" },
-  { key: "company", name: "Company", desc: "Team, settings, and configuration for this company.", route: "/company" },
-  { key: "drive", name: "Drive", desc: "Files, prompts, agent templates, and artifacts.", route: "/drive" },
-  { key: "apps", name: "Apps", desc: "Integrations, MCP tools, and third-party connections.", route: "/apps" },
+  { key: "events", name: "Events", desc: "Real-time activity stream. Decisions, messages, and approvals.", route: "/events" },
+];
+
+const SECONDARY_ITEMS = [
+  { key: "insights", name: "Insights", route: "/insights" },
+  { key: "company", name: "Company", route: "/company" },
+  { key: "drive", name: "Drive", route: "/drive" },
+  { key: "apps", name: "Apps", route: "/apps" },
 ];
 
 export default function WelcomePage() {
@@ -134,9 +137,28 @@ export default function WelcomePage() {
           </div>
         </div>
 
-        {/* Navigation grid */}
+        {/* Getting started banner — show when no agents and no quests */}
+        <div style={{
+          padding: "16px 20px",
+          background: "rgba(0,0,0,0.02)",
+          borderRadius: 12,
+          marginBottom: 20,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}>
+          <div>
+            <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(0,0,0,0.7)", margin: 0 }}>Get started</p>
+            <p style={{ fontSize: 12, color: "rgba(0,0,0,0.35)", margin: "2px 0 0" }}>Create your first agent or assign a quest</p>
+          </div>
+          <button className="btn btn-primary" onClick={() => navigate("/agents")} style={{ padding: "6px 16px", fontSize: 12 }}>
+            Hire agent
+          </button>
+        </div>
+
+        {/* Primary navigation grid */}
         <div className="welcome-grid">
-          {ITEMS.map((item) => (
+          {PRIMARY_ITEMS.map((item) => (
             <div key={item.key} className="welcome-card" onClick={() => navigate(item.route)}>
               <span className="welcome-card-icon">{ICONS[item.key]}</span>
               <div className="welcome-card-body">
@@ -144,6 +166,16 @@ export default function WelcomePage() {
                 <p>{item.desc}</p>
               </div>
               <svg className="welcome-card-arrow" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M5 3l4 4-4 4" /></svg>
+            </div>
+          ))}
+        </div>
+
+        {/* Secondary navigation — compact 4-column grid */}
+        <div className="welcome-grid-secondary">
+          {SECONDARY_ITEMS.map((item) => (
+            <div key={item.key} className="welcome-card-sm" onClick={() => navigate(item.route)}>
+              <span className="welcome-card-icon-sm">{ICONS[item.key]}</span>
+              <span className="welcome-card-label-sm">{item.name}</span>
             </div>
           ))}
         </div>

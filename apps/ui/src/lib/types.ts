@@ -91,6 +91,7 @@ export interface Insight {
 export interface AuditEntry {
   id: number;
   timestamp: string;
+  created_at?: string;
   company: string;
   decision_type: string;
   summary: string;

@@ -3924,3 +3924,11 @@
   transition: color 0.1s;
 }
 .trial-banner-dismiss:hover { color: var(--text-secondary); }
+
+/* ── Onboarding celebration animations ──────────────── */
+@keyframes draw-circle {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes draw-check {
+  to { stroke-dashoffset: 0; }
+}

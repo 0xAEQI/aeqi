@@ -87,20 +87,43 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         AuthMode::Secret => {
             let secret = signing_secret(&state);
             let Some(token) = extract_bearer(&req) else {
-                return (StatusCode::UNAUTHORIZED, "missing authorization header").into_response();
+                tracing::warn!("auth: missing authorization header");
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    axum::Json(
+                        serde_json::json!({"ok": false, "error": "missing authorization header"}),
+                    ),
+                )
+                    .into_response();
             };
             match validate_token(token, secret) {
                 Ok(claims) => {
                     req.extensions_mut().insert(claims);
                     next.run(req).await
                 }
-                Err(_) => (StatusCode::UNAUTHORIZED, "invalid or expired token").into_response(),
+                Err(_) => {
+                    tracing::warn!("auth: invalid or expired token");
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        axum::Json(
+                            serde_json::json!({"ok": false, "error": "invalid or expired token"}),
+                        ),
+                    )
+                        .into_response()
+                }
             }
         }
         AuthMode::Accounts => {
             let secret = signing_secret(&state);
             let Some(token) = extract_bearer(&req) else {
-                return (StatusCode::UNAUTHORIZED, "missing authorization header").into_response();
+                tracing::warn!("auth: missing authorization header");
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    axum::Json(
+                        serde_json::json!({"ok": false, "error": "missing authorization header"}),
+                    ),
+                )
+                    .into_response();
             };
             match validate_token(token, secret) {
                 Ok(claims) => {
@@ -117,13 +140,29 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
                             || path.starts_with("/api/companies")
                             || path.starts_with("/companies");
                         if !allowed {
-                            return (StatusCode::FORBIDDEN, "email not verified").into_response();
+                            tracing::info!(user_id = %uid, "auth: email not verified, restricted access");
+                            return (
+                                StatusCode::FORBIDDEN,
+                                axum::Json(
+                                    serde_json::json!({"ok": false, "error": "email not verified"}),
+                                ),
+                            )
+                                .into_response();
                         }
                     }
                     req.extensions_mut().insert(claims);
                     next.run(req).await
                 }
-                Err(_) => (StatusCode::UNAUTHORIZED, "invalid or expired token").into_response(),
+                Err(_) => {
+                    tracing::warn!("auth: invalid or expired token");
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        axum::Json(
+                            serde_json::json!({"ok": false, "error": "invalid or expired token"}),
+                        ),
+                    )
+                        .into_response()
+                }
             }
         }
     }

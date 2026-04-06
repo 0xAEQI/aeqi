@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import Header from "@/components/Header";
 import { DataState } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useChatStore } from "@/store/chat";
@@ -52,7 +51,12 @@ export default function InsightsPage() {
 
   return (
     <div className="page-content">
-      <Header title="Insights" />
+      <div className="q-hero">
+        <div className="q-hero-left">
+          <h1 className="q-hero-title">Insights</h1>
+          <p className="q-hero-subtitle">Knowledge your agents accumulate across sessions</p>
+        </div>
+      </div>
 
       <div className="filters">
         <input
@@ -79,7 +83,7 @@ export default function InsightsPage() {
       >
         <div>
           {filtered.map((m: any) => (
-            <div key={m.id} className="memory-entry">
+            <div key={m.id} className="memory-entry" style={{ borderLeft: `3px solid ${CATEGORY_COLORS[m.category] || "var(--text-muted)"}` }}>
               <div className="memory-header">
                 <code className="memory-key">{m.key}</code>
                 <div className="memory-tags">
