@@ -186,98 +186,6 @@ function HowItWorks() {
   );
 }
 
-/* ─── Product visual (stylized dashboard) ─── */
-function ProductPreview() {
-  return (
-    <section className="pb-24 px-6">
-      <motion.div {...fadeView()} className="max-w-3xl mx-auto">
-        <div className="bg-white rounded-2xl border border-black/[0.08] shadow-lg shadow-black/[0.04] overflow-hidden">
-          {/* Browser chrome */}
-          <div className="flex items-center gap-2 px-4 py-3 border-b border-black/[0.06]">
-            <div className="flex gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full bg-black/10" />
-              <div className="w-2.5 h-2.5 rounded-full bg-black/10" />
-              <div className="w-2.5 h-2.5 rounded-full bg-black/10" />
-            </div>
-            <div className="flex-1 flex justify-center">
-              <div className="bg-black/[0.04] rounded-md px-3 py-1 text-[11px] text-black/30 font-mono">app.aeqi.ai</div>
-            </div>
-          </div>
-          {/* Stylized dashboard */}
-          <div className="p-6 grid grid-cols-4 gap-4 min-h-[280px]">
-            {/* Sidebar */}
-            <div className="col-span-1 space-y-3">
-              <div className="h-3 w-16 bg-black/[0.06] rounded" />
-              <div className="space-y-2 mt-4">
-                <div className="h-2.5 w-20 bg-black/[0.04] rounded" />
-                <div className="h-2.5 w-24 bg-black/[0.08] rounded" />
-                <div className="h-2.5 w-18 bg-black/[0.04] rounded" />
-                <div className="h-2.5 w-22 bg-black/[0.04] rounded" />
-              </div>
-              <div className="h-px bg-black/[0.06] my-3" />
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-green-400/60" />
-                  <div className="h-2 w-14 bg-black/[0.05] rounded" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-green-400/60" />
-                  <div className="h-2 w-16 bg-black/[0.05] rounded" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-yellow-400/60" />
-                  <div className="h-2 w-12 bg-black/[0.05] rounded" />
-                </div>
-              </div>
-            </div>
-            {/* Main content */}
-            <div className="col-span-3 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="h-4 w-32 bg-black/[0.07] rounded" />
-                <div className="h-7 w-24 bg-black rounded-full" />
-              </div>
-              {/* Stats row */}
-              <div className="flex gap-6">
-                <div>
-                  <div className="text-[18px] font-bold text-black/60 font-mono">3</div>
-                  <div className="text-[9px] text-black/20 uppercase tracking-wider">in progress</div>
-                </div>
-                <div>
-                  <div className="text-[18px] font-bold text-black/60 font-mono">7</div>
-                  <div className="text-[9px] text-black/20 uppercase tracking-wider">pending</div>
-                </div>
-                <div>
-                  <div className="text-[18px] font-bold text-black/60 font-mono">24</div>
-                  <div className="text-[9px] text-black/20 uppercase tracking-wider">completed</div>
-                </div>
-              </div>
-              {/* Quest rows */}
-              <div className="space-y-1.5 mt-2">
-                {[
-                  { status: "bg-blue-400/70", w: "w-48" },
-                  { status: "bg-blue-400/70", w: "w-56" },
-                  { status: "bg-blue-400/70", w: "w-40" },
-                  { status: "bg-black/10", w: "w-52" },
-                  { status: "bg-black/10", w: "w-44" },
-                  { status: "bg-black/10", w: "w-60" },
-                  { status: "bg-black/10", w: "w-36" },
-                ].map((q, i) => (
-                  <div key={i} className="flex items-center gap-3 py-1.5">
-                    <div className={`w-2 h-2 rounded-full ${q.status}`} />
-                    <div className={`h-2 ${q.w} bg-black/[0.05] rounded`} />
-                    <div className="ml-auto h-2 w-10 bg-black/[0.03] rounded" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-        <p className="text-center text-[11px] text-black/20 mt-4">Dashboard · Agents · Quests · Sessions · MCP for your IDE</p>
-      </motion.div>
-    </section>
-  );
-}
-
 /* ─── Built in the open ─── */
 function BuiltInTheOpen() {
   const [copied, setCopied] = useState(false);
@@ -345,7 +253,6 @@ export default function App() {
       <Hero />
       <div className="bg-[#fafafa]">
         <HowItWorks />
-        <ProductPreview />
       </div>
       <div className="bg-white">
         <BuiltInTheOpen />
