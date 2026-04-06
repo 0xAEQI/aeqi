@@ -383,16 +383,16 @@ function FinalCTA() {
     <section className="py-20 px-6">
       <motion.div className="max-w-xl mx-auto text-center" {...fadeView()}>
         <h2 className="text-[24px] md:text-[30px] font-semibold tracking-tight text-black/85 leading-snug">
-          Your agents are waiting.
+          Launch a company<br />that never sleeps.
         </h2>
         <p className="text-[15px] text-black/40 mt-3 mb-8">
-          Start with the free trial. No credit card required.
+          Set the mission. Hire agents. Watch it run.
         </p>
         <a
           href="https://app.aeqi.ai/signup"
           className="inline-block bg-black text-white rounded-full px-10 py-3.5 text-[16px] font-medium hover:bg-black/80 transition-all hover:shadow-xl hover:shadow-black/10 hover:scale-[1.02] active:scale-[0.98]"
         >
-          Start free trial
+          Launch a Company
         </a>
       </motion.div>
     </section>
