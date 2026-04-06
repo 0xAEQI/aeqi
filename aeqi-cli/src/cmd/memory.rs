@@ -1,7 +1,8 @@
 use aeqi_core::traits::Insight;
 use anyhow::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use crate::cli::MemoryAction;
 use crate::helpers::{load_config, open_insights};
 
 pub(crate) async fn cmd_recall(
@@ -56,5 +57,33 @@ pub(crate) async fn cmd_remember(
         .await?;
     let scope = project_name.unwrap_or("global");
     println!("Stored memory {id} [{scope}] {key}");
+    Ok(())
+}
+
+pub(crate) async fn cmd_memory(config_path: &Option<PathBuf>, action: MemoryAction) -> Result<()> {
+    match action {
+        MemoryAction::Export { vault } => cmd_memory_export(config_path, &vault).await,
+        MemoryAction::Import { vault } => cmd_memory_import(config_path, &vault).await,
+    }
+}
+
+async fn cmd_memory_export(config_path: &Option<PathBuf>, vault: &Path) -> Result<()> {
+    let (config, _) = load_config(config_path)?;
+    let memory = open_insights(&config)?;
+
+    let count = aeqi_insights::obsidian::export(&memory, vault)?;
+    println!("Exported {count} memories to {}", vault.display());
+    Ok(())
+}
+
+async fn cmd_memory_import(config_path: &Option<PathBuf>, vault: &Path) -> Result<()> {
+    let (config, _) = load_config(config_path)?;
+    let memory = open_insights(&config)?;
+
+    let (imported, skipped) = aeqi_insights::obsidian::import(&memory, vault).await?;
+    println!(
+        "Imported {imported} memories ({skipped} skipped) from {}",
+        vault.display()
+    );
     Ok(())
 }

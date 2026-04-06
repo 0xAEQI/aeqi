@@ -60,12 +60,12 @@ function Pricing() {
               <span className="text-[36px] font-semibold tracking-tight text-black/80">${starter.price}</span>
               <span className="text-[14px] text-black/40 ml-1">/mo</span>
             </div>
-            <p className="text-[14px] text-black/50 mb-8">{starter.tagline}</p>
+            <p className="text-[14px] text-black/50 mb-8 min-h-[40px]">{starter.tagline}</p>
             <div className="space-y-3.5 text-[15px] text-black/60 mb-10">
               {starter.features.map((f) => (
-                <div key={f} className="flex items-center gap-2.5">
+                <div key={f.text} className="flex items-center gap-2.5">
                   <span className="text-black/40">+</span>
-                  <span>{f}</span>
+                  <span>{f.text}</span>
                 </div>
               ))}
             </div>
@@ -88,12 +88,12 @@ function Pricing() {
               <span className="text-[36px] font-semibold tracking-tight text-black/80">${growth.price}</span>
               <span className="text-[14px] text-black/40 ml-1">/mo</span>
             </div>
-            <p className="text-[14px] text-black/50 mb-8">{growth.tagline}</p>
-            <div className="space-y-3.5 text-[15px] text-black/60 mb-10">
+            <p className="text-[14px] text-black/50 mb-8 min-h-[40px]">{growth.tagline}</p>
+            <div className="space-y-3.5 text-[15px] mb-10">
               {growth.features.map((f) => (
-                <div key={f} className="flex items-center gap-2.5">
-                  <span className="text-black/40">+</span>
-                  <span>{f}</span>
+                <div key={f.text} className={`flex items-center gap-2.5 ${f.highlight ? "text-black/80 font-medium" : "text-black/60"}`}>
+                  <span className={f.highlight ? "text-black/60" : "text-black/40"}>+</span>
+                  <span>{f.text}</span>
                 </div>
               ))}
             </div>
@@ -114,7 +114,7 @@ function Pricing() {
             <div className="mb-1">
               <span className="text-[36px] font-semibold tracking-tight text-black/80">Custom</span>
             </div>
-            <p className="text-[14px] text-black/50 mb-8">Your infrastructure. Your terms.</p>
+            <p className="text-[14px] text-black/50 mb-8 min-h-[40px]">Your infrastructure. Your terms.</p>
             <div className="space-y-3.5 text-[15px] text-black/60 mb-10">
               <div className="flex items-center gap-2.5">
                 <span className="text-black/40">+</span>

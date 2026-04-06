@@ -25,7 +25,7 @@ export default function Footer() {
             <p className="text-[12px] uppercase tracking-[0.15em] text-black/50 font-medium mb-4">Community</p>
             <div className="space-y-2.5 text-[14px]">
               <a href="https://github.com/0xAEQI/aeqi" className="block text-black/60 hover:text-black/80 transition-colors">GitHub</a>
-              <a href="https://x.com/0xAEQI" className="block text-black/60 hover:text-black/80 transition-colors">X</a>
+              <a href="https://x.com/aeqiai" className="block text-black/60 hover:text-black/80 transition-colors">X</a>
             </div>
           </motion.div>
 

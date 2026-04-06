@@ -117,6 +117,11 @@ pub enum Commands {
         #[arg(short = 'r', long = "company", alias = "project")]
         company: Option<String>,
     },
+    /// Memory management (export/import).
+    Memory {
+        #[command(subcommand)]
+        action: MemoryAction,
+    },
 
     // --- Phase 5: Pipelines ---
     /// Pipeline workflow commands.
@@ -551,5 +556,21 @@ pub enum WebAction {
         /// Override bind address (default: from config or 0.0.0.0:8400).
         #[arg(long)]
         bind: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum MemoryAction {
+    /// Export all memories to an Obsidian vault.
+    Export {
+        /// Path to the Obsidian vault directory.
+        #[arg(long)]
+        vault: std::path::PathBuf,
+    },
+    /// Import memories from an Obsidian vault.
+    Import {
+        /// Path to the Obsidian vault directory.
+        #[arg(long)]
+        vault: std::path::PathBuf,
     },
 }

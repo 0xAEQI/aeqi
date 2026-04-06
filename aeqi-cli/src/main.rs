@@ -110,6 +110,7 @@ async fn main() -> Result<()> {
             content,
             company,
         }) => cmd::memory::cmd_remember(&cli.config, &key, &content, company.as_deref()).await,
+        Some(Commands::Memory { action }) => cmd::memory::cmd_memory(&cli.config, action).await,
         Some(Commands::Pipeline { action }) => {
             cmd::pipeline::cmd_pipeline(&cli.config, action).await
         }

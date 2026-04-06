@@ -295,6 +295,87 @@ impl SqliteInsights {
         .ok()
     }
 
+    // ── Bulk queries for export ──
+
+    /// List all insights (unscored, no search ranking).
+    pub fn list_all(&self) -> Result<Vec<InsightEntry>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock: {e}"))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, key, content, category, agent_id, session_id, created_at
+             FROM insights ORDER BY created_at DESC",
+        )?;
+        let entries = stmt
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                let key: String = row.get(1)?;
+                let content: String = row.get(2)?;
+                let cat_str: String = row.get(3)?;
+                let agent_id: Option<String> = row.get(4)?;
+                let session_id: Option<String> = row.get(5)?;
+                let created_str: String = row.get(6)?;
+                Ok((id, key, content, cat_str, agent_id, session_id, created_str))
+            })?
+            .filter_map(|r| r.ok())
+            .filter_map(
+                |(id, key, content, cat_str, agent_id, session_id, created_str)| {
+                    let category: InsightCategory =
+                        serde_json::from_value(serde_json::Value::String(cat_str)).ok()?;
+                    let created_at = DateTime::parse_from_rfc3339(&created_str)
+                        .ok()?
+                        .with_timezone(&Utc);
+                    Some(InsightEntry {
+                        id,
+                        key,
+                        content,
+                        category,
+                        agent_id,
+                        created_at,
+                        session_id,
+                        score: 1.0,
+                    })
+                },
+            )
+            .collect();
+        Ok(entries)
+    }
+
+    /// List all memory graph edges.
+    pub fn list_all_edges(&self) -> Result<Vec<MemoryEdge>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("lock: {e}"))?;
+        let mut stmt = conn.prepare(
+            "SELECT source_id, target_id, relation, strength, created_at
+             FROM memory_edges",
+        )?;
+        let edges = stmt
+            .query_map([], |row| {
+                let source_id: String = row.get(0)?;
+                let target_id: String = row.get(1)?;
+                let relation_str: String = row.get(2)?;
+                let strength: f32 = row.get(3)?;
+                let created_str: String = row.get(4)?;
+                Ok((source_id, target_id, relation_str, strength, created_str))
+            })?
+            .filter_map(|r| r.ok())
+            .filter_map(
+                |(source_id, target_id, relation_str, strength, created_str)| {
+                    let relation =
+                        serde_json::from_value(serde_json::Value::String(relation_str)).ok()?;
+                    let created_at = DateTime::parse_from_rfc3339(&created_str)
+                        .ok()?
+                        .with_timezone(&Utc);
+                    Some(MemoryEdge {
+                        source_id,
+                        target_id,
+                        relation,
+                        strength,
+                        created_at,
+                    })
+                },
+            )
+            .collect();
+        Ok(edges)
+    }
+
     fn decay_factor(&self, created_at: &DateTime<Utc>) -> f64 {
         let age_days = (Utc::now() - *created_at).num_seconds() as f64 / 86400.0;
         if age_days <= 0.0 {
