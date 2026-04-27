@@ -1,6 +1,0 @@
-name = "leader"
-prefix = "ld"
-role = "orchestrator"
-voice = "vocal"
-runtime = "openrouter_claude_code"
-max_workers = 1
