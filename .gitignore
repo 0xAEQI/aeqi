@@ -13,8 +13,7 @@ agents/*/.aeqi/
 *.db-wal
 *.db-shm
 
-# Local config (commit sigil.example.toml instead)
-config/sigil.toml
+# Local config
 config/platform.toml
 apps/ui/node_modules/
 apps/ui/dist/
